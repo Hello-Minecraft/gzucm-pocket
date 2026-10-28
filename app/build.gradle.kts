@@ -16,9 +16,9 @@ android {
         minSdk = 26
         targetSdk = 35
         // versionCode 由 versionName 推出：主*10000 + 次*100 + 修订
-        // 1.2.1 → 10201。改版本名必须同步改 code，VersionTest 会校验。
-        versionCode = 10201
-        versionName = "1.2.1"
+        // 1.2.2 → 10202。改版本名必须同步改 code，VersionTest 会校验。
+        versionCode = 10202
+        versionName = "1.2.2"
         resourceConfigurations += listOf("zh", "en")
     }
 

@@ -75,6 +75,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 sessions = cachedSessions,
                 semester = cachedSemester,
                 phase = Phase.Loading,
+                // 电费也先把缓存摆上来，别一进页面是「--」再跳
+                power = cachedPowerOrNull(),
             )
         }
         viewModelScope.launch {
@@ -223,6 +225,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { doLoadPower() }
     }
 
+    /** 读本地缓存的电费，启动时先显示它，避免一进来是「--」 */
+    private fun cachedPowerOrNull(): PowerInfo? =
+        store.cachedPower?.let {
+            runCatching { Net.json.decodeFromString(PowerInfo.serializer(), it) }.getOrNull()
+        }
+
     private suspend fun doLoadPower() {
         state = state.copy(powerLoading = true, powerError = null)
         val r = withContext(Dispatchers.IO) {
@@ -233,8 +241,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         r.onSuccess { (info, daily) ->
-            state = state.copy(power = info, powerDaily = daily, powerLoading = false, powerError = null)
-            store.cachedPower = Net.json.encodeToString(PowerInfo.serializer(), info)
+            /**
+             * 后台接口（OkHttp）拿不到一卡通会话时，余额会解析成 0。
+             * 如果之前有真实数据（比如 154.98），这个 0 就是假的，
+             * 不能拿它覆盖 —— 否则每次开 App 都变成 0 度。
+             * 真正的 0 度由 WebView 那条路（applyEcardSync）写入，那里不做这个保护。
+             */
+            val prev = state.power ?: cachedPowerOrNull()
+            val fakeZero = info.balance <= 0.0 && (prev?.balance ?: 0.0) > 0.0
+            if (fakeZero) {
+                state = state.copy(powerLoading = false, powerError = null)
+            } else {
+                state = state.copy(power = info, powerDaily = daily, powerLoading = false, powerError = null)
+                store.cachedPower = Net.json.encodeToString(PowerInfo.serializer(), info)
+            }
         }.onFailure { e ->
             // 不能静默吞掉：用户至少要知道是「没登录」还是「被拦了」还是「网断了」
             state = state.copy(

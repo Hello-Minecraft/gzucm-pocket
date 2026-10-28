@@ -555,7 +555,7 @@ private fun PowerCard(power: PowerInfo?, daily: List<PowerDaily>, onClick: () ->
                 )
                 Spacer(Modifier.weight(1f))
                 Text(
-                    power?.roomLabel ?: "点击加载",
+                    power?.roomLabel ?: "尚未同步",
                     fontSize = 10.5.sp,
                     color = scheme.onSurfaceVariant.copy(alpha = 0.7f),
                 )
@@ -586,10 +586,12 @@ private fun PowerCard(power: PowerInfo?, daily: List<PowerDaily>, onClick: () ->
                             color = scheme.onSurfaceVariant,
                         )
                         if (power != null && power.balance > 0) {
+                            val days = power.balance / avg
                             Text(
-                                "可用约 ${(power.balance / avg).toInt()} 天",
+                                if (days < 1) "不足 1 天"
+                                else "可用约 ${days.toInt()} 天",
                                 fontSize = 10.5.sp,
-                                color = if (power.balance / avg < 5) scheme.error
+                                color = if (days < 5) scheme.error
                                 else scheme.primary.copy(alpha = 0.85f),
                             )
                         }
