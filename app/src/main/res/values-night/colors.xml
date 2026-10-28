@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 深色：与 Compose DarkColors.background (#0A0C0F) 对齐 -->
+    <color name="window_background">#0A0C0F</color>
+    <!-- 深色模式下系统栏图标用浅色 -->
+    <bool name="light_system_bars">false</bool>
+</resources>

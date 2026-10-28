@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.GzucmPocket" parent="@android:style/Theme.Material.NoActionBar">
+        <!-- 状态栏/导航栏全透明，由 Compose 的 Surface 背景色填充 -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <!-- 下面这些在 values-night 里翻转 -->
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:windowLightStatusBar">@bool/light_system_bars</item>
+        <item name="android:windowLightNavigationBar">@bool/light_system_bars</item>
+        <item name="android:enforceStatusBarContrast">false</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
+    </style>
+</resources>

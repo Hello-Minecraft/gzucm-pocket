@@ -1,0 +1,36 @@
+# ── 签名与本地配置（绝对不能进仓库）────────────────────────
+*.jks
+*.keystore
+keystore.properties
+local.properties
+
+# ── 构建产物 ──────────────────────────────────────────────
+build/
+app/build/
+.gradle/
+.kotlin/
+*.apk
+*.aab
+*.ap_
+*.dex
+captures/
+.externalNativeBuild/
+.cxx/
+
+# ── IDE ───────────────────────────────────────────────────
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# ── 抓包/调试产物（含个人课表、房间号等真实数据）──────────
+gzucm-probe/data/
+gzucm-probe/*.log
+gzucm-probe/*.png
+__pycache__/
+*.pyc
+
+# ── 临时文件 ──────────────────────────────────────────────
+*.tmp
+*.swp
+*.log
