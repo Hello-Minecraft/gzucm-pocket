@@ -34,7 +34,15 @@
 
 ## 截图
 
-<!-- 有截图后放这里 -->
+| 今日 | 课表 |
+|:---:|:---:|
+| ![今日](docs/screenshots/today.jpg) | ![课表](docs/screenshots/schedule.jpg) |
+| 当天课程、下次上课、本周概览、宿舍电量 | 按周课表，支持自定义背景 |
+
+| 成绩 | 电费 |
+|:---:|:---:|
+| ![成绩](docs/screenshots/grades.jpg) | ![电费](docs/screenshots/power.jpg) |
+| 加权绩点、学分构成、分级列表 | 余额、趋势、每日明细、手动更新 |
 
 ## 技术要点
 
