@@ -220,16 +220,6 @@ fun TodayScreen(
             currentWeek = currentWeek,
         )
 
-        // 页脚说明
-        Spacer(Modifier.height(18.dp))
-        Text(
-            "以上内容均由ai生成。",
-            modifier = Modifier.fillMaxWidth(),
-            fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-        )
-
         // 悬浮底栏占位，避免最后一张卡被压在底栏下面
         Spacer(Modifier.height(LocalFloatingBarInset.current))
     }
