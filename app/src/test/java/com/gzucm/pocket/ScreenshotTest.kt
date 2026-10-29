@@ -170,7 +170,7 @@ class ScreenshotTest {
 
     @Test
     fun today() = shot("02_today") {
-        TodayScreen(semester, 8, sessions, power, daily, {}, {}, {}, {}, false, null)
+        TodayScreen(semester, 8, sessions, power, daily, {}, {}, {}, {}, false, 0, 0, null)
     }
 
     @Test
@@ -190,7 +190,7 @@ class ScreenshotTest {
             tab = com.gzucm.pocket.ui.Tab.Today,
             onSelect = {},
         ) {
-            TodayScreen(semester, 8, sessions, power, daily, {}, {}, {}, {}, false, null)
+            TodayScreen(semester, 8, sessions, power, daily, {}, {}, {}, {}, false, 0, 0, null)
         }
     }
 

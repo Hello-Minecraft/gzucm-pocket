@@ -145,8 +145,19 @@ object PowerAlert {
      * 是否该跑静默同步：每天只跑一次。
      * 抽成纯函数是为了能测——「每次打开都跑一遍」是最容易写错的地方。
      */
-    fun shouldSilentSync(lastSyncDate: String?, today: String): Boolean =
-        lastSyncDate != today
+    fun shouldSilentSync(
+        lastSyncDate: String?,
+        lastAttemptAt: Long,
+        today: String,
+        now: Long = System.currentTimeMillis(),
+        cooldownMs: Long = 30 * 60_000L,
+    ): Boolean {
+        // 今天已经成功拉过 → 不再打扰
+        if (lastSyncDate == today) return false
+        // 刚试过且失败了 → 冷却一会再试，别连着打服务器
+        if (lastAttemptAt > 0 && now - lastAttemptAt < cooldownMs) return false
+        return true
+    }
 
     fun today(): String =
         SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
@@ -155,6 +166,8 @@ object PowerAlert {
     class CheckWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
         override suspend fun doWork(): Result {
             val store = SessionStore(applicationContext)
+            // 用户关掉了就别发
+            if (!store.powerAlertEnabled) return Result.success()
             val days = store.powerDaysLeft
             val at = store.powerCheckedAt
             val today = today()

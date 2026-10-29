@@ -35,6 +35,10 @@ fun PowerSilentSync(
 ) {
     if (!active) return
 
+    // 供桥接层延迟重试时拿到 WebView
+    val holder = remember { object { var web: WebView? = null } }
+    val main = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+
     val bridge = remember {
         object {
             var balanceRaw: String? = null
@@ -49,8 +53,17 @@ fun PowerSilentSync(
                 tryFinish()
             }
 
+            var retriedDaily = false
+
             @JavascriptInterface
             fun dailyJson(json: String) {
+                // 明细空不一定是真没数据 —— 页面刚起来时分页可能还没跑完，重试一次
+                if (!retriedDaily && Ecard.parseDailyJson(json).isEmpty()) {
+                    retriedDaily = true
+                    Log.i("EcardSilent", "daily empty, retry once")
+                    main.postDelayed({ holder.web?.evaluateJavascript(EXTRACT_JS, null) }, 1_500)
+                    return
+                }
                 dailyJson = json
                 tryFinish()
             }
@@ -89,11 +102,12 @@ fun PowerSilentSync(
     }
 
     AndroidView(
-        modifier = Modifier.size(1.dp),
+        modifier = Modifier.size(2.dp),
         factory = { ctx ->
             WebView(ctx).apply {
+                holder.web = this
                 setBackgroundColor(0)
-                alpha = 0f
+                alpha = 0.01f
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.userAgentString = (settings.userAgentString ?: "") + " GzucmPocket"

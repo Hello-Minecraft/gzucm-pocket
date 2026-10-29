@@ -2,6 +2,7 @@ package com.gzucm.pocket.ui
 
 import android.app.Application
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
@@ -11,6 +12,7 @@ import com.gzucm.pocket.core.CourseGrade
 import com.gzucm.pocket.core.CourseSession
 import com.gzucm.pocket.core.FitnessGrade
 import com.gzucm.pocket.core.LevelGrade
+import com.gzucm.pocket.core.ClassReminder
 import com.gzucm.pocket.core.Net
 import com.gzucm.pocket.core.NetError
 import com.gzucm.pocket.core.PowerDaily
@@ -41,12 +43,60 @@ data class UiState(
     val powerError: String? = null,
     val message: String? = null,
     val lastSync: Long = 0L,
+    /** 逐周抓取进度：已完成 / 总周数。用于首屏显示「第 N/20 周」 */
+    val progressDone: Int = 0,
+    val progressTotal: Int = 0,
+    /** 已经拿到数据的周次；不在里面的周显示「正在加载」，而不是空白 */
+    val loadedWeeks: Set<Int> = emptySet(),
 )
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     var state by mutableStateOf(UiState())
         private set
+
+    /**
+     * 电费静默同步的请求计数。
+     *
+     * 每次「登录完成」「点同步按钮」就 +1，RootScreen 看到计数器变了就挂一次隐藏 WebView。
+     * 用计数器而不是布尔，是为了连着点两次也能各触发一次。
+     */
+    var powerSyncTick by mutableIntStateOf(0)
+        private set
+
+    /** 上课提醒开关；关掉时把已排的闹钟一并撤销 */
+    /** 上课提醒开关。必须是 Compose 状态：直接读 prefs 不会触发重组，Switch 就没有动画 */
+    var classReminderOn by mutableStateOf(Graph.store.classReminderEnabled)
+        private set
+
+    /** 电费不足提醒开关（同样是 Compose 状态，否则 Switch 不动） */
+    var powerAlertOn by mutableStateOf(Graph.store.powerAlertEnabled)
+        private set
+
+    fun setPowerAlert(enabled: Boolean) {
+        powerAlertOn = enabled
+        store.powerAlertEnabled = enabled
+        if (enabled) {
+            runCatching { com.gzucm.pocket.core.PowerAlert.ensureChannel(getApplication()) }
+            com.gzucm.pocket.core.PowerAlert.schedule(getApplication())
+        } else {
+            com.gzucm.pocket.core.PowerAlert.cancel(getApplication())
+        }
+    }
+
+    fun setClassReminder(enabled: Boolean) {
+        classReminderOn = enabled
+        store.classReminderEnabled = enabled
+        val sem = state.semester
+        val ses = state.sessions
+        if (sem != null && ses.isNotEmpty()) {
+            runCatching { ClassReminder.scheduleAll(getApplication(), sem, ses, enabled) }
+        }
+    }
+
+    fun requestPowerSync() {
+        powerSyncTick += 1
+    }
 
     private val store = Graph.store
 
@@ -75,8 +125,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 sessions = cachedSessions,
                 semester = cachedSemester,
                 phase = Phase.Loading,
-                // 电费也先把缓存摆上来，别一进页面是「--」再跳
+                // 电费也先把缓存摆上来，别一进页面是「--」再跳；
+                // 明细一起恢复，否则折线图和「每日明细」要等同步完才出现
                 power = cachedPowerOrNull(),
+                powerDaily = cachedPowerDailyOrNull(),
+                // 缓存里的周也算「已到达」，否则断网时每周都显示「还在路上」一直转圈
+                loadedWeeks = (1..cachedSemester.totalWeeks).toSet(),
+                progressDone = cachedSemester.totalWeeks,
+                progressTotal = cachedSemester.totalWeeks,
             )
         }
         viewModelScope.launch {
@@ -87,12 +143,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
             val ok = withContext(Dispatchers.IO) { runCatching { Jw.ping() }.getOrDefault(false) }
             if (!ok) {
-                // 会话死了。有缓存就先进去看离线数据，同时把 phase 标成 NeedLogin
-                // 让用户可以从设置里重新登录；没缓存就直接回登录页。
-                state = state.copy(
-                    phase = if (cachedSessions.isEmpty()) Phase.NeedLogin else Phase.Ready,
-                    message = if (cachedSessions.isEmpty()) null else "登录状态已过期，当前显示离线缓存",
-                )
+                // 会话可能死了。**这里不再直接写提示** —— 只做一次真实同步尝试，
+                // 由 doSync 的失败分支决定要不要提示（一天最多一次）。
+                state = state.copy(phase = if (cachedSessions.isEmpty()) Phase.NeedLogin else Phase.Ready)
+                if (cachedSessions.isNotEmpty()) syncQuietly()
                 return@launch
             }
             state = state.copy(phase = Phase.Ready)
@@ -102,12 +156,31 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 登录成功后由 WebView 回调：注入两套 cookie 并开始同步 */
+    /**
+     * 教务会话一就绪就调用：立刻开始抓课表。
+     *
+     * 登录页在跳一卡通 SSO 后还要等最多 8 秒兜底，那 8 秒原本是纯等待。
+     * 提前在这里启动，课表和一卡通的等待就并行了。
+     */
+    fun onJwReady(jwCookies: Map<String, String>) {
+        if (jwCookies.isEmpty()) return
+        Net.cookies.seed("jw.gzucm.edu.cn", jwCookies)
+        if (state.phase != Phase.Ready) {
+            state = state.copy(phase = Phase.Ready, message = null)
+        }
+        // 已经在同步就别重复开一份
+        if (!state.syncing && state.sessions.isEmpty()) syncQuietly()
+    }
+
     fun onLoggedIn(jwCookies: Map<String, String>, ecardCookies: Map<String, String>) {
         if (jwCookies.isNotEmpty()) Net.cookies.seed("jw.gzucm.edu.cn", jwCookies)
         if (ecardCookies.isNotEmpty()) Net.cookies.seed("ecard.gzucm.edu.cn", ecardCookies)
         state = state.copy(phase = Phase.Ready, message = null)
-        syncQuietly()
-        loadPowerQuietly()
+        // 课表可能已经在 onJwReady 时抓过了，别重复
+        if (state.sessions.isEmpty() && !state.syncing) syncQuietly()
+        // 电费交给静默 WebView（OkHttp 拿不到一卡通会话）。登录完成主动触发一次，
+        // 不必等「当天首次」的自动条件。
+        if (ecardCookies.isNotEmpty()) requestPowerSync()
     }
 
     fun logout() {
@@ -126,6 +199,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // ── 同步 ────────────────────────────────────────────────────────────
 
     fun sync() {
+        // 手动同步 = 课表 + 电费一起刷，走各自的静默通道
+        requestPowerSync()
         if (state.syncing) return
         viewModelScope.launch { doSync() }
     }
@@ -136,21 +211,73 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun doSync() {
         state = state.copy(syncing = true, message = null)
-        val result = withContext(Dispatchers.IO) {
+
+        // ── 第一阶段：学期周历 + 当前周 ──────────────────────────────
+        // 只等 2 次往返就能出画面。全量 20 周在好网络下也才 0.2 秒，
+        // 但弱网时每次可能 1 秒以上，先给当前周能把白屏从几十秒压到几秒。
+        val first = withContext(Dispatchers.IO) {
             runCatching {
                 val code = store.semesterCode ?: Jw.guessSemesterCode()
-                var semester = Jw.fetchSemester(code)
-                if (semester == null) {
-                    val alt = Jw.previousSemesterCode(code)
-                    semester = Jw.fetchSemester(alt)
-                }
-                semester ?: error("无法获取教学周历")
-                // 逐周抓取：能拿到上课内容（sknrjj）与真实日期，总表没有这些
-                val sessions = Jw.fetchDetailedSessions(semester)
-                semester to sessions
+                val semester = Jw.fetchSemester(code)
+                    ?: Jw.fetchSemester(Jw.previousSemesterCode(code))
+                    ?: error("无法获取教学周历")
+                val week = semester.weekOf(LocalDate.now()).coerceIn(1, semester.totalWeeks)
+                val weekSessions = runCatching { Jw.fetchWeek(semester, week) }.getOrDefault(emptyList())
+                Triple(semester, week, weekSessions)
             }
         }
-        result.onSuccess { (semester, sessions) ->
+
+        val semester = first.getOrElse { e ->
+            val today = LocalDate.now().toString()
+            // 「登录已过期」这类要你动手的提示，一天一次就够。
+            // 以前每次冷启动都会看到同一句话，纯噪音。
+            val authIssue = e is com.gzucm.pocket.core.NetError.Unauthorized ||
+                e is com.gzucm.pocket.core.NetError.Http
+            val showIt = if (!authIssue) true else store.loginExpiredNotifiedDate != today
+            if (authIssue && showIt) store.loginExpiredNotifiedDate = today
+
+            val sem = state.semester
+            state = state.copy(
+                syncing = false,
+                message = if (showIt) describe(e) else state.message,
+                phase = if (state.sessions.isEmpty()) Phase.NeedLogin else Phase.Ready,
+                // 失败时别让课表停在「加载中」：有缓存就按缓存全量展示
+                loadedWeeks = if (sem != null && state.sessions.isNotEmpty())
+                    (1..sem.totalWeeks).toSet() else state.loadedWeeks,
+            )
+            return
+        }.first
+
+        first.onSuccess { (sem, week, weekSessions) ->
+            currentWeek = week
+            viewingWeek = week
+            state = state.copy(
+                phase = Phase.Ready,
+                semester = sem,
+                sessions = weekSessions.sortedWith(compareBy({ it.week }, { it.weekday }, { it.startUnit })),
+                loadedWeeks = setOf(week),
+                progressDone = 1,
+                progressTotal = sem.totalWeeks,
+                syncing = true,
+            )
+        }
+
+        // ── 第二阶段：补齐其余周，边到边更新进度 ────────────────────
+        val week = first.getOrThrow().second
+        val restSessions = withContext(Dispatchers.IO) {
+            runCatching {
+                Jw.fetchWeeksExcept(semester, week) { done ->
+                    state = state.copy(progressDone = done + 1)
+                }
+            }.getOrDefault(emptyList())
+        }
+
+        val sessions = withContext(Dispatchers.Default) {
+            (first.getOrThrow().third + restSessions)
+                .sortedWith(compareBy({ it.week }, { it.weekday }, { it.startUnit }))
+        }
+
+        if (sessions.isNotEmpty()) {
             store.semesterCode = semester.code
             store.cachedSemester = Net.json.encodeToString(Semester.serializer(), semester)
             store.cachedSessions = Net.json.encodeToString(
@@ -158,22 +285,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 sessions,
             )
             store.lastSyncAt = System.currentTimeMillis()
-            val week = semester.weekOf(LocalDate.now()).coerceIn(1, semester.totalWeeks)
-            currentWeek = week
-            viewingWeek = week
+            store.loginExpiredNotifiedDate = null
+            // 课表变了就重排提醒（只排未来 3 天，代价很小）
+            runCatching {
+                ClassReminder.scheduleAll(
+                    getApplication(), semester, sessions, store.classReminderEnabled,
+                )
+            }
             state = state.copy(
                 phase = Phase.Ready,
                 semester = semester,
                 sessions = sessions,
+                loadedWeeks = (1..semester.totalWeeks).toSet(),
                 syncing = false,
                 lastSync = store.lastSyncAt,
                 message = null,
             )
-        }.onFailure { e ->
+        } else {
             state = state.copy(
                 syncing = false,
-                message = describe(e),
-                phase = if (state.sessions.isEmpty()) Phase.NeedLogin else Phase.Ready,
+                message = if (state.sessions.isEmpty()) "没能拿到课表数据，稍后可以下拉重试" else null,
             )
         }
     }
@@ -225,6 +356,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { doLoadPower() }
     }
 
+    /** 读本地缓存的每日明细；当日数据每天变，但历史天不会 */
+    private fun cachedPowerDailyOrNull(): List<PowerDaily> =
+        store.cachedPowerDaily?.let {
+            runCatching {
+                Net.json.decodeFromString<List<PowerDaily>>(it)
+            }.getOrNull()
+        } ?: emptyList()
+
     /** 读本地缓存的电费，启动时先显示它，避免一进来是「--」 */
     private fun cachedPowerOrNull(): PowerInfo? =
         store.cachedPower?.let {
@@ -275,10 +414,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** WebView 通道拿到的数据，直接落库 */
     fun applyEcardSync(info: PowerInfo, daily: List<PowerDaily>) {
-        state = state.copy(power = info, powerDaily = daily, powerLoading = false, powerError = null)
+        // 明细偶尔会取到空（页面还在初始化 / 分页没跑完）。
+        // 空的时候保留原有明细，别把缓存里的历史数据清掉。
+        val finalDaily = if (daily.isEmpty()) state.powerDaily else daily
+        state = state.copy(power = info, powerDaily = finalDaily, powerLoading = false, powerError = null)
         store.cachedPower = Net.json.encodeToString(PowerInfo.serializer(), info)
+        if (finalDaily.isNotEmpty()) {
+            store.cachedPowerDaily = Net.json.encodeToString(
+                kotlinx.serialization.builtins.ListSerializer(PowerDaily.serializer()),
+                finalDaily,
+            )
+        }
         // 顺手算好「可用天数」存下来，每日巡检的 Worker 直接读，不用联网
-        val recent = daily.sortedBy { it.date }.takeLast(7)
+        val recent = finalDaily.sortedBy { it.date }.takeLast(7)
         val avg = if (recent.isEmpty()) 0.0 else recent.sumOf { it.usage } / recent.size
         store.powerDaysLeft = if (avg > 0.01) (info.balance / avg).toFloat() else -1f
         store.powerCheckedAt = System.currentTimeMillis()

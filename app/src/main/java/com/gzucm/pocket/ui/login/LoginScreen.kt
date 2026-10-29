@@ -61,6 +61,8 @@ private enum class Stage { Jw, Ecard }
 fun LoginScreen(
     onLoggedIn: (jw: Map<String, String>, ecard: Map<String, String>) -> Unit,
     onEcardData: (balanceJson: String?, dailyJson: String?) -> Unit = { _, _ -> },
+    /** 教务登录成功的瞬间回调（早于一卡通），用来提前开始抓课表 */
+    onJwReady: ((Map<String, String>) -> Unit)? = null,
 ) {
     var loading by remember { mutableStateOf(true) }
     var stage by remember { mutableStateOf(Stage.Jw) }
@@ -125,6 +127,8 @@ fun LoginScreen(
                 // 教务的 JSESSIONID 是根路径的，从这里取没问题
                 val jwCookie = cookieOf("https://jw.gzucm.edu.cn")
                 if (LoginFlow.shouldHopToEcard(url, jwCookie.containsKey("JSESSIONID"), finished)) {
+                    // 教务会话已就绪：先把课表抓起来，别死等一卡通那 8 秒
+                    onJwReady?.invoke(jwCookie)
                     stage = Stage.Ecard
                     hint = "正在同步校园卡…"
                     view?.loadUrl("https://ecard.gzucm.edu.cn/sso/login?plat=gzzyy")

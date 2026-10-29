@@ -89,10 +89,35 @@ class SessionStore(context: Context) {
         get() = sp.getFloat(KEY_BG_ALPHA, 0.45f)
         set(v) = sp.edit().putFloat(KEY_BG_ALPHA, v).apply()
 
+    /** 缓存的当月每日明细（JSON）。余额缓存了明细没缓存，导致重启后折线图和明细是空的 */
+    var cachedPowerDaily: String?
+        get() = sp.getString(KEY_CACHE_POWER_DAILY, null)
+        set(v) = sp.edit().putString(KEY_CACHE_POWER_DAILY, v).apply()
+
+    /** 上次静默同步电费的**尝试**时间。失败也会写，用于 30 分钟冷却 */
+    var lastPowerAttemptAt: Long
+        get() = sp.getLong(KEY_POWER_ATTEMPT_AT, 0L)
+        set(v) = sp.edit().putLong(KEY_POWER_ATTEMPT_AT, v).apply()
+
     /** 上次静默同步电费的日期（yyyy-MM-dd），用来实现「每天只同步一次」 */
     var lastPowerSyncDate: String?
         get() = sp.getString(KEY_POWER_SYNC_DATE, null)
         set(v) = sp.edit().putString(KEY_POWER_SYNC_DATE, v).apply()
+
+    /** 「登录已过期」提示过的日期。同一天只提示一次，别每次开 App 都弹 */
+    var loginExpiredNotifiedDate: String?
+        get() = sp.getString(KEY_LOGIN_EXPIRED_DATE, null)
+        set(v) = sp.edit().putString(KEY_LOGIN_EXPIRED_DATE, v).apply()
+
+    /** 电费不足提醒开关，默认打开 */
+    var powerAlertEnabled: Boolean
+        get() = sp.getBoolean(KEY_POWER_ALERT_ON, true)
+        set(v) = sp.edit().putBoolean(KEY_POWER_ALERT_ON, v).apply()
+
+    /** 上课提醒开关，默认打开 */
+    var classReminderEnabled: Boolean
+        get() = sp.getBoolean(KEY_CLASS_REMIND, true)
+        set(v) = sp.edit().putBoolean(KEY_CLASS_REMIND, v).apply()
 
     /** 默认启动页：0=今日 1=课表 2=成绩 3=电费（与 Tab 顺序一致） */
     var startTab: Int
@@ -112,7 +137,12 @@ class SessionStore(context: Context) {
         const val KEY_BG_PATH = "course_bg_path"
         const val KEY_BG_ALPHA = "course_bg_alpha"
         const val KEY_START_TAB = "start_tab"
+        const val KEY_CLASS_REMIND = "class_remind"
+        const val KEY_POWER_ALERT_ON = "power_alert_on"
+        const val KEY_LOGIN_EXPIRED_DATE = "login_expired_date"
         const val KEY_POWER_SYNC_DATE = "power_sync_date"
+        const val KEY_POWER_ATTEMPT_AT = "power_attempt_at"
+        const val KEY_CACHE_POWER_DAILY = "cache_power_daily"
     }
 }
 

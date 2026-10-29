@@ -83,6 +83,11 @@ fun ScheduleScreen(
     viewingWeek: Int,
     onWeekChange: (Int) -> Unit,
     onCourseClick: (CourseSession) -> Unit,
+    /** null = 不做按周加载判断（全部已就绪）；RootScreen 会传真实集合 */
+    loadedWeeks: Set<Int>? = null,
+    syncing: Boolean = false,
+    progressDone: Int = 0,
+    progressTotal: Int = 0,
 ) {
     if (semester == null) {
         EmptyHint("正在获取学期信息…")
@@ -199,6 +204,7 @@ fun ScheduleScreen(
                 },
                 isTodayOf = { wd -> isTodayOf(semester, week, wd) },
                 onCourseClick = onCourseClick,
+                isLoading = loadedWeeks != null && week !in loadedWeeks,
             )
         }
         }
@@ -240,7 +246,27 @@ private fun WeekGrid(
     byWeekday: Map<Int, List<CourseSession>>,
     isTodayOf: (Int) -> Boolean,
     onCourseClick: (CourseSession) -> Unit,
+    isLoading: Boolean = false,
 ) {
+    // 这一周还没拿到数据：别让用户对着一片空白以为课表坏了
+    if (isLoading) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(top = 40.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            com.gzucm.pocket.ui.components.SyncPlaceholder(done = 0, total = 0)
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "第 $week 周还在路上",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            )
+        }
+        return
+    }
+
     // 纵向可滚动：13 行 × 58dp 在多数手机上放不下
     Column(
         Modifier

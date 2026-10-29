@@ -1,5 +1,6 @@
 package com.gzucm.pocket.ui.settings
 
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -48,6 +49,10 @@ fun SettingsScreen(
     onStartTabChange: (Int) -> Unit = {},
     onDonate: () -> Unit = {},
     onOpenAbout: () -> Unit = {},
+    classReminder: Boolean = true,
+    onClassReminderChange: (Boolean) -> Unit = {},
+    notifyGranted: Boolean = true,
+    onRequestNotify: () -> Unit = {},
 ) {
     val scheme = MaterialTheme.colorScheme
     Column(
@@ -109,6 +114,54 @@ fun SettingsScreen(
                         )
                     }
                 }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        // ── 上课提醒 ──────────────────────────────────────────────
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(scheme.surface),
+        ) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    // toggleable 单点处理；Switch 不接点击，避免同一次点击翻两次导致卡顿
+                    .toggleable(
+                        value = classReminder,
+                        role = androidx.compose.ui.semantics.Role.Switch,
+                        onValueChange = onClassReminderChange,
+                    )
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("上课提醒", fontSize = 13.5.sp)
+                    Text(
+                        "课前 20 分钟提醒；上一节还没下课时改为课间提前 10 分钟",
+                        fontSize = 10.5.sp,
+                        lineHeight = 15.sp,
+                        color = scheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    )
+                    // 开着却发不出通知 = 白开，直接摆一个可点的提示
+                    if (classReminder && !notifyGranted) {
+                        Spacer(Modifier.height(5.dp))
+                        Text(
+                            "通知权限未开启，提醒不会弹出 · 点这里开启",
+                            fontSize = 10.5.sp,
+                            color = scheme.error,
+                            modifier = Modifier.clickable(onClick = onRequestNotify),
+                        )
+                    }
+                }
+                Spacer(Modifier.width(10.dp))
+                androidx.compose.material3.Switch(
+                    checked = classReminder,
+                    onCheckedChange = null,
+                )
             }
         }
 

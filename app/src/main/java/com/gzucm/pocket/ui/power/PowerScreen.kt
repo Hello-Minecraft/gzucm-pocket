@@ -21,11 +21,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -36,12 +38,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.font.FontWeight
+import kotlin.math.roundToInt
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.Canvas
 import com.gzucm.pocket.core.PowerDaily
 import com.gzucm.pocket.ui.components.LocalFloatingBarInset
@@ -56,7 +62,14 @@ fun PowerScreen(
     error: String? = null,
     onRefresh: () -> Unit,
     onSync: () -> Unit = {},
+    powerAlertOn: Boolean = true,
+    onPowerAlertChange: (Boolean) -> Unit = {},
 ) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    // 提到这里：之前挂在 LazyColumn 的 item 里，卡片滚出屏幕会被销毁，
+    // 面板会突然消失，状态也跟着丢
+    var showWhy by remember { mutableStateOf(false) }
+
     if (power == null) {
         Column(
             Modifier
@@ -144,6 +157,26 @@ fun PowerScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.weight(1f))
+                // 上次更新时间：小小字，压在「更新」左边
+                val updatedText = remember(power) {
+                    val ts = com.gzucm.pocket.core.SessionStore(
+                        ctx.applicationContext
+                    ).powerCheckedAt
+                    if (ts <= 0) "" else {
+                        val d = java.util.Date(ts)
+                        val fmt = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.CHINA)
+                        "更新于 " + fmt.format(d)
+                    }
+                }
+                if (updatedText.isNotEmpty()) {
+                    Text(
+                        updatedText,
+                        fontSize = 9.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                        modifier = Modifier.padding(end = 2.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                }
                 Row(
                     Modifier
                         .clip(RoundedCornerShape(8.dp))
@@ -183,8 +216,7 @@ fun PowerScreen(
                     )
                     .padding(horizontal = 20.dp, vertical = 20.dp),
             ) {
-                // 房号 + 「电费不准？」提示
-                var showWhy by remember { mutableStateOf(false) }
+                // 房号 + 「电费设置」提示
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         power.roomLabel,
@@ -199,24 +231,16 @@ fun PowerScreen(
                             .padding(horizontal = 3.dp, vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        // 小圆圈感叹号
-                        Box(
-                            Modifier
-                                .size(13.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                "!",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.surface,
-                            )
-                        }
+                        // 原来的「!」圆圈换成调节图标，跟「设置」这个语义更搭
+                        Icon(
+                            Icons.Rounded.Tune,
+                            contentDescription = null,
+                            modifier = Modifier.size(13.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                        )
                         Spacer(Modifier.width(4.dp))
                         Text(
-                            "电费不准？",
+                            "电费设置",
                             fontSize = 10.5.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textDecoration = TextDecoration.Underline,
@@ -227,6 +251,8 @@ fun PowerScreen(
                     PowerWhySheet(
                         roomLabel = power.roomLabel,
                         onDismiss = { showWhy = false },
+                        alertOn = powerAlertOn,
+                        onAlertChange = onPowerAlertChange,
                     )
                 }
                 Spacer(Modifier.height(10.dp))
@@ -330,17 +356,82 @@ fun PowerScreen(
     }
 }
 
+/**
+ * 用电趋势折线图。
+ *
+ * 支持左右滑动选中某一天：竖线定位 + 该点高亮，
+ * 日期与用量显示在图**上方**（图内空间太挤，字会压线）。
+ */
 @Composable
 private fun UsageChart(points: List<PowerDaily>) {
     val scheme = MaterialTheme.colorScheme
     val line = scheme.primary
     val maxV = (points.maxOfOrNull { it.usage } ?: 0.1).coerceAtLeast(0.1)
+    var sel by remember(points) { mutableIntStateOf(-1) }
+    val picked = points.getOrNull(sel)
 
     Column {
+        // 顶部读数：没选中时给操作提示，选中后显示日期 + 用量
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (picked != null) {
+                Text(
+                    picked.date,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = scheme.onSurface,
+                )
+                Text(
+                    "${Fmt.d2(picked.usage)} 度",
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = line,
+                )
+            } else {
+                Text(
+                    "左右滑动查看某一天的用量",
+                    fontSize = 10.5.sp,
+                    color = scheme.onSurfaceVariant.copy(alpha = 0.65f),
+                )
+                Text(
+                    "峰值 ${Fmt.d2(maxV)} 度",
+                    fontSize = 10.sp,
+                    color = scheme.onSurfaceVariant.copy(alpha = 0.6f),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
         Canvas(
             Modifier
                 .fillMaxWidth()
-                .height(110.dp),
+                .height(110.dp)
+                .pointerInput(points) {
+                    // 拖动时按 x 落到最近的点；手指不用精确对准
+                    fun pick(x: Float) {
+                        if (size.width <= 0 || points.size < 2) return
+                        val step = size.width / (points.size - 1).toFloat()
+                        val i = (x / step).roundToInt().coerceIn(0, points.lastIndex)
+                        sel = i
+                    }
+                    detectDragGestures(
+                        onDragStart = { off -> pick(off.x) },
+                        onDrag = { change, _ -> pick(change.position.x); change.consume() },
+                    )
+                }
+                .pointerInput(points) {
+                    detectTapGestures { off ->
+                        if (size.width <= 0 || points.size < 2) return@detectTapGestures
+                        val step = size.width / (points.size - 1).toFloat()
+                        val i = (off.x / step).roundToInt().coerceIn(0, points.lastIndex)
+                        // 再点同一处就取消选中
+                        sel = if (sel == i) -1 else i
+                    }
+                },
         ) {
             if (points.size < 2) return@Canvas
             val w = size.width
@@ -368,31 +459,32 @@ private fun UsageChart(points: List<PowerDaily>) {
                 }
             }
 
-            drawPath(
-                fill,
-                Brush.verticalGradient(
-                    listOf(line.copy(alpha = 0.22f), Color.Transparent),
-                ),
-            )
+            drawPath(fill, Brush.verticalGradient(listOf(line.copy(alpha = 0.22f), Color.Transparent)))
             drawPath(path, line, style = Stroke(width = 2.2f))
 
-            // 最后一个点加高亮
-            val last = points.last()
-            drawCircle(
-                color = line,
-                radius = 3.4f,
-                center = Offset(w, yOf(last.usage.toFloat())),
-            )
+            if (picked != null) {
+                // 选中：竖线 + 高亮点
+                val x = stepX * sel
+                val y = yOf(picked.usage.toFloat())
+                drawLine(
+                    color = line.copy(alpha = 0.45f),
+                    start = Offset(x, 0f),
+                    end = Offset(x, h),
+                    strokeWidth = 1.4f,
+                )
+                drawCircle(color = line.copy(alpha = 0.18f), radius = 7.5f, center = Offset(x, y))
+                drawCircle(color = line, radius = 3.6f, center = Offset(x, y))
+            } else {
+                // 未选中：保留最后一天的点，给个「线到这里为止」的锚
+                val last = points.last()
+                drawCircle(color = line, radius = 3.4f, center = Offset(w, yOf(last.usage.toFloat())))
+            }
         }
+
         Spacer(Modifier.height(6.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(
                 points.first().date.takeLast(5),
-                fontSize = 9.5.sp,
-                color = scheme.onSurfaceVariant.copy(alpha = 0.6f),
-            )
-            Text(
-                "峰值 ${Fmt.d2(maxV)} 度",
                 fontSize = 9.5.sp,
                 color = scheme.onSurfaceVariant.copy(alpha = 0.6f),
             )

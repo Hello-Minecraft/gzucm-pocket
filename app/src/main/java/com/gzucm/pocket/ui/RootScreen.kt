@@ -36,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -125,6 +126,16 @@ internal fun MainScaffold(
 fun RootScreen(vm: AppViewModel = viewModel()) {
     val state = vm.state
     val ctx0 = androidx.compose.ui.platform.LocalContext.current
+    // 通知权限：开着开关却发不出通知等于白开，所以开之前先查
+    fun notifyGranted(): Boolean =
+        android.os.Build.VERSION.SDK_INT < 33 ||
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                ctx0, android.Manifest.permission.POST_NOTIFICATIONS,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    var notifyOk by remember { mutableStateOf(notifyGranted()) }
+    val askNotify = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted -> notifyOk = granted }
     val prefs = remember { com.gzucm.pocket.core.SessionStore(ctx0.applicationContext) }
     // 默认启动页由用户在设置里选
     var tab by remember {
@@ -150,11 +161,17 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
         java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
             .format(java.util.Date())
     }
-    var silentSyncKey by remember { mutableStateOf(0) }
     var silentDone by remember { mutableStateOf(false) }
+    // 已经处理到第几次手动请求；用来区分「每日自动」和「用户点了同步」
+    var handledTick by remember { mutableIntStateOf(vm.powerSyncTick) }
+    val tickPending = vm.powerSyncTick != handledTick
     val needSilent = state.phase == Phase.Ready &&
         !silentDone &&
-        com.gzucm.pocket.core.PowerAlert.shouldSilentSync(prefs.lastPowerSyncDate, todayStr)
+        // 没有一卡通会话时别去试：注定跳 SSO 失败，还会白白进 30 分钟冷却
+        com.gzucm.pocket.core.Net.cookies.has("ecard.gzucm.edu.cn") &&
+        (tickPending || com.gzucm.pocket.core.PowerAlert.shouldSilentSync(
+            prefs.lastPowerSyncDate, prefs.lastPowerAttemptAt, todayStr,
+        ))
 
     // 隐藏的同步载体：不可见、不接收点击，拿完数据就自己结束
     if (needSilent) {
@@ -164,11 +181,14 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 onDone = { info, daily ->
                     vm.applyEcardSync(info, daily)
                     prefs.lastPowerSyncDate = todayStr
+                    handledTick = vm.powerSyncTick
                     silentDone = true
                 },
                 onFail = {
-                    // 静默失败不打扰用户，但记下来避免同一天反复重试
-                    prefs.lastPowerSyncDate = todayStr
+                    // 失败不写「今天已完成」，否则一次失败就锁死一整天，只能手动更新。
+                    // 改成记「上次尝试时间」，冷却 30 分钟后允许再试。
+                    prefs.lastPowerAttemptAt = System.currentTimeMillis()
+                    handledTick = vm.powerSyncTick
                     silentDone = true
                 },
             )
@@ -177,7 +197,10 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         when (state.phase) {
-            Phase.NeedLogin -> LoginScreen(onLoggedIn = vm::onLoggedIn)
+            Phase.NeedLogin -> LoginScreen(
+                onLoggedIn = vm::onLoggedIn,
+                onJwReady = vm::onJwReady,
+            )
 
             else -> MainScaffold(tab = tab, onSelect = { tab = it }) {
                 AnimatedContent(
@@ -197,6 +220,8 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                             onOpenSettings = { showSettings = true },
                             onRefresh = { vm.sync() },
                             syncing = state.syncing,
+                            progressDone = state.progressDone,
+                            progressTotal = state.progressTotal,
                             notice = state.message,
                         )
 
@@ -207,6 +232,10 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                             viewingWeek = vm.viewingWeek,
                             onWeekChange = vm::goToWeek,
                             onCourseClick = { detail = it },
+                            loadedWeeks = state.loadedWeeks,
+                            syncing = state.syncing,
+                            progressDone = state.progressDone,
+                            progressTotal = state.progressTotal,
                         )
 
                         Tab.Grades -> {
@@ -229,6 +258,13 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                                 error = state.powerError,
                                 onRefresh = { vm.loadPower(force = true) },
                                 onSync = { showEcardSync = true },
+                            powerAlertOn = vm.powerAlertOn,
+                            onPowerAlertChange = { on ->
+                                vm.setPowerAlert(on)
+                                if (on && !notifyGranted()) askNotify.launch(
+                                    android.Manifest.permission.POST_NOTIFICATIONS
+                                )
+                            },
                             )
                         }
                     }
@@ -267,7 +303,11 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
         }
         androidx.compose.material3.ModalBottomSheet(
             onDismissRequest = {
-                if (showAbout) showAbout = false else showSettings = false
+                // 注意：这里必须把两个标志都清掉。
+                // 之前只清一个，导致「在关于页下拉关掉面板」后 showSettings 还是 true，
+                // Compose 仍认为面板存在 → 留下一个透明遮罩盖在首页上，什么都点不动。
+                showAbout = false
+                showSettings = false
             },
             containerColor = MaterialTheme.colorScheme.surface,
             shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
@@ -291,6 +331,18 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 },
                 onDonate = { showDonate = true },
                 onOpenAbout = { showAbout = true },
+                classReminder = vm.classReminderOn,
+                onClassReminderChange = { on ->
+                    // 先落状态再要权限：用户点了开启就是他的意图
+                    vm.setClassReminder(on)
+                    if (on && !notifyGranted()) askNotify.launch(
+                        android.Manifest.permission.POST_NOTIFICATIONS
+                    )
+                },
+                notifyGranted = notifyOk,
+                onRequestNotify = {
+                    askNotify.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                },
             )
         }
     }

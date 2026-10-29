@@ -84,7 +84,9 @@ object Jw {
             code = code,
             name = semesterName(code),
             firstMonday = start,
-            totalWeeks = maxWeek.coerceAtLeast(18),
+            // 周数以教务周历实际给出的为准，不硬造。
+            // 周历解析不出周次（maxWeek<=0）视为数据异常，宁可报错也别猜。
+            totalWeeks = if (maxWeek <= 0) return null else maxWeek.coerceIn(10, 30),
         )
     }
 
@@ -276,6 +278,34 @@ object Jw {
         } else {
             merged.sortedWith(compareBy({ it.week }, { it.weekday }, { it.startUnit }))
         }
+    }
+
+    /**
+     * 先抓指定周（用于首屏），再并发补齐其余周。
+     *
+     * 为什么要拆：全量 20 周在好网络下只要 0.2 秒，但弱网时每次往返可能 1 秒以上，
+     * 等全部回来才渲染就是几十秒白屏。先给当前周，用户 1 次往返就能看到课表。
+     *
+     * @param onEach 每完成一周回调一次（传入累计完成数），用于进度显示
+     */
+    suspend fun fetchWeeksExcept(
+        semester: Semester,
+        exclude: Int,
+        onEach: (done: Int) -> Unit = {},
+    ): List<CourseSession> = coroutineScope {
+        val weeks = (1..semester.totalWeeks).filter { it != exclude }
+        if (weeks.isEmpty()) return@coroutineScope emptyList()
+        val gate = Semaphore(5)
+        val counter = java.util.concurrent.atomic.AtomicInteger(0)
+        weeks.map { w ->
+            async(Dispatchers.IO) {
+                gate.withPermit {
+                    val r = runCatching { fetchWeek(semester, w) }.getOrElse { emptyList() }
+                    onEach(counter.incrementAndGet())
+                    r
+                }
+            }
+        }.awaitAll().flatten()
     }
 
     // ── 成绩 ─────────────────────────────────────────────────────────────

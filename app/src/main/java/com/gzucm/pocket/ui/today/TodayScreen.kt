@@ -26,6 +26,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,9 +65,19 @@ fun TodayScreen(
     onOpenSettings: () -> Unit,
     onRefresh: () -> Unit,
     syncing: Boolean,
+    progressDone: Int = 0,
+    progressTotal: Int = 0,
     notice: String? = null,
 ) {
     val today = LocalDate.now()
+    // 每分钟走一次，用来判断「今天的课是不是已经上完了」
+    var nowMin by remember { mutableIntStateOf(LocalTime.now().let { it.hour * 60 + it.minute }) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(30_000)
+            nowMin = LocalTime.now().let { it.hour * 60 + it.minute }
+        }
+    }
     // 这四处原本每次重组都重算（含 O(n) 遍历与多次 split），
     // 挂在 sessions/currentWeek 上缓存，页面不变就不重算。
     val todaySessions = remember(sessions, currentWeek, today) {
@@ -73,6 +87,19 @@ fun TodayScreen(
     val weekSessions = remember(sessions, currentWeek) {
         sessions.filter { it.week == currentWeek }
     }
+
+    // 今天最后一节课结束之后，首页就该看明天的了
+    val todayDone = todaySessions.isNotEmpty() &&
+        nowMin > (todaySessions.maxOfOrNull { parseMinutes(it.endTime) } ?: 0)
+    val tomorrowSessions = remember(sessions, semester, today) {
+        val sem = semester ?: return@remember emptyList()
+        val d = today.plusDays(1)
+        val w = sem.weekOf(d)
+        if (w < 1 || w > sem.totalWeeks) emptyList()
+        else sessions.filter { it.week == w && it.weekday == d.dayOfWeek.value }
+            .sortedBy { it.startUnit }
+    }
+    val showingTomorrow = todayDone && tomorrowSessions.isNotEmpty()
 
     Column(
         Modifier
@@ -187,27 +214,37 @@ fun TodayScreen(
         Spacer(Modifier.height(18.dp))
 
         Text(
-            "今日课程",
+            if (showingTomorrow) "明日课程" else "今日课程",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Medium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(10.dp))
 
-        if (todaySessions.isEmpty()) {
+        if (showingTomorrow) {
+            Timeline(sessions = tomorrowSessions, onCourseClick = onCourseClick)
+        } else if (todaySessions.isEmpty()) {
             Box(
                 Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
                     .background(MaterialTheme.colorScheme.surface)
-                    .padding(vertical = 30.dp),
+                    .padding(vertical = if (syncing && sessions.isEmpty()) 26.dp else 30.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(
-                    "今天没有课",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                // 还在抓数据时说「今天没有课」是错的 —— 那是假话，用户会以为今天真没课
+                if (syncing && sessions.isEmpty()) {
+                    com.gzucm.pocket.ui.components.SyncPlaceholder(
+                        done = progressDone,
+                        total = progressTotal,
+                    )
+                } else {
+                    Text(
+                        "今天没有课",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         } else {
             Timeline(sessions = todaySessions, onCourseClick = onCourseClick)

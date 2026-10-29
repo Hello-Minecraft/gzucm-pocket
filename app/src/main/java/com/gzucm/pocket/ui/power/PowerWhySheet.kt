@@ -1,5 +1,7 @@
 package com.gzucm.pocket.ui.power
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,7 +36,12 @@ import androidx.compose.ui.unit.sp
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PowerWhySheet(roomLabel: String, onDismiss: () -> Unit) {
+fun PowerWhySheet(
+    roomLabel: String,
+    onDismiss: () -> Unit,
+    alertOn: Boolean = true,
+    onAlertChange: (Boolean) -> Unit = {},
+) {
     val scheme = MaterialTheme.colorScheme
     val ctx = LocalContext.current
     val store = remember { com.gzucm.pocket.core.SessionStore(ctx.applicationContext) }
@@ -59,7 +66,7 @@ fun PowerWhySheet(roomLabel: String, onDismiss: () -> Unit) {
                 .padding(bottom = 28.dp),
         ) {
             Text(
-                "电费数据说明",
+                "电费设置",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Medium,
             )
@@ -69,6 +76,39 @@ fun PowerWhySheet(roomLabel: String, onDismiss: () -> Unit) {
                 fontSize = 11.5.sp,
                 color = scheme.onSurfaceVariant,
             )
+
+            Spacer(Modifier.height(14.dp))
+
+            // 电费不足提醒开关（跟着「电费不准？」一起放进来）
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(scheme.surfaceVariant.copy(alpha = 0.35f))
+                    // 用 toggleable 单点处理；Switch 自己不接点击，
+                    // 否则同一次点击会翻两次，看起来「卡卡的」
+                    .toggleable(
+                        value = alertOn,
+                        role = androidx.compose.ui.semantics.Role.Switch,
+                        onValueChange = onAlertChange,
+                    )
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("电费不足提醒", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Text(
+                        "可用不足 3 天时提醒，每天最多一次",
+                        fontSize = 10.5.sp,
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                androidx.compose.material3.Switch(
+                    checked = alertOn,
+                    onCheckedChange = null,
+                )
+            }
 
             Spacer(Modifier.height(16.dp))
 
