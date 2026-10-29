@@ -10,6 +10,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -72,6 +74,13 @@ fun LoginScreen(
     var done by remember { mutableStateOf(false) }
     // 一卡通同步的兜底倒计时（秒）
     var countdown by remember { mutableStateOf(8) }
+    // 二维码只在桌面版页面里，手机版连 showQrLogin() 函数都没有 —— 必须切 UA
+    val qrMode = remember { mutableStateOf(false) }
+    val mobileUa = remember { mutableStateOf<String?>(null) }
+    val desktopUa =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+            "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+
     // 电费取数只注入一次
     var powerInjecting by remember { mutableStateOf(false) }
     var pendingBalance by remember { mutableStateOf<String?>(null) }
@@ -197,6 +206,29 @@ fun LoginScreen(
                         strokeWidth = 2.dp,
                     )
                 }
+                Text(
+                    if (qrMode.value) "账号密码" else "扫码登录",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable {
+                            val on = !qrMode.value
+                            qrMode.value = on
+                            webRef?.let { w ->
+                                w.settings.userAgentString =
+                                    if (on) desktopUa else mobileUa.value
+                                hint = if (on) {
+                                    "点开二维码后截图，再用微信「扫一扫 → 相册」识别"
+                                } else {
+                                    "请用学号和密码登录"
+                                }
+                                w.reload()
+                            }
+                        }
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                )
                 IconButton(onClick = { webRef?.reload() }) {
                     Icon(
                         Icons.Rounded.Refresh,
@@ -259,9 +291,17 @@ fun LoginScreen(
 
                                 override fun onPageFinished(view: WebView?, url: String?) {
                                     loading = false
+                                    // 桌面版加载完再点开二维码视图（页面自带 showQrLogin）
+                                    if (qrMode.value && url?.contains("authserver/login") == true) {
+                                        view?.evaluateJavascript(
+                                            "try{showQrLogin && showQrLogin();}catch(e){}",
+                                            null,
+                                        )
+                                    }
                                     url?.let { handle(it, view, finished = true) }
                                 }
                             }
+                            mobileUa.value = settings.userAgentString
                             webRef = this
                             loadUrl("https://jw.gzucm.edu.cn/new/ssoLogin")
                         }
