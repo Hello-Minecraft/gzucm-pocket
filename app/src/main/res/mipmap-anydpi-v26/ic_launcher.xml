@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  自适应图标：背景是纯色，前景是图案本体。
+
+  前景内容按「外接圆」缩到画布的 66.7%（72/108），
+  各家 ROM 无论裁成圆形、方圆还是圆角方，图案都不会被切。
+-->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@drawable/ic_launcher_background" />
     <foreground android:drawable="@drawable/ic_launcher_foreground" />

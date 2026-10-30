@@ -181,7 +181,7 @@ object ClassReminder {
          * 授课内容放 BigText，展开后才显示。
          */
         val builder = NotificationCompat.Builder(ctx, CHANNEL_ID)
-            .setSmallIcon(com.gzucm.pocket.R.drawable.ic_launcher_foreground)
+            .setSmallIcon(com.gzucm.pocket.R.drawable.ic_notification)
             // 标题带上上课时间，一瞥就知道几点在哪
             .setContentTitle(
                 listOf(session.startTime.trim(), session.name)

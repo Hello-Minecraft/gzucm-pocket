@@ -125,7 +125,7 @@ object PowerAlert {
         }
 
         val n = NotificationCompat.Builder(ctx, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("宿舍电量快用完了")
             .setContentText("剩余 $balanceText，可用$days，记得充值")
             .setStyle(
