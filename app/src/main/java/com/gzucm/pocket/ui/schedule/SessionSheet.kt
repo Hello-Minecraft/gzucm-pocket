@@ -1,5 +1,7 @@
 package com.gzucm.pocket.ui.schedule
 
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +20,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,9 +39,21 @@ import com.gzucm.pocket.ui.theme.courseColor
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SessionSheet(session: CourseSession, onDismiss: () -> Unit) {
+fun SessionSheet(
+    session: CourseSession,
+    onDismiss: () -> Unit,
+    /**
+     * 与这门课**时段重叠**的其他课（不含自己）。
+     *
+     * 传进来的话，顶部会多一条「重叠课程」切换条 ——
+     * 点另一个课名就切到那门课的详情，不用关掉再点开。
+     */
+    overlapGroup: List<CourseSession> = emptyList(),
+) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val color = courseColor(session.name)
+    // 当前看的是哪一门：点切换条会变
+    var current by remember(session) { mutableStateOf(session) }
+    val color = courseColor(current.name)
     val scheme = MaterialTheme.colorScheme
 
     ModalBottomSheet(
@@ -62,9 +82,61 @@ fun SessionSheet(session: CourseSession, onDismiss: () -> Unit) {
                     color = scheme.onSurfaceVariant,
                 )
             }
+            /*
+             * 重叠课程切换条。
+             *
+             * 只在「同一时段还有别的课」时出现 —— 这时候只看一门是看不到全貌的，
+             * 用户需要知道「这个时间段一共压了几门」。
+             * 用横向可滚动的胶囊，课名长的也能读。
+             */
+            if (overlapGroup.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "重叠课程",
+                    fontSize = 10.5.sp,
+                    color = scheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(7.dp))
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    (listOf(session) + overlapGroup).forEach { c ->
+                        val sel = c === current || c == current
+                        val cc = courseColor(c.name)
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(
+                                    if (sel) cc.copy(alpha = 0.20f)
+                                    else scheme.surfaceVariant.copy(alpha = 0.40f)
+                                )
+                                .border(
+                                    if (sel) 1.dp else 0.dp,
+                                    if (sel) cc.copy(alpha = 0.75f)
+                                    else androidx.compose.ui.graphics.Color.Transparent,
+                                    RoundedCornerShape(9.dp),
+                                )
+                                .clickable { current = c }
+                                .padding(horizontal = 11.dp, vertical = 7.dp),
+                        ) {
+                            Text(
+                                c.name,
+                                fontSize = 11.5.sp,
+                                fontWeight = if (sel) FontWeight.Medium else FontWeight.Normal,
+                                color = if (sel) cc else scheme.onSurfaceVariant,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+            }
+
             Spacer(Modifier.height(9.dp))
             Text(
-                session.name,
+                current.name,
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Medium,
                 lineHeight = 28.sp,
@@ -73,7 +145,7 @@ fun SessionSheet(session: CourseSession, onDismiss: () -> Unit) {
             Spacer(Modifier.height(20.dp))
 
             // 上课内容：只有按周查询才有（sknrjj），放最前面，这是最有信息量的一条
-            if (session.content.isNotBlank()) {
+            if (current.content.isNotBlank()) {
                 Box(
                     Modifier
                         .fillMaxWidth()
@@ -89,7 +161,7 @@ fun SessionSheet(session: CourseSession, onDismiss: () -> Unit) {
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            session.content,
+                            current.content,
                             fontSize = 14.5.sp,
                             lineHeight = 21.sp,
                             fontWeight = FontWeight.Medium,
@@ -99,19 +171,19 @@ fun SessionSheet(session: CourseSession, onDismiss: () -> Unit) {
                 Spacer(Modifier.height(16.dp))
             }
 
-            InfoLine("时间", "${session.startTime} — ${session.endTime}  ·  第 ${session.startUnit}-${session.endUnit} 节")
-            if (session.date.isNotBlank()) InfoLine("日期", session.date)
-            if (session.room.isNotBlank()) InfoLine("地点", session.room)
-            if (session.teachers.isNotBlank()) InfoLine("授课教师", session.teachers)
-            if (session.teachingMode.isNotBlank()) InfoLine("教学模式", session.teachingMode)
-            if (session.category.isNotBlank()) InfoLine("教学环节", session.category)
-            if (session.teachForm.isNotBlank()) InfoLine("教学形式", session.teachForm)
-            if (session.mergedClasses.isNotBlank()) InfoLine("合班上课", session.mergedClasses)
-            if (session.studyHours.isNotBlank() && session.studyHours != "0") {
-                InfoLine("课时", "${session.studyHours} 学时")
+            InfoLine("时间", "${current.startTime} — ${current.endTime}  ·  第 ${current.startUnit}-${current.endUnit} 节")
+            if (current.date.isNotBlank()) InfoLine("日期", current.date)
+            if (current.room.isNotBlank()) InfoLine("地点", current.room)
+            if (current.teachers.isNotBlank()) InfoLine("授课教师", current.teachers)
+            if (current.teachingMode.isNotBlank()) InfoLine("教学模式", current.teachingMode)
+            if (current.category.isNotBlank()) InfoLine("教学环节", current.category)
+            if (current.teachForm.isNotBlank()) InfoLine("教学形式", current.teachForm)
+            if (current.mergedClasses.isNotBlank()) InfoLine("合班上课", current.mergedClasses)
+            if (current.studyHours.isNotBlank() && current.studyHours != "0") {
+                InfoLine("课时", "${current.studyHours} 学时")
             }
-            if (session.code.isNotBlank()) InfoLine("课程号", session.code)
-            if (session.courseSeq.isNotBlank()) InfoLine("课序号", session.courseSeq)
+            if (current.code.isNotBlank()) InfoLine("课程号", current.code)
+            if (current.courseSeq.isNotBlank()) InfoLine("课序号", current.courseSeq)
 
             Spacer(Modifier.height(18.dp))
 
@@ -124,14 +196,14 @@ fun SessionSheet(session: CourseSession, onDismiss: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "第 ${session.week} 周",
+                    "第 ${current.week} 周",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
                     color = color,
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    weekdayName(session.weekday),
+                    weekdayName(current.weekday),
                     fontSize = 12.sp,
                     color = scheme.onSurfaceVariant,
                 )

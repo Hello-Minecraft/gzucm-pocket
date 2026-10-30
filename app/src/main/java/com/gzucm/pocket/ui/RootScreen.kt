@@ -271,7 +271,22 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
     }
 
     detail?.let { s ->
-        SessionSheet(session = s, onDismiss = { detail = null })
+        /*
+         * 同一时段的其他课。
+         *
+         * 判据和课表分簇一致：同周、同星期、节次区间有交集。
+         * 在详情页把它们列出来，用户才知道「这个时段一共压了几门」，
+         * 而不是点开一门以为课表只有这一节。
+         */
+        val group = vm.state.sessions.filter { o ->
+            o !== s && o.week == s.week && o.weekday == s.weekday &&
+                o.startUnit <= s.endUnit && s.startUnit <= o.endUnit
+        }
+        SessionSheet(
+            session = s,
+            onDismiss = { detail = null },
+            overlapGroup = group,
+        )
     }
 
     if (showEcardSync) {

@@ -63,6 +63,29 @@ class ScreenshotTest {
         startTime = t1, endTime = t2, room = room, category = cat,
     )
 
+    /**
+     * 时间冲突的数据。
+     *
+     * 真实教务系统里确实会出现：学校排课把一门课的几个周次排到同一时段，
+     * 或者实验课与理论课撞车。这里覆盖四种典型的交叠形态，
+     * 用于验证「两块不能盖在一起、文字不能互相压」。
+     */
+    private val conflictSessions = listOf(
+        // ① 完全包含：长课 1-4 节，中间插一节短课 2-3 节
+        s("毛泽东思想和中国特色社会主义理论体系概论", 1, 1, 4, "08:30", "11:50", "综教楼B202（智慧课室）"),
+        s("医学伦理学", 1, 2, 3, "09:20", "11:00", "新课室楼301"),
+        // ② 部分重叠：3-5 与 4-6，错开一半
+        s("岭南骨伤康复学", 2, 3, 5, "10:20", "13:00", "教学楼B214"),
+        s("中医骨伤科学", 2, 4, 6, "11:10", "13:50", "教学楼B212（智慧课室）"),
+        // ③ 首节相同、长度不同
+        s("大学心理健康教育", 3, 6, 10, "14:00", "17:40", "户外拓展实验基地"),
+        s("马拉松运动医学", 3, 6, 7, "14:00", "15:30", "教学楼B212（智慧课室）"),
+        // ④ 三课交叠：一段被两门课夹在中间
+        s("方剂学", 4, 1, 3, "08:30", "11:00", "综教楼305"),
+        s("中药学", 4, 2, 5, "09:20", "13:00", "综教楼306"),
+        s("中医诊断学", 4, 4, 6, "11:10", "13:50", "综教楼307"),
+    )
+
     private val sessions = listOf(
         s("中医儿科学", 1, 1, 2, "08:30", "10:00", "综教楼808（智慧课室）"),
         s("五官学", 1, 3, 4, "10:20", "11:50", "新课室楼302"),
@@ -371,5 +394,31 @@ class ScreenshotTest {
     @Test
     fun rebindGuide() = shot("19_rebind_guide") {
         com.gzucm.pocket.ui.power.RebindGuideSheet(onDismiss = {})
+    }
+
+    /** 时间冲突：当前实现会叠在一起，先看问题是多严重 */
+    @Test
+    fun scheduleConflict() = shot("20_schedule_conflict") {
+        ScheduleScreen(semester, conflictSessions, 8, 8, {}, {})
+    }
+
+    /** 内置冲突演示数据在真实界面的样子（走 ConflictDemo，不是测试手写的） */
+    @Test
+    fun conflictDemoSchedule() = shot("21_conflict_demo") {
+        ScheduleScreen(
+            com.gzucm.pocket.core.ConflictDemo.semester(),
+            com.gzucm.pocket.core.ConflictDemo.sessions(),
+            8, 8, {}, {},
+        )
+    }
+
+    /** 冲突排布：并排分列模式（对照叠压） */
+    @Test
+    fun conflictSplitMode() = shot("22_conflict_split") {
+        ScheduleScreen(
+            com.gzucm.pocket.core.ConflictDemo.semester(),
+            com.gzucm.pocket.core.ConflictDemo.sessions(),
+            8, 8, {}, {},
+        )
     }
 }

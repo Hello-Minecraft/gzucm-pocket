@@ -170,6 +170,16 @@ class SessionStore(context: Context) {
         get() = sp.getLong(KEY_THEME_SEED, 0L)
         set(v) = sp.edit().putLong(KEY_THEME_SEED, v).apply()
 
+    /**
+     * 时间冲突的课怎么排。
+     *
+     * true  = 错位叠压（默认）：两块保持接近整列宽、错开叠着，文字都读得出来
+     * false = 并排分列：各占半列，字会变窄，但两块都完整可见
+     */
+    var overlapMode: Boolean
+        get() = sp.getBoolean(KEY_OVERLAP_MODE, true)
+        set(v) = sp.edit().putBoolean(KEY_OVERLAP_MODE, v).apply()
+
     private companion object {
         const val KEY_COOKIES = "cookies"
         const val KEY_SEMESTER = "semester"
@@ -184,6 +194,7 @@ class SessionStore(context: Context) {
         const val KEY_BG_ALPHA = "course_bg_alpha"
         const val KEY_START_TAB = "start_tab"
         const val KEY_THEME_SEED = "theme_seed"
+        const val KEY_OVERLAP_MODE = "overlap_mode"
         const val KEY_CLASS_REMIND = "class_remind"
         const val KEY_POWER_ALERT_ON = "power_alert_on"
         const val KEY_CLASS_LEAD_FREE = "class_lead_free"
