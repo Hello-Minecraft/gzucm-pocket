@@ -59,9 +59,12 @@ object Jw {
 
         var firstMonday: LocalDate? = null
         var maxWeek = 0
-        for (group in root["data"]?.jsonArray ?: return null) {
-            for (rowEl in group.jsonArray) {
-                val row = rowEl.jsonArray
+        // 用安全转换：data 可能是字符串/数字（鉴权失败的响应就是），
+        // 直接 .jsonArray 会抛 IllegalArgumentException
+        val groups = root["data"] as? kotlinx.serialization.json.JsonArray ?: return null
+        for (group in groups) {
+            for (rowEl in (group as? kotlinx.serialization.json.JsonArray).orEmpty()) {
+                val row = (rowEl as? kotlinx.serialization.json.JsonArray).orEmpty()
                 if (row.isEmpty()) continue
                 val head = row[0].jsonObject
                 if (head.str("type") != "zc") continue

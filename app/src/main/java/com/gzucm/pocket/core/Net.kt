@@ -109,6 +109,42 @@ class SessionStore(context: Context) {
         get() = sp.getString(KEY_LOGIN_EXPIRED_DATE, null)
         set(v) = sp.edit().putString(KEY_LOGIN_EXPIRED_DATE, v).apply()
 
+    /** 上次静默检查更新的日期（yyyy-MM-dd），每天只查一次 */
+    var lastUpdateCheckDate: String?
+        get() = sp.getString(KEY_UPDATE_CHECK_DATE, null)
+        set(v) = sp.edit().putString(KEY_UPDATE_CHECK_DATE, v).apply()
+
+    /** 最近一次查到的新版本号；非空表示有更新 */
+    var latestVersion: String?
+        get() = sp.getString(KEY_LATEST_VERSION, null)
+        set(v) = sp.edit().putString(KEY_LATEST_VERSION, v).apply()
+
+    /** 缓存的成绩（课程 / 等级 / 体测）。之前没缓存，退出重进一旦网络抖就白屏 */
+    var cachedGrades: String?
+        get() = sp.getString(KEY_CACHE_GRADES, null)
+        set(v) = sp.edit().putString(KEY_CACHE_GRADES, v).apply()
+    var cachedLevels: String?
+        get() = sp.getString(KEY_CACHE_LEVELS, null)
+        set(v) = sp.edit().putString(KEY_CACHE_LEVELS, v).apply()
+    var cachedFitness: String?
+        get() = sp.getString(KEY_CACHE_FITNESS, null)
+        set(v) = sp.edit().putString(KEY_CACHE_FITNESS, v).apply()
+
+    /** 成绩上次成功抓取的时间 */
+    var gradesCheckedAt: Long
+        get() = sp.getLong(KEY_GRADES_AT, 0L)
+        set(v) = sp.edit().putLong(KEY_GRADES_AT, v).apply()
+
+    /** 上课提醒：当前没课时的提前量（分钟） */
+    var classLeadFree: Int
+        get() = sp.getInt(KEY_CLASS_LEAD_FREE, 20)
+        set(v) = sp.edit().putInt(KEY_CLASS_LEAD_FREE, v).apply()
+
+    /** 上课提醒：课间（上一节还没下课）的提前量（分钟） */
+    var classLeadBreak: Int
+        get() = sp.getInt(KEY_CLASS_LEAD_BREAK, 10)
+        set(v) = sp.edit().putInt(KEY_CLASS_LEAD_BREAK, v).apply()
+
     /** 电费不足提醒开关，默认打开 */
     var powerAlertEnabled: Boolean
         get() = sp.getBoolean(KEY_POWER_ALERT_ON, true)
@@ -124,6 +160,16 @@ class SessionStore(context: Context) {
         get() = sp.getInt(KEY_START_TAB, 0)
         set(v) = sp.edit().putInt(KEY_START_TAB, v).apply()
 
+    /**
+     * 主题色种子色（Long 形式的 ARGB）。0 = 默认薄荷。
+     *
+     * 存 Long 而不是 Int：SharedPreferences 只有 putLong 能无损存下
+     * Color(0xFF4ADE9B) 这种带 alpha 的完整值，putInt 也能但要来回转换。
+     */
+    var themeSeed: Long
+        get() = sp.getLong(KEY_THEME_SEED, 0L)
+        set(v) = sp.edit().putLong(KEY_THEME_SEED, v).apply()
+
     private companion object {
         const val KEY_COOKIES = "cookies"
         const val KEY_SEMESTER = "semester"
@@ -137,8 +183,17 @@ class SessionStore(context: Context) {
         const val KEY_BG_PATH = "course_bg_path"
         const val KEY_BG_ALPHA = "course_bg_alpha"
         const val KEY_START_TAB = "start_tab"
+        const val KEY_THEME_SEED = "theme_seed"
         const val KEY_CLASS_REMIND = "class_remind"
         const val KEY_POWER_ALERT_ON = "power_alert_on"
+        const val KEY_CLASS_LEAD_FREE = "class_lead_free"
+        const val KEY_CLASS_LEAD_BREAK = "class_lead_break"
+        const val KEY_UPDATE_CHECK_DATE = "update_check_date"
+        const val KEY_LATEST_VERSION = "latest_version"
+        const val KEY_CACHE_GRADES = "cache_grades"
+        const val KEY_CACHE_LEVELS = "cache_levels"
+        const val KEY_CACHE_FITNESS = "cache_fitness"
+        const val KEY_GRADES_AT = "grades_at"
         const val KEY_LOGIN_EXPIRED_DATE = "login_expired_date"
         const val KEY_POWER_SYNC_DATE = "power_sync_date"
         const val KEY_POWER_ATTEMPT_AT = "power_attempt_at"
@@ -274,10 +329,47 @@ object Net {
         }
         resp.use {
             val text = it.body?.string().orEmpty()
-            if (it.isSuccessful) return text
+            if (it.isSuccessful) {
+                /**
+                 * 会话过期时学校**不返 401**：302 跳到 CAS，最后 200 返回登录页 HTML。
+                 * 如果原样返回，上层会拿登录页去解析，报出「数据格式不对」——
+                 * 用户看到莫名其妙的话，实际只要重新登录。
+                 * 所以在这里统一识别成 Unauthorized。
+                 */
+                if (looksLikeLoginPage(text)) throw NetError.Unauthorized(200)
+                return text
+            }
             if (it.code == 401 || it.code == 403) throw NetError.Unauthorized(it.code)
             throw NetError.Http(it.code, text.take(120))
         }
+    }
+
+    /**
+     * 这段文本是不是统一身份认证的登录页。
+     *
+     * 判据：**必须是 HTML**（JSON 一律不算），且带 CAS 登录页的特征。
+     * 先按首字符排除 JSON，成本为零，也不会误伤正常接口。
+     */
+    internal fun looksLikeLoginPage(text: String): Boolean {
+        if (text.isEmpty()) return false
+        val trimmed = text.trimStart()
+
+        // ① HTML 形式的登录页（页面级请求会遇到）
+        if (trimmed.startsWith("<")) {
+            return trimmed.contains("统一身份认证") ||
+                (trimmed.contains("authserver.gzucm.edu.cn") && trimmed.contains("execution"))
+        }
+
+        // ② JSON 形式的「没登录」（接口级请求会遇到）：
+        //    {"code":-401,"message":"尚未登录，请先登录"}
+        //    {"code":-401,"message":"对不起，您的帐号[x]已在别处登录，您已被迫退出。"}
+        // 这类响应 HTTP 是 200，结构上也像正常的 JSON，
+        // 不特意识别就会被上层当成「数据格式变了」。
+        if (trimmed.startsWith("{") && trimmed.length < 4000) {
+            if (trimmed.contains("\"-401\"") || trimmed.contains(":-401")) return true
+            if (trimmed.contains("尚未登录") || trimmed.contains("已在别处登录")) return true
+        }
+        return false
     }
 
     const val UA =
@@ -299,6 +391,7 @@ object Net {
 sealed class NetError(message: String) : Exception(message) {
     class Unreachable(cause: Throwable) : NetError("网络不可达：${cause.javaClass.simpleName}")
     class Unauthorized(code: Int) : NetError("登录已失效（HTTP $code）")
-    class Http(code: Int, body: String) : NetError("服务器返回 $code：$body")
+    /** code 要暴露出去了：界面按状态码区分「登录失效」和「服务器故障」 */
+    class Http(val code: Int, body: String) : NetError("服务器返回 $code：$body")
     class Parse(what: String) : NetError("数据解析失败：$what")
 }

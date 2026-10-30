@@ -220,7 +220,7 @@ fun LoginScreen(
                                 w.settings.userAgentString =
                                     if (on) desktopUa else mobileUa.value
                                 hint = if (on) {
-                                    "点开二维码后截图，再用微信「扫一扫 → 相册」识别"
+                                    "扫码用微信确认身份，不需要教务密码"
                                 } else {
                                     "请用学号和密码登录"
                                 }
@@ -265,6 +265,41 @@ fun LoginScreen(
                         RoundedCornerShape(18.dp),
                     ),
             ) {
+                // 扫码提示：微信不认「从相册选」的截图，必须另一台设备扫
+                if (qrMode.value) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.09f))
+                            .padding(horizontal = 12.dp, vertical = 9.dp),
+                    ) {
+                        Text(
+                            "⚠",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                "二维码要用另一台设备扫",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                "微信不认相册里的截图。让另一台手机直接扫这个屏幕，" +
+                                    "或者把屏幕拍下来、扫那张照片。",
+                                fontSize = 10.5.sp,
+                                lineHeight = 15.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
                     factory = { ctx ->

@@ -36,7 +36,8 @@ object ApkDownloader {
             dm.enqueue(req)
             Result.Ok(fileName)
         }.getOrElse { e ->
-            Result.Failed("下载启动失败：${e.javaClass.simpleName}")
+            // 不吐类名：用户看不懂 SecurityException 是什么
+            Result.Failed("下载没能开始，检查网络或存储权限后重试")
         }
     }
 }

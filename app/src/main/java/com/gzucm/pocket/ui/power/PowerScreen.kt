@@ -60,10 +60,10 @@ fun PowerScreen(
     daily: List<PowerDaily>,
     loading: Boolean,
     error: String? = null,
-    onRefresh: () -> Unit,
     onSync: () -> Unit = {},
     powerAlertOn: Boolean = true,
     onPowerAlertChange: (Boolean) -> Unit = {},
+    onOpenRebindGuide: () -> Unit = {},
 ) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     // 提到这里：之前挂在 LazyColumn 的 item 里，卡片滚出屏幕会被销毁，
@@ -253,6 +253,8 @@ fun PowerScreen(
                         onDismiss = { showWhy = false },
                         alertOn = powerAlertOn,
                         onAlertChange = onPowerAlertChange,
+                        // 先收起设置面板：两层 ModalBottomSheet 叠在一起会互相挡
+                        onBuyInMiniProgram = { showWhy = false; onOpenRebindGuide() },
                     )
                 }
                 Spacer(Modifier.height(10.dp))

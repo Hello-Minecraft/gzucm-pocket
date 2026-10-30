@@ -42,10 +42,16 @@ import com.gzucm.pocket.core.ReleaseNotes
  * 从设置页进来（设置 → 关于软件），不直接铺在设置页面上。
  */
 @Composable
-fun AboutScreen(onBack: () -> Unit) {
+fun AboutScreen(
+    onBack: () -> Unit,
+    /** 检查完成后回调，让首页小红点同步 */
+    onChecked: () -> Unit = {},
+) {
     val scheme = MaterialTheme.colorScheme
     val ver = runCatching { com.gzucm.pocket.BuildConfig.VERSION_NAME }.getOrDefault("—")
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    val store = remember { com.gzucm.pocket.core.SessionStore(ctx.applicationContext) }
+    val todayStr = remember { java.time.LocalDate.now().toString() }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     var checking by remember { mutableStateOf(false) }
@@ -75,6 +81,8 @@ fun AboutScreen(onBack: () -> Unit) {
             when (val r = com.gzucm.pocket.core.Updater.check()) {
                 is com.gzucm.pocket.core.Updater.Result.Newer -> {
                     updateOk = true
+                    store.latestVersion = r.info.latestVersion
+                    store.lastUpdateCheckDate = todayStr
                     newVersion = r.info.latestVersion
                     releasePage = r.info.pageUrl
                     apkUrl = r.info.apkUrl
@@ -83,6 +91,8 @@ fun AboutScreen(onBack: () -> Unit) {
                 }
                 com.gzucm.pocket.core.Updater.Result.UpToDate -> {
                     updateOk = true
+                    store.latestVersion = null
+                    store.lastUpdateCheckDate = todayStr
                     updateMsg = "已是最新版本 v$ver"
                 }
                 is com.gzucm.pocket.core.Updater.Result.Failed -> {
@@ -91,6 +101,7 @@ fun AboutScreen(onBack: () -> Unit) {
                 }
             }
             checking = false
+            onChecked()
         }
     }
 

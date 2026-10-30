@@ -41,6 +41,8 @@ fun PowerWhySheet(
     onDismiss: () -> Unit,
     alertOn: Boolean = true,
     onAlertChange: (Boolean) -> Unit = {},
+    /** 引导去小程序改绑（App 内 WebView 完成不了支付，绑不了） */
+    onBuyInMiniProgram: () -> Unit = {},
 ) {
     val scheme = MaterialTheme.colorScheme
     val ctx = LocalContext.current
@@ -127,13 +129,25 @@ fun PowerWhySheet(
             Spacer(Modifier.height(4.dp))
 
             // 补充的几条：都是实际会踩的
-            Point(
-                "显示 0 度但宿舍有电",
-                "多半是房间号没绑对。去小程序里核对校区、楼栋、宿舍号，三样都要对上。",
+            /**
+             * 换宿舍的引导。
+             *
+             * 原本想在 App 内用 WebView 打开一卡通页面让用户自己改绑 —— 实测**不行**：
+             * 绑定最后一步要走微信支付（一分钱验证），WebView 里点支付没反应，
+             * 流程走不完，房间永远绑不上。
+             *
+             * 所以改成「告诉用户去哪做」：本校一卡通的房间绑定只能在小程序里完成。
+             * 不去猜小程序的具体路径，只给必须满足的条件和一句重试提示。
+             */
+            PointLink(
+                title = "宿舍号对不上？",
+                body = "会显示 0 度或查不到电。校区、楼栋、宿舍号三样都要对上，缺一个都不行。",
+                action = "换宿舍怎么办",
+                onClick = onBuyInMiniProgram,
             )
             Point(
                 "余额是「度」不是「元」",
-                "这里显示的是剩余电量，单位是度。充值时按金额折算成度数，所以和微信里的扣款金额不是同一个数。",
+                "这里显示的是剩余电量，单位是度。充值时按金额折算成度数，所以和微信里的扣款金额不是同一个数。1 元电费大约等于 1.5 度电。",
             )
             Point(
                 "免费电量不显示",
@@ -145,7 +159,7 @@ fun PowerWhySheet(
             )
             Point(
                 "更新频率",
-                "每天首次打开 App 会在后台自动更新一次（不弹窗）。想立刻刷新，在电费页点「更新」。",
+                "进电费页时如果数据超过 2 小时没更新，会自动弹窗同步一次；2 小时内直接用上次的结果。想立刻刷新就点「更新」。",
             )
 
             Spacer(Modifier.height(14.dp))
@@ -182,6 +196,56 @@ private fun Point(title: String, body: String, highlight: Boolean = false) {
                 fontWeight = FontWeight.Medium,
                 color = if (highlight) scheme.primary else scheme.onSurface,
             )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                body,
+                fontSize = 12.sp,
+                lineHeight = 18.sp,
+                color = scheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * 说明项 + 一个行内操作入口。
+ *
+ * 入口跟标题**同一行**，带下划线 —— 一行字就能看懂「这问题怎么办」，
+ * 不用卡片、不用箭头，低频操作不该抢其他说明的注意力。
+ */
+@Composable
+private fun PointLink(title: String, body: String, action: String, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Row(Modifier.padding(bottom = 14.dp)) {
+        Spacer(
+            Modifier
+                .padding(top = 6.dp)
+                .size(5.dp)
+                .clip(CircleShape)
+                .background(scheme.primary)
+        )
+        Spacer(Modifier.width(10.dp))
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // 标题也用主题色：整条都在提示「这里有操作」，跟纯灰的说明项分开
+                Text(
+                    title,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = scheme.primary,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    action,
+                    fontSize = 12.5.sp,
+                    color = scheme.primary,
+                    textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable(onClick = onClick)
+                        .padding(vertical = 2.dp, horizontal = 2.dp),
+                )
+            }
             Spacer(Modifier.height(2.dp))
             Text(
                 body,

@@ -63,17 +63,39 @@ import java.time.LocalDate
 private val WeekdayLabels = listOf("一", "二", "三", "四", "五", "六", "日")
 
 /**
- * 广中医作息。每节 45 分钟，节间 5 分钟。
- * 节次编号是跳号的：没有 5、10、11（实测抓包确认），13 存在但常被忽略。
+ * 广中医作息。每节 40 分钟，课间 10 分钟。
+ *
+ * 节次编号是**连续**的 1–14，之前误以为跳号（没有 5、10、11）——
+ * 那是「自己的课表里恰好没有这些节次的课」，不是系统没有。
+ * 全校课表里 5 节 155 条、10 节 741 条、11 节 221 条（第 8 周实测）。
+ *
+ * 时间来自教务周课表页的 businessHours，并与课程接口的 qssj 交叉核对：
+ * 第 5 节 13:10、第 10 节 17:20 两处吻合；
+ * 10/11 节再用「40 分钟课 + 10 分钟课间」推链验证：
+ * 16:30(9) → 17:20(10) → 18:10(11) → 19:00(12，已确认)。
  */
 val SlotTimes: Map<Int, String> = mapOf(
-    1 to "08:30", 2 to "09:20", 3 to "10:20", 4 to "11:10",
-    6 to "14:00", 7 to "14:50", 8 to "15:40", 9 to "16:30",
-    12 to "19:00", 13 to "19:50", 14 to "20:40",
+    1 to "08:30", 2 to "09:20", 3 to "10:20", 4 to "11:10", 5 to "13:10",
+    6 to "14:00", 7 to "14:50", 8 to "15:40", 9 to "16:30", 10 to "17:20",
+    11 to "18:10", 12 to "19:00", 13 to "19:50", 14 to "20:40",
 )
 
+/**
+ * 下课时间 = 上课时间 + 40 分钟。
+ * 从 SlotTimes 推出来而不是手写一份，作息改了不会两边对不上。
+ */
+val SlotEndTimes: Map<Int, String> = SlotTimes.mapValues { (_, hhmm) ->
+    val parts = hhmm.split(":")
+    val h = parts.getOrNull(0)?.toIntOrNull()
+    val m = parts.getOrNull(1)?.toIntOrNull()
+    if (h == null || m == null) "" else {
+        val total = h * 60 + m + 40
+        "%02d:%02d".format((total / 60) % 24, total % 60)
+    }
+}
+
 /** 全部可能的节次，用于计算跨节高度时补齐中间被跳过的号 */
-private val AllUnits = listOf(1, 2, 3, 4, 6, 7, 8, 9, 12, 13, 14)
+private val AllUnits = (1..14).toList()
 
 @Composable
 fun ScheduleScreen(
@@ -317,7 +339,15 @@ private fun SlotColumn(slots: List<Int>) {
                 Text(
                     SlotTimes[unit] ?: "",
                     fontSize = 7.5.sp,
-                    color = scheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    lineHeight = 9.sp,
+                    color = scheme.onSurfaceVariant.copy(alpha = 0.55f),
+                )
+                // 下课时间：比上课时间更淡，两行不至于抢注意力
+                Text(
+                    SlotEndTimes[unit] ?: "",
+                    fontSize = 7.sp,
+                    lineHeight = 8.sp,
+                    color = scheme.onSurfaceVariant.copy(alpha = 0.35f),
                 )
             }
         }
@@ -352,8 +382,8 @@ private fun WeekHeader(
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Medium,
                 )
+                Spacer(Modifier.width(8.dp))
                 if (viewingWeek == currentWeek) {
-                    Spacer(Modifier.width(8.dp))
                     Box(
                         Modifier
                             .clip(RoundedCornerShape(6.dp))
@@ -362,6 +392,22 @@ private fun WeekHeader(
                     ) {
                         Text(
                             "本周",
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                } else {
+                    // 翻到别的周了：给一条回得去的路，否则要一页页滑回来
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f))
+                            .clickable(onClickLabel = "回到本周") { onWeekChange(currentWeek) }
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            "回到本周",
                             fontSize = 10.5.sp,
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.primary,

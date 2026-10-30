@@ -221,20 +221,20 @@ class ParsingTest {
     // ── 作息表 ──────────────────────────────────────────────────────────
 
     @Test
-    fun `节次时间表跳过不存在的 5 与 10 11`() {
+    fun `节次时间表覆盖 1 到 14 全部节次`() {
+        // 曾经误以为 5、10、11 节不存在（自己课表里没有而已），
+        // 全校课表证明 5/10/11 都有课，时间表必须覆盖
         val slots = com.gzucm.pocket.ui.schedule.SlotTimes
         assertEquals("08:30", slots[1])
         assertEquals("10:20", slots[3])
+        assertEquals("13:10", slots[5])
         assertEquals("14:00", slots[6])
         assertEquals("16:30", slots[9])
+        assertEquals("17:20", slots[10])
+        assertEquals("18:10", slots[11])
         assertEquals("19:50", slots[13])
         assertEquals("20:40", slots[14])
-        // 广中医实际不存在 5、10、11 节
-        assertEquals(null, slots[5])
-        assertEquals(null, slots[10])
-        assertEquals(null, slots[11])
-        // 共 11 个有效节次
-        assertEquals(11, slots.size)
+        assertEquals(14, slots.size)
     }
 }
 

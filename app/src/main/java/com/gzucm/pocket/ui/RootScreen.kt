@@ -144,55 +144,33 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
     var detail by remember { mutableStateOf<CourseSession?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var showEcardSync by remember { mutableStateOf(false) }
+    var showRebindGuide by remember { mutableStateOf(false) }
     var showDonate by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
+    // 从「登录已过期」点「去登录」进来时：设置页要自动滚到「重新登录」并抖动提示
+    var focusRelogin by remember { mutableStateOf(false) }
 
     /**
-     * 电费同步策略（2026-10-28 改）：
+     * 电费同步策略（2026-10-30 改）。
      *
-     * - **每天首次打开 App**：静默获取一次，**不弹窗**，用户无感。
-     * - 之后当天不再自动同步，避免每次打开都跑一遍。
-     * - 用户想手动更新：电费页点「更新」，才弹窗（那种情况用户本来就等着）。
+     * 之前是「每天首次打开 App 挂一个 1dp 隐藏 WebView 静默同步」，但那条路
+     * 一直失败：页面被判为不可见 → JS 定时器被系统节流 → 分页循环跑不完，
+     * 经常只拿到余额、拿不到明细，用户最后还是得手动点一次。
      *
-     * 静默同步用 1dp 的隐藏 WebView —— 数据只能从 WebView 里取，
-     * 但没必要把界面亮给用户看。
+     * 现在只保留**弹窗**这一条：进电费页时，如果数据过期（超 2 小时）
+     * 或是刚登录/刚手动同步过，就自动弹一次。弹窗看得见进度，也确实能成功。
+     * 不打开电费页就不打扰 —— 首页电费卡会标明数据有多旧。
      */
-    val todayStr = remember {
-        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
-            .format(java.util.Date())
-    }
-    var silentDone by remember { mutableStateOf(false) }
-    // 已经处理到第几次手动请求；用来区分「每日自动」和「用户点了同步」
-    var handledTick by remember { mutableIntStateOf(vm.powerSyncTick) }
-    val tickPending = vm.powerSyncTick != handledTick
-    val needSilent = state.phase == Phase.Ready &&
-        !silentDone &&
-        // 没有一卡通会话时别去试：注定跳 SSO 失败，还会白白进 30 分钟冷却
-        com.gzucm.pocket.core.Net.cookies.has("ecard.gzucm.edu.cn") &&
-        (tickPending || com.gzucm.pocket.core.PowerAlert.shouldSilentSync(
-            prefs.lastPowerSyncDate, prefs.lastPowerAttemptAt, todayStr,
-        ))
-
-    // 隐藏的同步载体：不可见、不接收点击，拿完数据就自己结束
-    if (needSilent) {
-        androidx.compose.foundation.layout.Box(Modifier.size(1.dp)) {
-            com.gzucm.pocket.ui.power.PowerSilentSync(
-                active = true,
-                onDone = { info, daily ->
-                    vm.applyEcardSync(info, daily)
-                    prefs.lastPowerSyncDate = todayStr
-                    handledTick = vm.powerSyncTick
-                    silentDone = true
-                },
-                onFail = {
-                    // 失败不写「今天已完成」，否则一次失败就锁死一整天，只能手动更新。
-                    // 改成记「上次尝试时间」，冷却 30 分钟后允许再试。
-                    prefs.lastPowerAttemptAt = System.currentTimeMillis()
-                    handledTick = vm.powerSyncTick
-                    silentDone = true
-                },
-            )
-        }
+    // 进电费页时按需自动弹窗
+    LaunchedEffect(tab, state.phase) {
+        if (tab != Tab.Power) return@LaunchedEffect
+        if (state.phase != Phase.Ready) return@LaunchedEffect
+        // 没有一卡通会话时弹窗也是跳 SSO，先不打扰
+        if (!com.gzucm.pocket.core.Net.cookies.has("ecard.gzucm.edu.cn")) return@LaunchedEffect
+        val need = vm.powerDirty || com.gzucm.pocket.core.PowerAlert.needsAutoSync(
+            prefs.powerCheckedAt, prefs.lastPowerAttemptAt, System.currentTimeMillis(),
+        )
+        if (need && !showEcardSync) showEcardSync = true
     }
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -215,13 +193,19 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                             sessions = state.sessions,
                             power = state.power,
                             powerDaily = state.powerDaily,
+                            powerCheckedAt = prefs.powerCheckedAt,
                             onCourseClick = { detail = it },
                             onOpenPower = { tab = Tab.Power },
                             onOpenSettings = { showSettings = true },
+                            onOpenLogin = {
+                                showSettings = true
+                                focusRelogin = true
+                            },
                             onRefresh = { vm.sync() },
                             syncing = state.syncing,
                             progressDone = state.progressDone,
                             progressTotal = state.progressTotal,
+                            hasUpdate = vm.hasUpdate,
                             notice = state.message,
                         )
 
@@ -245,7 +229,16 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                                 levels = state.levels,
                                 fitness = state.fitness,
                                 loading = state.gradesLoading,
+                                progressDone = state.gradesDone,
+                                progressTotal = state.gradesTotal,
+                                stage = state.gradesStage,
+                                updatedAt = prefs.gradesCheckedAt,
                                 onRefresh = { vm.loadGrades(force = true) },
+                                needLogin = vm.loginExpired,
+                                onOpenLogin = {
+                                    showSettings = true
+                                    focusRelogin = true
+                                },
                             )
                         }
 
@@ -256,8 +249,8 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                                 daily = state.powerDaily,
                                 loading = state.powerLoading,
                                 error = state.powerError,
-                                onRefresh = { vm.loadPower(force = true) },
                                 onSync = { showEcardSync = true },
+                            onOpenRebindGuide = { showRebindGuide = true },
                             powerAlertOn = vm.powerAlertOn,
                             onPowerAlertChange = { on ->
                                 vm.setPowerAlert(on)
@@ -287,12 +280,18 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 showEcardSync = false
                 if (info != null) {
                     vm.applyEcardSync(info, daily)
-                } else if (err != null) {
-                    vm.showPowerError(err)
+                } else {
+                    // 记下尝试时间：失败后 10 分钟内不再自动弹，免得反复打断
+                    prefs.lastPowerAttemptAt = System.currentTimeMillis()
+                    if (err != null) vm.showPowerError(err)
                 }
             },
             onDismiss = { showEcardSync = false },
         )
+    }
+
+    if (showRebindGuide) {
+        com.gzucm.pocket.ui.power.RebindGuideSheet(onDismiss = { showRebindGuide = false })
     }
 
     if (showSettings) {
@@ -302,7 +301,17 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 .format(java.util.Date(ts))
         }
         androidx.compose.material3.ModalBottomSheet(
+            /**
+             * 打开就全展开。
+             *
+             * 默认是「半展开」（约半屏高），设置页内容比半屏长得多，
+             * 一进去只能看到上面几项，想找「重新登录」还得先把面板往上拖 —— 没人知道能拖。
+             */
+            sheetState = androidx.compose.material3.rememberModalBottomSheetState(
+                skipPartiallyExpanded = true,
+            ),
             onDismissRequest = {
+                focusRelogin = false
                 // 注意：这里必须把两个标志都清掉。
                 // 之前只清一个，导致「在关于页下拉关掉面板」后 showSettings 还是 true，
                 // Compose 仍认为面板存在 → 留下一个透明遮罩盖在首页上，什么都点不动。
@@ -313,16 +322,26 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
             shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
         ) {
             if (showAbout) {
-                com.gzucm.pocket.ui.settings.AboutScreen(onBack = { showAbout = false })
+                com.gzucm.pocket.ui.settings.AboutScreen(
+                    onBack = { showAbout = false },
+                    onChecked = { vm.refreshUpdateBadge() },
+                )
                 return@ModalBottomSheet
             }
             com.gzucm.pocket.ui.settings.SettingsScreen(
                 onSync = { vm.sync(); showSettings = false },
                 onLogout = { vm.logout(); showSettings = false },
                 onClose = { showSettings = false },
-                onRelogin = { vm.logout(); vm.reopenLogin(); showSettings = false },
+                onRelogin = {
+                    focusRelogin = false
+                    vm.logout()
+                    vm.reopenLogin()
+                    showSettings = false
+                },
                 lastSyncText = lastSync,
                 semesterText = state.semester?.name ?: "—",
+                focusRelogin = focusRelogin,
+                hasUpdate = vm.hasUpdate,
                 startTabIndex = prefs.startTab,
                 onStartTabChange = {
                     prefs.startTab = it
@@ -339,6 +358,9 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                         android.Manifest.permission.POST_NOTIFICATIONS
                     )
                 },
+                leadFree = vm.classLeadFree,
+                leadBreak = vm.classLeadBreak,
+                onLeadChange = { f, b -> vm.setClassLead(f, b) },
                 notifyGranted = notifyOk,
                 onRequestNotify = {
                     askNotify.launch(android.Manifest.permission.POST_NOTIFICATIONS)

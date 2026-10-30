@@ -145,18 +145,22 @@ object PowerAlert {
      * 是否该跑静默同步：每天只跑一次。
      * 抽成纯函数是为了能测——「每次打开都跑一遍」是最容易写错的地方。
      */
-    fun shouldSilentSync(
-        lastSyncDate: String?,
+    /**
+     * 进电费页时要不要自动弹窗同步。
+     *
+     * - 从没成功过 → 要
+     * - 距上次成功超过 [staleMs]（默认 2 小时）→ 要
+     * - 刚失败过（尝试时间晚于成功时间，且不到 [cooldownMs]）→ 不要，免得反复弹
+     */
+    fun needsAutoSync(
+        lastCheckedAt: Long,
         lastAttemptAt: Long,
-        today: String,
         now: Long = System.currentTimeMillis(),
-        cooldownMs: Long = 30 * 60_000L,
+        staleMs: Long = 2 * 60 * 60_000L,
+        cooldownMs: Long = 10 * 60_000L,
     ): Boolean {
-        // 今天已经成功拉过 → 不再打扰
-        if (lastSyncDate == today) return false
-        // 刚试过且失败了 → 冷却一会再试，别连着打服务器
-        if (lastAttemptAt > 0 && now - lastAttemptAt < cooldownMs) return false
-        return true
+        if (lastAttemptAt > lastCheckedAt && now - lastAttemptAt < cooldownMs) return false
+        return lastCheckedAt <= 0L || now - lastCheckedAt >= staleMs
     }
 
     fun today(): String =

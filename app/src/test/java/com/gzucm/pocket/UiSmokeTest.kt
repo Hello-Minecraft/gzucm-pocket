@@ -170,7 +170,7 @@ class UiSmokeTest {
     @Test
     fun `电费页显示余额与明细`() {
         set {
-            PowerScreen(power = power, daily = daily, loading = false, onRefresh = {})
+            PowerScreen(power = power, daily = daily, loading = false)
         }
         rule.onNodeWithText("11.78").assertIsDisplayed()
         rule.onNodeWithText("用电趋势").assertIsDisplayed()
@@ -180,7 +180,7 @@ class UiSmokeTest {
     @Test
     fun `电费页无数据时不崩`() {
         set {
-            PowerScreen(power = null, daily = emptyList(), loading = false, onRefresh = {})
+            PowerScreen(power = null, daily = emptyList(), loading = false)
         }
         rule.onNodeWithText("暂时读不到电费数据").assertIsDisplayed()
     }

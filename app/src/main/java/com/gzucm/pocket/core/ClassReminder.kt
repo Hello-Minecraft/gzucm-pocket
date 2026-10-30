@@ -31,10 +31,20 @@ object ClassReminder {
     const val CHANNEL_ID = "class_remind"
     private const val NOTIFY_ID_BASE = 20_000
 
-    /** 平时提前 20 分钟 */
-    const val LEAD_NORMAL = 20
-    /** 上一节还没下课，改到课间提前 10 分钟 */
-    const val LEAD_BREAK = 10
+    /** 默认：当前没课（早八、午二那种），提前 20 分钟 */
+    const val DEFAULT_LEAD_FREE = 20
+    /** 默认：当前还在上课（课间），提前 10 分钟 */
+    const val DEFAULT_LEAD_BREAK = 10
+
+    /**
+     * 判断「T 时刻是否在别的课上」时，往前多看 1 分钟。
+     *
+     * 大课间有 20 分钟（10:00 下课、10:20 上课）。若按 T-20 整点判断，
+     * 10:00 正好是下课时刻，会被判成「没课」，于是走 20 分钟档 ——
+     * 结果刚下课就提醒，等于没给课间留时间。往前挪到 T-21 就落回上课区间，
+     * 正确走「课间档」。
+     */
+    private const val PROBE_OFFSET_MIN = 21
 
     // ── 时间计算 ─────────────────────────────────────────────────────
 
@@ -53,9 +63,11 @@ object ClassReminder {
         session: CourseSession,
         daySessions: List<CourseSession>,
         date: LocalDate,
+        leadFree: Int = DEFAULT_LEAD_FREE,
+        leadBreak: Int = DEFAULT_LEAD_BREAK,
     ): Long? {
         val start = at(date, session.startTime) ?: return null
-        val probe = start - LEAD_NORMAL * 60_000L
+        val probe = start - PROBE_OFFSET_MIN * 60_000L
 
         val stillInClass = daySessions.any { other ->
             if (other === session) return@any false
@@ -64,8 +76,27 @@ object ClassReminder {
             probe >= s && probe < e
         }
 
-        val lead = if (stillInClass) LEAD_BREAK else LEAD_NORMAL
+        val lead = if (stillInClass) leadBreak else leadFree
         return start - lead * 60_000L
+    }
+
+    /** 这节该用哪一档（供通知文案显示「N 分钟后上课」） */
+    fun leadFor(
+        session: CourseSession,
+        daySessions: List<CourseSession>,
+        date: LocalDate,
+        leadFree: Int = DEFAULT_LEAD_FREE,
+        leadBreak: Int = DEFAULT_LEAD_BREAK,
+    ): Int {
+        val start = at(date, session.startTime) ?: return leadFree
+        val probe = start - PROBE_OFFSET_MIN * 60_000L
+        val stillInClass = daySessions.any { other ->
+            if (other === session) return@any false
+            val s = at(date, other.startTime) ?: return@any false
+            val e = at(date, other.endTime) ?: return@any false
+            probe >= s && probe < e
+        }
+        return if (stillInClass) leadBreak else leadFree
     }
 
     /** 副标题：地点·教师，空的自动略过 */
@@ -187,7 +218,7 @@ object ClassReminder {
 
     // ── 闹钟调度 ─────────────────────────────────────────────────────
 
-    private fun pi(ctx: Context, session: CourseSession, date: LocalDate): PendingIntent {
+    private fun pi(ctx: Context, session: CourseSession, date: LocalDate, lead: Int): PendingIntent {
         val intent = Intent(ctx, ClassReminderReceiver::class.java).apply {
             putExtra("name", session.name)
             putExtra("room", session.room)
@@ -196,7 +227,7 @@ object ClassReminder {
             putExtra("startTime", session.startTime)
             putExtra("startUnit", session.startUnit)
             putExtra("endUnit", session.endUnit)
-            putExtra("lead", LEAD_NORMAL)
+            putExtra("lead", lead)
         }
         val code = (session.weekday * 1000 + session.startUnit * 10 + date.dayOfMonth)
         return PendingIntent.getBroadcast(
@@ -216,6 +247,8 @@ object ClassReminder {
         semester: Semester,
         sessions: List<CourseSession>,
         enabled: Boolean,
+        leadFree: Int = DEFAULT_LEAD_FREE,
+        leadBreak: Int = DEFAULT_LEAD_BREAK,
     ) {
         val am = ctx.getSystemService(AlarmManager::class.java) ?: return
         cancelAll(ctx, sessions, semester)
@@ -235,10 +268,10 @@ object ClassReminder {
             if (daySessions.isEmpty()) continue
 
             for (s in daySessions) {
-                val whenAt = remindAt(s, daySessions, date) ?: continue
+                val whenAt = remindAt(s, daySessions, date, leadFree, leadBreak) ?: continue
                 if (whenAt <= now + 5_000) continue
-                val lead = if (whenAt == (at(date, s.startTime) ?: 0L) - LEAD_BREAK * 60_000L) LEAD_BREAK else LEAD_NORMAL
-                val p = pi(ctx, s, date)
+                val lead = leadFor(s, daySessions, date, leadFree, leadBreak)
+                val p = pi(ctx, s, date, lead)
                 runCatching {
                     if (Build.VERSION.SDK_INT >= 31 && !am.canScheduleExactAlarms()) {
                         am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, whenAt, p)
@@ -257,7 +290,8 @@ object ClassReminder {
         val today = LocalDate.now()
         for (offset in 0..2) {
             val date = today.plusDays(offset.toLong())
-            sessions.forEach { runCatching { am.cancel(pi(ctx, it, date)) } }
+            // PendingIntent 的匹配只看 requestCode，extras 不参与，所以这里 lead 传什么都命中
+            sessions.forEach { runCatching { am.cancel(pi(ctx, it, date, 0)) } }
         }
     }
 }
@@ -279,6 +313,9 @@ class ClassReminderReceiver : BroadcastReceiver() {
             category = "",
             content = intent.getStringExtra("content") ?: "",
         )
-        ClassReminder.notify(context, session, intent.getIntExtra("lead", ClassReminder.LEAD_NORMAL))
+        ClassReminder.notify(
+            context, session,
+            intent.getIntExtra("lead", ClassReminder.DEFAULT_LEAD_FREE),
+        )
     }
 }

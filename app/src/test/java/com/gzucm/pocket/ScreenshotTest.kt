@@ -5,6 +5,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotDisplayed
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
@@ -128,14 +131,27 @@ class ScreenshotTest {
     private fun shot(
         name: String,
         scrollUp: Int = 0,
+        seed: Long = 0L,
+        dark: Boolean = true,
+        /** 额外推进主线程时钟的毫秒数：用于等 LaunchedEffect 里的 delay/动画 */
+        settleMs: Long = 0L,
         block: @androidx.compose.runtime.Composable () -> Unit,
     ) {
         rule.setContent {
-            GzucmTheme(darkTheme = true) {
+            GzucmTheme(darkTheme = dark, seed = seed) {
                 Surface(Modifier.fillMaxSize()) { block() }
             }
         }
         rule.waitForIdle()
+
+        // Compose 的 LaunchedEffect 里用真实时钟 delay，waitForIdle 不会等它。
+        // 需要验证「延迟后才发生的动作」时，靠 ShadowLooper 把主线程时间推过去。
+        if (settleMs > 0) {
+            org.robolectric.shadows.ShadowLooper.idleMainLooper(
+                settleMs, java.util.concurrent.TimeUnit.MILLISECONDS,
+            )
+            rule.waitForIdle()
+        }
 
         // 需要看底部时，把内容滚到尽头
         repeat(scrollUp) {
@@ -170,17 +186,17 @@ class ScreenshotTest {
 
     @Test
     fun today() = shot("02_today") {
-        TodayScreen(semester, 8, sessions, power, daily, {}, {}, {}, {}, false, 0, 0, null)
+        TodayScreen(semester, 8, sessions, power, daily, 0L, {}, {}, {}, {}, false, 0, 0, false, null)
     }
 
     @Test
     fun grades() = shot("03_grades") {
-        GradesScreen(grades, levels, fitness, false, {})
+        GradesScreen(grades, levels, fitness, false, 0, 0, null, 0L, {})
     }
 
     @Test
     fun powerScreen() = shot("04_power") {
-        PowerScreen(power = power, daily = daily, loading = false, onRefresh = {})
+        PowerScreen(power = power, daily = daily, loading = false)
     }
 
     /** 整体骨架：验证悬浮底栏的几何关系 */
@@ -190,7 +206,7 @@ class ScreenshotTest {
             tab = com.gzucm.pocket.ui.Tab.Today,
             onSelect = {},
         ) {
-            TodayScreen(semester, 8, sessions, power, daily, {}, {}, {}, {}, false, 0, 0, null)
+            TodayScreen(semester, 8, sessions, power, daily, 0L, {}, {}, {}, {}, false, 0, 0, false, null)
         }
     }
 
@@ -220,5 +236,140 @@ class ScreenshotTest {
                 ScheduleScreen(semester, sessions, 8, 8, {}, {})
             }
         }
+    }
+
+    /** 设置页：看主题色卡两行的排布 */
+    @Test
+    fun settings() = shot("07_settings") {
+        com.gzucm.pocket.ui.settings.SettingsScreen(
+            onSync = {}, onLogout = {}, onClose = {},
+            lastSyncText = "10-30 12:05",
+            semesterText = "2026-2027 学年 第一学期",
+        )
+    }
+
+    /** 换成靛蓝主题后的首页：确认中性色没被带跑偏 */
+    @Test
+    fun todayWithIndigo() = shot("08_today_indigo", seed = 0xFF3B82F6) {
+        TodayScreen(semester, 8, sessions, power, daily, 0L, {}, {}, {}, {}, false, 0, 0, false, null)
+    }
+
+    /** 换成莫兰迪苔绿：低饱和色在深底上会不会糊 */
+    @Test
+    fun todayWithMoss() = shot("09_today_moss", seed = 0xFF8CA07A) {
+        TodayScreen(semester, 8, sessions, power, daily, 0L, {}, {}, {}, {}, false, 0, 0, false, null)
+    }
+
+    /** 浅色主题 + 靛蓝：浅底上主色太亮就看不清，必须确认一下 */
+    @Test
+    fun todayLightIndigo() = shot("10_today_light_indigo", seed = 0xFF3B82F6, dark = false) {
+        TodayScreen(semester, 8, sessions, power, daily, 0L, {}, {}, {}, {}, false, 0, 0, false, null)
+    }
+
+    /** 浅色主题 + 豆沙（低饱和）：最容易发粉发白的组合 */
+    @Test
+    fun settingsLight() = shot("11_settings_light", dark = false) {
+        com.gzucm.pocket.ui.settings.SettingsScreen(
+            onSync = {}, onLogout = {}, onClose = {},
+            lastSyncText = "10-30 12:05",
+            semesterText = "2026-2027 学年 第一学期",
+        )
+    }
+
+    /** 课表翻到别的周：确认「回到本周」按钮出现 */
+    @Test
+    fun scheduleOtherWeek() = shot("12_schedule_other_week") {
+        ScheduleScreen(semester, sessions, 8, 12, {}, {})
+    }
+
+    /** 成绩页登录失效：文案仍是「暂无成绩」，但多一个去登录按钮 */
+    @Test
+    fun gradesNeedLogin() = shot("13_grades_need_login") {
+        GradesScreen(
+            grades = emptyList(), levels = emptyList(), fitness = emptyList(),
+            loading = false, onRefresh = {}, needLogin = true, onOpenLogin = {},
+        )
+    }
+
+    /** 设置页从「去登录」进来：应自动滚到「重新登录」并高亮 */
+    @Test
+    fun settingsFocusRelogin() = shot("14_settings_focus_relogin", scrollUp = 0) {
+        com.gzucm.pocket.ui.settings.SettingsScreen(
+            onSync = {}, onLogout = {}, onClose = {},
+            lastSyncText = "10-30 12:05",
+            semesterText = "2026-2027 学年 第一学期",
+            focusRelogin = true,
+        )
+    }
+
+    /**
+     * 矮屏（640dp）下点「去登录」：设置页必须自己滚下去，把「重新登录」露出来。
+     * 用矮屏是因为 891dp 时整页放得下，滚不滚看不出来。
+     */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h640dp-xhdpi")
+    fun settingsFocusReloginShort() = shot("15_focus_relogin_short", settleMs = 1_200) {
+        com.gzucm.pocket.ui.settings.SettingsScreen(
+            onSync = {}, onLogout = {}, onClose = {},
+            lastSyncText = "10-30 12:05",
+            semesterText = "2026-2027 学年 第一学期",
+            focusRelogin = true,
+        )
+    }
+
+    /** 同样的矮屏，但没有 focusRelogin：应该停在顶部，作为对照组 */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h640dp-xhdpi")
+    fun settingsNoFocusShort() = shot("16_no_focus_short") {
+        com.gzucm.pocket.ui.settings.SettingsScreen(
+            onSync = {}, onLogout = {}, onClose = {},
+            lastSyncText = "10-30 12:05",
+            semesterText = "2026-2027 学年 第一学期",
+        )
+    }
+
+    /** 对照组：没点「去登录」时，矮屏上「重新登录」本来在屏幕外 */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h640dp-xhdpi")
+    fun `没点去登录时重新登录在视野外`() {
+        rule.setContent {
+            GzucmTheme(darkTheme = true) {
+                Surface(Modifier.fillMaxSize()) {
+                    com.gzucm.pocket.ui.settings.SettingsScreen(
+                        onSync = {}, onLogout = {}, onClose = {},
+                        lastSyncText = "10-30 12:05",
+                        semesterText = "2026-2027 学年 第一学期",
+                    )
+                }
+            }
+        }
+        rule.waitForIdle()
+        rule.onNodeWithText("重新登录").assertIsNotDisplayed()
+    }
+
+    /** 对照组：没登录过期（真的没成绩，比如大一新生）→ 只有文字，没有按钮 */
+    @Test
+    fun gradesEmptyNoLogin() = shot("17_grades_empty_plain") {
+        GradesScreen(
+            grades = emptyList(), levels = emptyList(), fitness = emptyList(),
+            loading = false, onRefresh = {}, needLogin = false, onOpenLogin = {},
+        )
+    }
+
+    /** 「关于软件」那行有更新提示时啥样 */
+    @Test
+    fun settingsUpdateBadge() = shot("18_settings_update_badge", scrollUp = 2) {
+        com.gzucm.pocket.ui.settings.SettingsScreen(
+            onSync = {}, onLogout = {}, onClose = {},
+            lastSyncText = "10-30 12:05",
+            semesterText = "2026-2027 学年 第一学期",
+            hasUpdate = true,
+        )
+    }
+
+    /** 换宿舍引导：四步 + 一句补救提示 */
+    @Test
+    fun rebindGuide() = shot("19_rebind_guide") {
+        com.gzucm.pocket.ui.power.RebindGuideSheet(onDismiss = {})
     }
 }

@@ -2,6 +2,7 @@ package com.gzucm.pocket.ui.theme
 
 import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -90,12 +91,36 @@ fun courseColor(name: String): Color {
     return CoursePalette[Math.floorMod(h, CoursePalette.size)]
 }
 
+/**
+ * 换主题色：**中性色一个都不动**，只替换 primary / secondary / tertiary 这一簇。
+ *
+ * 这样每个预设的背景、正文、分割线都跟默认档完全一致，
+ * 不会出现「换个颜色结果深色底变灰」的问题。
+ */
+private fun ColorScheme.withAccent(accent: ThemeColor.Accent): ColorScheme = copy(
+    primary = accent.primary,
+    onPrimary = accent.onPrimary,
+    primaryContainer = accent.primaryContainer,
+    onPrimaryContainer = accent.onPrimaryContainer,
+    secondary = accent.secondary,
+    tertiary = accent.tertiary,
+)
+
+/** 按种子色取配色；seed = 0 表示默认（原样返回） */
+private fun schemeFor(dark: Boolean, seed: Long): ColorScheme {
+    val base = if (dark) DarkColors else LightColors
+    if (seed == ThemeColor.DEFAULT_SEED) return base
+    return base.withAccent(ThemeColor.accentFor(Color(seed), dark))
+}
+
 @Composable
 fun GzucmTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    /** 主题色的种子色；0 = 默认薄荷 */
+    seed: Long = ThemeColor.DEFAULT_SEED,
     content: @Composable () -> Unit,
 ) {
-    val colors = if (darkTheme) DarkColors else LightColors
+    val colors = schemeFor(darkTheme, seed)
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {

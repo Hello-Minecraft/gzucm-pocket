@@ -68,6 +68,7 @@ data class Semester(
 }
 
 /** 课程成绩一行 */
+@Serializable
 data class CourseGrade(
     val term: String,
     val name: String,
@@ -81,6 +82,7 @@ data class CourseGrade(
 )
 
 /** 考级成绩（四六级等） */
+@Serializable
 data class LevelGrade(
     val name: String,
     val term: String,
@@ -91,9 +93,11 @@ data class LevelGrade(
 )
 
 /** 体测单项 */
+@Serializable
 data class FitnessItem(val label: String, val value: String, val score: String, val grade: String)
 
 /** 体测成绩 */
+@Serializable
 data class FitnessGrade(
     val term: String,
     val total: String,

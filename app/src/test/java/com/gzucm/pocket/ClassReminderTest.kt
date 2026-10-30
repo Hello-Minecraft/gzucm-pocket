@@ -46,13 +46,35 @@ class ClassReminderTest {
     }
 
     @Test
-    fun `上一节还没下课时改成课间提前10分钟`() {
-        // 1-2 节 08:00-09:40，3-4 节 10:00-11:40。
-        // T-20 = 09:40，正好是下课时刻，不算在课上 → 仍是 20 分钟。
+    fun `大课间20分钟仍算上课 走课间档`() {
+        // 1-2 节 08:00-09:40，3-4 节 10:00-11:40 → 课间 20 分钟。
+        // 按 T-20 判断：09:40 正好是下课时刻，会被判成「没课」，于是 09:40 就提醒，
+        // 等于刚下课就响。改成 T-21（09:39 仍在课上）才正确走课间档 → 09:50。
         val a = s("中医基础理论", "08:00", "09:40", startUnit = 1, endUnit = 2)
         val b = s("中医诊断学", "10:00", "11:40", startUnit = 3, endUnit = 4)
         val at = ClassReminder.remindAt(b, listOf(a, b), date)!!
-        assertEquals("09:40", hhmm(at))
+        assertEquals("09:50", hhmm(at))
+    }
+
+    @Test
+    fun `两档提前量可以自定义`() {
+        val morning = s("早八", "08:00", "09:40", startUnit = 1, endUnit = 2)
+        val next = s("第二节", "10:00", "11:40", startUnit = 3, endUnit = 4)
+        // 没课那档改 30 分钟
+        val at1 = ClassReminder.remindAt(morning, listOf(morning, next), date, leadFree = 30)!!
+        assertEquals("07:30", hhmm(at1))
+        // 课间那档改 15 分钟
+        val at2 = ClassReminder.remindAt(next, listOf(morning, next), date, leadBreak = 15)!!
+        assertEquals("09:45", hhmm(at2))
+    }
+
+    @Test
+    fun `leadFor 返回实际使用的那一档`() {
+        val morning = s("早八", "08:00", "09:40", startUnit = 1, endUnit = 2)
+        val next = s("第二节", "10:00", "11:40", startUnit = 3, endUnit = 4)
+        assertEquals(20, ClassReminder.leadFor(morning, listOf(morning, next), date))
+        assertEquals(10, ClassReminder.leadFor(next, listOf(morning, next), date))
+        assertEquals(25, ClassReminder.leadFor(morning, listOf(morning, next), date, leadFree = 25))
     }
 
     @Test

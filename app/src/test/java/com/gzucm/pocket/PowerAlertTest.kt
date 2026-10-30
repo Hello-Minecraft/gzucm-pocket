@@ -59,39 +59,48 @@ class PowerAlertTest {
         assertTrue(PowerAlert.shouldNotify(4f, fresh, null, today, now, threshold = 7f))
     }
 
-    // ── 静默同步频率 ─────────────────────────────────────────────
+    // ── 进电费页是否自动弹窗同步 ─────────────────────────────────
+
+    private val hour = 60 * 60_000L
 
     @Test
-    fun `从没同步过要跑`() {
-        assertTrue(PowerAlert.shouldSilentSync(null, 0L, today, now))
+    fun `从没同步过要自动弹`() {
+        assertTrue(PowerAlert.needsAutoSync(0L, 0L, now))
     }
 
     @Test
-    fun `今天成功过就不再跑`() {
-        assertFalse(PowerAlert.shouldSilentSync(today, now - 5 * 60_000L, today, now))
+    fun `十分钟前刚同步过不弹`() {
+        assertFalse(PowerAlert.needsAutoSync(now - 10 * 60_000L, 0L, now))
     }
 
     @Test
-    fun `昨天成功过今天要跑`() {
-        assertTrue(PowerAlert.shouldSilentSync("2026-10-27", 0L, today, now))
+    fun `超过两小时要弹`() {
+        assertTrue(PowerAlert.needsAutoSync(now - 3 * hour, 0L, now))
     }
 
     @Test
-    fun `刚失败过要等冷却`() {
-        // 5 分钟前试过且没成功 → 别连着打
-        val fiveMinAgo = now - 5 * 60_000L
-        assertFalse(PowerAlert.shouldSilentSync(null, fiveMinAgo, today, now))
+    fun `刚好两小时要弹`() {
+        assertTrue(PowerAlert.needsAutoSync(now - 2 * hour, 0L, now))
     }
 
     @Test
-    fun `冷却过后允许重试`() {
-        // 这是关键：失败不该锁死一整天，否则用户只能手动更新
-        val fortyMinAgo = now - 40 * 60_000L
-        assertTrue(PowerAlert.shouldSilentSync(null, fortyMinAgo, today, now))
+    fun `刚失败过先别弹 免得反复打断`() {
+        // 5 分钟前试过、上次成功是 3 小时前 → 冷却期内不弹
+        val attempted = now - 5 * 60_000L
+        assertFalse(PowerAlert.needsAutoSync(now - 3 * hour, attempted, now))
     }
 
     @Test
-    fun `今天成功过就无视冷却直接跳过`() {
-        assertFalse(PowerAlert.shouldSilentSync(today, 0L, today, now))
+    fun `冷却过后可以再弹`() {
+        val attempted = now - 30 * 60_000L
+        assertTrue(PowerAlert.needsAutoSync(now - 3 * hour, attempted, now))
+    }
+
+    @Test
+    fun `失败但已成功同步过就不受失败冷却影响`() {
+        // 上次尝试早于上次成功（说明之后成功过），照常按 staleness 判断
+        val checked = now - 3 * hour
+        val attempted = checked - 60_000L
+        assertTrue(PowerAlert.needsAutoSync(checked, attempted, now))
     }
 }

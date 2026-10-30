@@ -114,7 +114,7 @@ object Updater {
                 e is java.net.UnknownHostException -> "连不上 GitHub，检查网络或代理"
                 e is java.net.SocketTimeoutException -> "连接 GitHub 超时"
                 e is javax.net.ssl.SSLException -> "TLS 握手失败，可能被网络拦截"
-                else -> "检查失败：${e.javaClass.simpleName}"
+                else -> "检查失败，稍后再试"
             }
             Result.Failed(msg)
         }

@@ -60,6 +60,8 @@ fun TodayScreen(
     sessions: List<CourseSession>,
     power: PowerInfo?,
     powerDaily: List<PowerDaily>,
+    /** 电费上次成功同步的时间；0 表示从没成功过。首页据此提示数据新旧 */
+    powerCheckedAt: Long = 0L,
     onCourseClick: (CourseSession) -> Unit,
     onOpenPower: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -67,7 +69,16 @@ fun TodayScreen(
     syncing: Boolean,
     progressDone: Int = 0,
     progressTotal: Int = 0,
+    /** 有新版本时，设置按钮右上角显示小红点 */
+    hasUpdate: Boolean = false,
     notice: String? = null,
+    /**
+     * notice 里「去登录」的动作。
+     *
+     * 跟右上角设置按钮分开：那个只是打开设置，这个要额外把「重新登录」滚出来高亮。
+     * 默认回落到 [onOpenSettings]，老调用方不用改。
+     */
+    onOpenLogin: () -> Unit = onOpenSettings,
 ) {
     val today = LocalDate.now()
     // 每分钟走一次，用来判断「今天的课是不是已经上完了」
@@ -178,6 +189,17 @@ fun TodayScreen(
                     modifier = Modifier.size(17.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // 有新版本：右上角一颗小红点，白描边保证在深色主题也看得见
+                if (hasUpdate) {
+                    Box(
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 6.dp, end = 6.dp)
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.error),
+                    )
+                }
             }
         }
 
@@ -203,13 +225,18 @@ fun TodayScreen(
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickable(onClick = onOpenSettings).padding(start = 10.dp),
+                    modifier = Modifier.clickable(onClick = onOpenLogin).padding(start = 10.dp),
                 )
             }
             Spacer(Modifier.height(12.dp))
         }
 
-        PowerCard(power = power, daily = powerDaily, onClick = onOpenPower)
+        PowerCard(
+            power = power,
+            daily = powerDaily,
+            checkedAt = powerCheckedAt,
+            onClick = onOpenPower,
+        )
 
         Spacer(Modifier.height(18.dp))
 
@@ -564,7 +591,12 @@ private fun parseMinutes(hhmm: String): Int {
 }
 
 @Composable
-private fun PowerCard(power: PowerInfo?, daily: List<PowerDaily>, onClick: () -> Unit) {
+private fun PowerCard(
+    power: PowerInfo?,
+    daily: List<PowerDaily>,
+    checkedAt: Long,
+    onClick: () -> Unit,
+) {
     val scheme = MaterialTheme.colorScheme
     val accent = if (power == null) scheme.onSurfaceVariant else scheme.primary
     Box(
@@ -591,10 +623,22 @@ private fun PowerCard(power: PowerInfo?, daily: List<PowerDaily>, onClick: () ->
                     color = scheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.weight(1f))
+                // 电费只能进电费页同步（会话在 WebView 里），所以这里要说清数据有多旧，
+                // 否则用户会以为 12 小时前的余额是实时的
+                val staleText = run {
+                    if (power == null) return@run null
+                    val age = System.currentTimeMillis() - checkedAt
+                    if (checkedAt <= 0 || age < 12 * 60 * 60_000L) null
+                    else {
+                        val h = age / (60 * 60_000L)
+                        if (h < 1) "刚刚" else "${h}小时前 · 点此更新"
+                    }
+                }
                 Text(
-                    power?.roomLabel ?: "尚未同步",
+                    staleText ?: power?.roomLabel ?: "尚未同步",
                     fontSize = 10.5.sp,
-                    color = scheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    color = if (staleText != null) scheme.primary.copy(alpha = 0.85f)
+                    else scheme.onSurfaceVariant.copy(alpha = 0.7f),
                 )
             }
             Spacer(Modifier.height(8.dp))

@@ -37,8 +37,18 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // 主题色：先把上次选的读出来，再交给 GzucmTheme。
+        // ThemeState 是 Compose State，设置页改它就会整棵树重建配色。
+        runCatching {
+            com.gzucm.pocket.ui.theme.ThemeState.init(
+                com.gzucm.pocket.core.SessionStore(applicationContext).themeSeed
+            )
+        }
+
         setContent {
-            GzucmTheme {
+            GzucmTheme(
+                seed = com.gzucm.pocket.ui.theme.ThemeState.seed,
+            ) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     RootScreen()
                 }
