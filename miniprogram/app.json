@@ -1,0 +1,49 @@
+{
+  "pages": [
+    "pages/today/today",
+    "pages/schedule/schedule",
+    "pages/grades/grades",
+    "pages/login/login",
+    "pages/settings/settings",
+    "pages/detail/detail"
+  ],
+  "window": {
+    "navigationBarTitleText": "广中医口袋",
+    "navigationBarBackgroundColor": "#1B211D",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#121613",
+    "backgroundTextStyle": "dark",
+    "navigationStyle": "custom"
+  },
+  "tabBar": {
+    "color": "#6E7A72",
+    "selectedColor": "#8FA98F",
+    "backgroundColor": "#171D19",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/today/today",
+        "text": "今日",
+        "iconPath": "assets/tab-today.png",
+        "selectedIconPath": "assets/tab-today-on.png"
+      },
+      {
+        "pagePath": "pages/schedule/schedule",
+        "text": "课表",
+        "iconPath": "assets/tab-schedule.png",
+        "selectedIconPath": "assets/tab-schedule-on.png"
+      },
+      {
+        "pagePath": "pages/grades/grades",
+        "text": "成绩",
+        "iconPath": "assets/tab-grades.png",
+        "selectedIconPath": "assets/tab-grades-on.png"
+      }
+    ]
+  },
+  "permission": {},
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents",
+  "style": "v2",
+  "darkmode": false
+}

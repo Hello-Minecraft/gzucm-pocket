@@ -1,0 +1,8 @@
+{
+  "name": "jwproxy",
+  "version": "1.0.0",
+  "description": "教务接口转发（无状态、不落盘）",
+  "main": "index.js",
+  "dependencies": {},
+  "private": true
+}

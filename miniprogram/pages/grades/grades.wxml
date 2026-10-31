@@ -1,0 +1,167 @@
+<!--
+  成绩页。
+
+  三个 tab：课程 / 考级 / 体测。
+  「已修学分」卡片可以点开，展开学分构成 —— 这是 v1.3.0 的交互，
+  展开后还能切「总学分 / 公选」，公选按美育类等分类看进度。
+-->
+<view class="page">
+  <view class="safe-top pad">
+    <view class="head">
+      <view class="grow">
+        <view class="head-title">成绩</view>
+        <view class="head-sub" wx:if="{{grades.length}}">
+          {{grades.length}} 门 · {{terms.length}} 个学期
+        </view>
+      </view>
+      <view class="head-btn {{syncing ? 'head-btn-busy' : ''}}" bindtap="onSync">
+        {{syncing ? '同步中' : '同步'}}
+      </view>
+    </view>
+
+    <!-- tab -->
+    <view class="tabs">
+      <view
+        wx:for="{{tabs}}"
+        wx:key="key"
+        class="tab {{activeTab === index ? 'tab-on' : ''}}"
+        data-idx="{{index}}"
+        bindtap="onSwitchTab"
+      >{{item.label}}</view>
+    </view>
+  </view>
+
+  <!-- ═══════ 课程成绩 ═══════ -->
+  <block wx:if="{{activeTab === 0}}">
+    <block wx:if="{{grades.length}}">
+      <!-- 指标卡 -->
+      <view class="stats pad">
+        <view class="stat">
+          <view class="stat-label">加权绩点</view>
+          <view class="stat-value">{{gpa}}</view>
+        </view>
+        <view class="stat">
+          <view class="stat-label">平均分</view>
+          <view class="stat-value">{{avgScore}}</view>
+        </view>
+        <view
+          class="stat {{creditOpen ? 'stat-on' : ''}}"
+          bindtap="onToggleCredit"
+        >
+          <view class="stat-label">已修学分{{creditOpen ? ' ▴' : ' ▾'}}</view>
+          <view class="stat-value">{{passedCredit}}</view>
+        </view>
+      </view>
+
+      <!-- 学分构成（可收起） -->
+      <view wx:if="{{creditOpen}}" class="credit pad">
+        <view class="credit-head">
+          <view class="credit-title">{{publicOnly ? '公选学分' : '学分构成'}}</view>
+          <view class="credit-chips">
+            <view class="chip {{!publicOnly ? 'chip-on' : ''}}" data-pub="0" bindtap="onSwitchCreditScope">总学分</view>
+            <view class="chip {{publicOnly ? 'chip-on' : ''}}" data-pub="1" bindtap="onSwitchCreditScope">公选</view>
+          </view>
+        </view>
+
+        <view wx:if="{{publicOnly}}" class="credit-sub">
+          <text wx:if="{{creditCount}}">{{creditCount}} 门 · 合计 {{creditTotal}} 学分</text>
+          <text wx:else>还没有公共选修课成绩</text>
+        </view>
+
+        <view wx:for="{{creditRows}}" wx:key="label" class="credit-row">
+          <view class="credit-row-head">
+            <view class="credit-label ellipsis">{{item.label}}</view>
+            <view class="credit-num">{{item.creditText}}</view>
+          </view>
+          <credit-bar ratio="{{item.ratio}}" />
+        </view>
+
+        <!-- 公选视角才提示：各类要修多少看培养计划 -->
+        <view wx:if="{{publicOnly && creditCount}}" class="credit-note">
+          公选学分需求请自行查培养计划
+        </view>
+      </view>
+
+      <!-- 按学期列表 -->
+      <view class="pad">
+        <block wx:for="{{terms}}" wx:key="term" wx:for-item="t">
+          <view class="term-head">
+            <view class="term-name">{{t.term}}</view>
+            <view class="term-sub">{{t.count}} 门 · 绩点 {{t.gpa}}</view>
+          </view>
+          <view
+            wx:for="{{t.list}}"
+            wx:key="key"
+            wx:for-item="g"
+            class="grade-row"
+            bindtap="onTapGrade"
+            data-term="{{t.term}}"
+            data-name="{{g.name}}"
+          >
+            <view class="grow">
+              <view class="grade-name ellipsis">{{g.name}}</view>
+              <view class="grade-meta ellipsis">
+                <text wx:if="{{g.category}}">{{g.category}}</text>
+                <text wx:if="{{g.classify}}" class="grade-dot">·</text>
+                <text wx:if="{{g.classify}}">{{g.classify}}</text>
+                <text wx:if="{{g.creditText}}" class="grade-dot">·</text>
+                <text wx:if="{{g.creditText}}">{{g.creditText}} 学分</text>
+              </view>
+            </view>
+            <view class="grade-score {{g.fail ? 'grade-fail' : ''}}">{{g.scoreText}}</view>
+          </view>
+        </block>
+      </view>
+    </block>
+
+    <empty-state
+      wx:else
+      icon="📊"
+      text="{{needLogin ? '登录已过期' : (syncing ? '正在同步成绩…' : '还没有成绩')}}"
+      hint="{{needLogin ? '重新登录后就能看到' : (syncing ? '' : '点右上角「同步」拉一次')}}"
+      action="{{needLogin ? '去登录' : ''}}"
+      bind:action="onGoLogin"
+    />
+  </block>
+
+  <!-- ═══════ 考级成绩 ═══════ -->
+  <block wx:if="{{activeTab === 1}}">
+    <view class="pad" wx:if="{{levels.length}}">
+      <view wx:for="{{levels}}" wx:key="key" wx:for-item="lv" class="card level-card">
+        <view class="row-between">
+          <view class="lv-name">{{lv.name}}</view>
+          <view class="lv-total">{{lv.totalText}}</view>
+        </view>
+        <view class="lv-meta">{{lv.term}} · {{lv.date}}<text wx:if="{{lv.level}}"> · {{lv.level}}</text></view>
+        <view wx:if="{{lv.parts.length}}" class="lv-parts">
+          <view wx:for="{{lv.parts}}" wx:key="label" wx:for-item="p" class="lv-part">
+            <view class="lv-part-label">{{p.label}}</view>
+            <view class="lv-part-value">{{p.value}}</view>
+          </view>
+        </view>
+      </view>
+    </view>
+    <empty-state wx:else icon="🎓" text="还没有考级成绩" hint="四六级等成绩会出现在这里" />
+  </block>
+
+  <!-- ═══════ 体测成绩 ═══════ -->
+  <block wx:if="{{activeTab === 2}}">
+    <view class="pad" wx:if="{{fitness.length}}">
+      <view wx:for="{{fitness}}" wx:key="key" wx:for-item="ft" class="card fit-card">
+        <view class="row-between">
+          <view class="fit-term">{{ft.term}}</view>
+          <view class="fit-total">{{ft.total}}<text class="fit-level"> {{ft.level}}</text></view>
+        </view>
+        <view class="divider"></view>
+        <view wx:for="{{ft.items}}" wx:key="label" wx:for-item="it" class="fit-row">
+          <view class="fit-label">{{it.label}}</view>
+          <view class="fit-value">{{it.value}}</view>
+          <view class="fit-score">{{it.score}}</view>
+        </view>
+      </view>
+    </view>
+    <empty-state wx:else icon="🏃" text="还没有体测成绩" />
+  </block>
+
+  <view class="tail"></view>
+</view>

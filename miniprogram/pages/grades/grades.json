@@ -1,0 +1,7 @@
+{
+  "navigationStyle": "custom",
+  "usingComponents": {
+    "empty-state": "/components/empty-state/empty-state",
+    "credit-bar": "/components/credit-bar/credit-bar"
+  }
+}

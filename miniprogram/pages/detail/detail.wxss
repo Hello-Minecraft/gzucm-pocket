@@ -1,0 +1,183 @@
+.page {
+  min-height: 100vh;
+  padding-bottom: 40rpx;
+}
+
+.nav {
+  padding-top: 8rpx;
+  padding-bottom: 12rpx;
+}
+
+.nav-back {
+  display: inline-block;
+  padding: 10rpx 20rpx 10rpx 8rpx;
+  font-size: 27rpx;
+  color: var(--primary);
+}
+
+.nav-back:active {
+  opacity: 0.7;
+}
+
+/* ── 课程头 ───────────────────────────────────────────── */
+
+.course-head {
+  padding: 8rpx 0 8rpx 22rpx;
+  border-left: 6rpx solid var(--primary);
+  margin-bottom: 24rpx;
+}
+
+.course-name {
+  font-size: 40rpx;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -1rpx;
+}
+
+.course-tags {
+  margin-top: 12rpx;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8rpx;
+}
+
+.tag {
+  font-size: 20rpx;
+  padding: 5rpx 14rpx;
+  border-radius: 8rpx;
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+
+.tag-week {
+  background: rgba(143, 169, 143, 0.16);
+  color: var(--primary);
+}
+
+/* ── 键值对 ───────────────────────────────────────────── */
+
+.kv {
+  display: flex;
+  align-items: flex-start;
+  padding: 13rpx 0;
+}
+
+.kv + .kv {
+  border-top: 1rpx solid var(--line);
+}
+
+.k {
+  flex-shrink: 0;
+  width: 132rpx;
+  font-size: 24rpx;
+  color: var(--text-3);
+}
+
+.v {
+  flex: 1;
+  min-width: 0;
+  font-size: 26rpx;
+  line-height: 1.5;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.v-mute {
+  color: var(--text-3);
+}
+
+.v-small {
+  font-size: 22rpx;
+  color: var(--text-2);
+}
+
+/* ── 上课内容 ─────────────────────────────────────────── */
+
+.card-label {
+  font-size: 22rpx;
+  color: var(--text-3);
+  margin-bottom: 12rpx;
+}
+
+.content-text {
+  font-size: 26rpx;
+  line-height: 1.7;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ── 同一天的课 ───────────────────────────────────────── */
+
+.sib {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  padding: 16rpx 0;
+}
+
+.sib + .sib {
+  border-top: 1rpx solid var(--line);
+}
+
+.sib:active {
+  opacity: 0.7;
+}
+
+.sib-time {
+  flex-shrink: 0;
+  width: 76rpx;
+  font-size: 22rpx;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.sib-name {
+  font-size: 25rpx;
+}
+
+.sib-room {
+  flex-shrink: 0;
+  max-width: 200rpx;
+  font-size: 21rpx;
+  color: var(--text-3);
+  text-align: right;
+}
+
+/* ── 成绩 ─────────────────────────────────────────────── */
+
+.score-big {
+  font-size: 96rpx;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--primary);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -2rpx;
+}
+
+.score-fail {
+  color: var(--danger);
+}
+
+.score-sub {
+  margin-top: 6rpx;
+  font-size: 21rpx;
+  color: var(--text-3);
+  text-align: center;
+}
+
+.note {
+  margin-top: 20rpx;
+  padding: 20rpx 24rpx;
+  border-radius: 16rpx;
+  background: var(--surface);
+  border: 1rpx solid var(--line);
+  font-size: 21rpx;
+  line-height: 1.65;
+  color: var(--text-3);
+}
+
+.tail {
+  height: 24rpx;
+}

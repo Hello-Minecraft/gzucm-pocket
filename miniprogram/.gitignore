@@ -1,0 +1,11 @@
+# 编译产物
+tests/out/
+node_modules/
+
+# 测试临时文件
+tests/ref_hello.txt
+tests/shots/*.html
+
+# 开发者工具
+.workbuddy/
+project.private.config.json

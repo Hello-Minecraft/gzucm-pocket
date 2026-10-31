@@ -1,0 +1,123 @@
+<!--
+  课表页。
+
+  布局：左侧节次轴 + 右侧七列周视图。
+  横滑切周用 swiper，比手势判定稳，也不会和外层的页面滚动打架。
+-->
+<view class="page">
+  <!-- 顶部：状态栏留白 + 标题 + 操作 -->
+  <view class="safe-top">
+    <view class="head pad">
+      <view class="grow">
+        <view class="head-title">课表</view>
+        <view class="head-sub">
+          {{semester ? semester.name : '未同步'}}
+          <text wx:if="{{sessions.length}}" class="head-dot">·</text>
+          <text wx:if="{{sessions.length}} 第 {{viewWeek}} 周</text>
+        </view>
+      </view>
+      <view class="head-btn" bindtap="onToggleGrid">{{gridOn ? '网格开' : '网格'}}</view>
+      <view class="head-btn" bindtap="onOpenSettings">设置</view>
+    </view>
+  </view>
+
+  <!-- 周次条 -->
+  <scroll-view
+    wx:if="{{weeks.length}}"
+    class="week-strip"
+    scroll-x
+    scroll-with-animation
+    scroll-left="{{stripScroll}}"
+    enhanced
+    show-scrollbar="{{false}}"
+  >
+    <view class="week-row">
+      <view
+        wx:for="{{weeks}}"
+        wx:key="*this"
+        class="week-chip {{item === viewWeek ? 'week-on' : ''}} {{item === todayWeek ? 'week-today' : ''}}"
+        data-week="{{item}}"
+        bindtap="onPickWeek"
+      >
+        {{item}}
+      </view>
+    </view>
+  </scroll-view>
+
+  <!-- 星期表头 -->
+  <view class="day-head">
+    <view class="day-head-time"></view>
+    <view
+      wx:for="{{dayLabels}}"
+      wx:key="idx"
+      class="day-head-cell {{index + 1 === todayWeekday && viewWeek === todayWeek ? 'day-on' : ''}}"
+    >
+      <view class="day-head-name">{{item.label}}</view>
+      <view class="day-head-date">{{item.date}}</view>
+    </view>
+  </view>
+
+  <!-- 主网格 -->
+  <scroll-view wx:if="{{sessions.length}}" class="grid-wrap" scroll-y enhanced show-scrollbar="{{false}}">
+    <view class="grid" style="height: {{gridHeight}}rpx;">
+      <!-- 背景网格线 -->
+      <view wx:if="{{gridOn}}" class="grid-lines">
+        <view
+          wx:for="{{rows}}"
+          wx:key="unit"
+          class="grid-line"
+          style="top: {{index * rowH}}rpx; height: {{rowH}}rpx;"
+        ></view>
+        <view wx:for="{{colLines}}" wx:key="*this" class="grid-col-line" style="left: {{item}}%;"></view>
+      </view>
+
+      <!-- 节次轴 -->
+      <view class="time-col">
+        <view wx:for="{{rows}}" wx:key="unit" class="time-cell" style="height: {{rowH}}rpx;">
+          <view class="time-unit">{{item.unit}}</view>
+          <view class="time-start">{{item.start}}</view>
+        </view>
+      </view>
+
+      <!-- 课程 -->
+      <view class="course-area">
+        <block wx:for="{{placed}}" wx:key="key">
+          <course-card
+            item="{{item.session}}"
+            left="{{item.left}}"
+            width="{{item.width}}"
+            top="{{item.top}}"
+            height="{{item.height}}"
+            span="{{item.span}}"
+            col="{{item.col}}"
+            cols="{{item.cols}}"
+            selected="{{item.key === selectedKey}}"
+            dark="{{true}}"
+            bind:tap="onTapCourse"
+          />
+        </block>
+      </view>
+    </view>
+  </scroll-view>
+
+  <!-- 空态 -->
+  <empty-state
+    wx:if="{{!sessions.length}}"
+    icon="📅"
+    text="{{syncing ? '正在同步课表…' : '还没有课表'}}"
+    hint="{{syncing ? progressLabel : '点下面的按钮同步一次'}}"
+  />
+
+  <!-- 同步按钮（空态时浮在底部） -->
+  <view wx:if="{{!sessions.length && !syncing}}" class="sync-fab" bindtap="onSync">
+    同步课表
+  </view>
+
+  <!-- 同步中：底部进度条 -->
+  <view wx:if="{{syncing}}" class="sync-bar">
+    <view class="progress">
+      <view class="progress-bar" style="width: {{progressPct}}%;"></view>
+    </view>
+    <view class="sync-label">{{progressLabel || '正在同步…'}}</view>
+  </view>
+</view>

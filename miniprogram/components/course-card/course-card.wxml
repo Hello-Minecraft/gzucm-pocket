@@ -1,0 +1,40 @@
+<!--
+  课程卡片。
+
+  信息密度按高度分级，和 Android 版同一套规则：
+    · 占 1 节：只放课名（塞不下教室）
+    · 占 2 节：课名 + 教室 + 教师（教师 1 行）
+    · 占 3 节以上：课名 + 教室 + 教师（教师 2 行）
+  规则来自 Android 的一个 bug：教师原本限定 span>=3，
+  结果上午的课全是两节连上，一片没老师，看着像数据丢了。
+-->
+<view
+  class="blk {{selected ? 'blk-sel' : ''}}"
+  style="
+    left: {{left}}%;
+    width: {{width}}%;
+    top: {{top}}rpx;
+    height: {{height}}rpx;
+    background: {{bg}};
+    border-color: {{border}};
+    color: {{textColor}};
+  "
+  bindtap="onTap"
+>
+  <view class="blk-name {{span <= 1 ? 'name-1' : ''}}">{{item.name}}</view>
+
+  <block wx:if="{{span >= 2}}">
+    <view class="blk-room">{{item.room || '地点待定'}}</view>
+  </block>
+
+  <block wx:if="{{span >= 2 && item.teachers}}">
+    <view class="blk-teacher {{span >= 3 ? '' : 'teacher-1'}}">{{item.teachers}}</view>
+  </block>
+
+  <block wx:if="{{span >= 4 && item.content}}">
+    <view class="blk-content">{{item.content}}</view>
+  </block>
+
+  <!-- 重叠时右上角标个数字，一眼知道这块底下还压着几门 -->
+  <view wx:if="{{cols > 1}}" class="blk-badge">{{col + 1}}/{{cols}}</view>
+</view>

@@ -1,0 +1,295 @@
+.page {
+  min-height: 100vh;
+  padding-bottom: 40rpx;
+}
+
+/* ── 顶部 ─────────────────────────────────────────────── */
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  padding: 12rpx 0 24rpx;
+}
+
+.head-title {
+  font-size: 40rpx;
+  font-weight: 600;
+  letter-spacing: -1rpx;
+}
+
+.head-sub {
+  margin-top: 6rpx;
+  font-size: 23rpx;
+  color: var(--text-3);
+}
+
+.head-btn {
+  padding: 10rpx 22rpx;
+  border-radius: 12rpx;
+  font-size: 23rpx;
+  color: var(--text-2);
+  background: var(--surface-2);
+}
+
+/* ── 焦点卡（正在上 / 下一节）──────────────────────────── */
+
+.focus {
+  position: relative;
+  border-radius: 24rpx;
+  padding: 28rpx 30rpx;
+  background: linear-gradient(155deg, rgba(143, 169, 143, 0.18), var(--surface) 68%);
+  /* 0.16 的边框在深底上几乎看不见，抬到 0.3 才有"这是一张卡"的边界感 */
+  border: 1rpx solid rgba(143, 169, 143, 0.3);
+  overflow: hidden;
+}
+
+/* 正在上课时左边加一条竖色条，一眼能区分 */
+.focus-live {
+  border-color: rgba(143, 169, 143, 0.42);
+}
+
+.focus-live::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6rpx;
+  background: var(--primary);
+}
+
+.focus-tag {
+  display: inline-block;
+  font-size: 20rpx;
+  padding: 5rpx 14rpx;
+  border-radius: 8rpx;
+  background: rgba(143, 169, 143, 0.18);
+  color: var(--primary);
+  margin-bottom: 14rpx;
+}
+
+.focus-name {
+  font-size: 36rpx;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.5rpx;
+}
+
+.focus-meta {
+  margin-top: 12rpx;
+  font-size: 24rpx;
+  color: var(--text-2);
+}
+
+.focus-sep {
+  margin: 0 10rpx;
+  opacity: 0.45;
+}
+
+.focus-teacher {
+  margin-top: 6rpx;
+  font-size: 22rpx;
+  color: var(--text-3);
+  line-height: 1.4;
+}
+
+.focus-content {
+  margin-top: 12rpx;
+  font-size: 23rpx;
+  color: var(--text-2);
+  line-height: 1.5;
+  padding-top: 12rpx;
+  border-top: 1rpx solid var(--line);
+}
+
+.focus-count {
+  margin-top: 14rpx;
+  font-size: 22rpx;
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* ── 区块 ─────────────────────────────────────────────── */
+
+.sec {
+  margin-top: 32rpx;
+}
+
+.sec-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 14rpx;
+  padding: 0 4rpx;
+}
+
+.sec-title {
+  font-size: 28rpx;
+  font-weight: 600;
+}
+
+.sec-sub {
+  font-size: 22rpx;
+  color: var(--text-3);
+}
+
+/* ── 课程行 ───────────────────────────────────────────── */
+
+.course-row {
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  padding: 20rpx 22rpx 20rpx 30rpx;
+  border-radius: 18rpx;
+  background: var(--surface);
+  margin-bottom: 10rpx;
+}
+
+.course-row:active {
+  opacity: 0.8;
+}
+
+/*
+ * 上过的课压暗。
+ * 0.48 太狠了 —— 截图里几乎看不清课名，但用户还需要回看"今天上过什么"。
+ * 只降到 0.62，配合下面把课名单独再降一点，层次有了也读得清。
+ */
+.course-past {
+  opacity: 0.62;
+}
+
+.course-past .course-name {
+  color: var(--text-2);
+}
+
+.course-live {
+  border: 1rpx solid rgba(143, 169, 143, 0.4);
+}
+
+.course-time {
+  flex-shrink: 0;
+  width: 82rpx;
+  text-align: right;
+}
+
+.course-time-start {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.course-time-end {
+  margin-top: 2rpx;
+  font-size: 19rpx;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 左侧色条，颜色跟课表里的课程色一致 */
+/*
+ * 左侧色条用伪元素画，不用独立的 view。
+ *
+ * 独立 view 在 flex 里被压成 0 宽（截图里就完全看不见），
+ * 而且颜色要走内联 style 传，多一层出错的机会。
+ * 伪元素跟着行高走，天然不会塌。
+ */
+.course-row {
+  position: relative;
+}
+
+.course-row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 16rpx;
+  bottom: 16rpx;
+  /* 5rpx 在 390px 屏上只有 2.6px，肉眼几乎看不见，加粗到 8rpx */
+  width: 8rpx;
+  border-radius: 0 4rpx 4rpx 0;
+  background: var(--primary);
+}
+
+/* 上过/正在上的行，色条淡一点 —— 但别淡到看不出是根线 */
+.course-past::before {
+  opacity: 0.7;
+}
+
+.course-name {
+  font-size: 28rpx;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.course-meta {
+  margin-top: 4rpx;
+  font-size: 21rpx;
+  color: var(--text-3);
+}
+
+.course-sep {
+  margin: 0 8rpx;
+  opacity: 0.5;
+}
+
+.course-dot {
+  flex-shrink: 0;
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 6rpx;
+  background: var(--primary);
+}
+
+/* ── 统计 ─────────────────────────────────────────────── */
+
+.stats {
+  display: flex;
+  gap: 12rpx;
+}
+
+.stat {
+  flex: 1;
+  padding: 24rpx 0;
+  border-radius: 18rpx;
+  background: var(--surface);
+  text-align: center;
+}
+
+.stat-value {
+  font-size: 38rpx;
+  font-weight: 600;
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-label {
+  margin-top: 4rpx;
+  font-size: 21rpx;
+  color: var(--text-3);
+}
+
+/* ── 说明块 ───────────────────────────────────────────── */
+
+.note {
+  padding: 24rpx 26rpx;
+  border-radius: 18rpx;
+  background: var(--surface);
+  border: 1rpx solid var(--line);
+}
+
+.note-title {
+  font-size: 25rpx;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.note-body {
+  margin-top: 10rpx;
+  font-size: 22rpx;
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+.tail {
+  height: 24rpx;
+}

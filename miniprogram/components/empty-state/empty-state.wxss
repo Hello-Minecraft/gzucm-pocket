@@ -1,0 +1,38 @@
+.empty {
+  padding: 140rpx 48rpx;
+  text-align: center;
+}
+
+.empty-icon {
+  font-size: 76rpx;
+  opacity: 0.3;
+  margin-bottom: 24rpx;
+  line-height: 1;
+}
+
+.empty-text {
+  font-size: 30rpx;
+  color: var(--text-2);
+}
+
+.empty-hint {
+  margin-top: 14rpx;
+  font-size: 24rpx;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+.empty-btn {
+  display: inline-block;
+  margin-top: 36rpx;
+  padding: 18rpx 48rpx;
+  border-radius: 32rpx;
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 26rpx;
+  font-weight: 600;
+}
+
+.empty-btn:active {
+  opacity: 0.8;
+}

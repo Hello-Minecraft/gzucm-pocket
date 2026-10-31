@@ -1,0 +1,88 @@
+/* 课程块。定位由父级用百分比 + rpx 算好，这里只管样子 */
+.blk {
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: 8rpx;
+  border: 1rpx solid transparent;
+  padding: 7rpx 8rpx;
+  /* 必须 hidden：块高是按节数算死的，内容超了要截断而不是顶出去 */
+  overflow: hidden;
+  transition: opacity 0.16s ease;
+}
+
+.blk-sel {
+  opacity: 1;
+  box-shadow: 0 0 0 2rpx rgba(255, 255, 255, 0.5);
+}
+
+/* 课名 */
+.blk-name {
+  font-size: 22rpx;
+  line-height: 1.26;
+  font-weight: 600;
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  overflow: hidden;
+}
+
+/* 只占一节时字要小一点、行数少一点 */
+.name-1 {
+  font-size: 20rpx;
+  -webkit-line-clamp: 2;
+}
+
+/* 教室 */
+.blk-room {
+  margin-top: 4rpx;
+  font-size: 19rpx;
+  line-height: 1.25;
+  opacity: 0.86;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+/* 教师 */
+.blk-teacher {
+  margin-top: 3rpx;
+  font-size: 18rpx;
+  line-height: 1.22;
+  opacity: 0.62;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+/* 两节的块只给教师一行，宁可省略也别把上面挤变形 */
+.teacher-1 {
+  -webkit-line-clamp: 1;
+}
+
+/* 上课内容（只有按周抓到的才有） */
+.blk-content {
+  margin-top: 3rpx;
+  font-size: 17rpx;
+  line-height: 1.22;
+  opacity: 0.5;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+/* 并排时的序号角标 */
+.blk-badge {
+  position: absolute;
+  right: 4rpx;
+  top: 4rpx;
+  font-size: 16rpx;
+  line-height: 1;
+  padding: 3rpx 5rpx;
+  border-radius: 4rpx;
+  background: rgba(0, 0, 0, 0.35);
+  color: rgba(255, 255, 255, 0.8);
+}

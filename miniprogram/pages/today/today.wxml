@@ -1,0 +1,121 @@
+<!--
+  今日页。
+
+  信息优先级（从上到下）：
+    ① 现在/下一节课 —— 学生打开 App 十有八九是为了这个
+    ② 今天剩下的课
+    ③ 本周概览
+    ④ 电费（明确标注暂不支持，给个说明而不是空白）
+
+  故意不在小程序里做电费：它不是"暂缓"，是**技术上拿不到**。
+  一卡通没有 JSON 接口，Android 版是靠在 WebView 里注入 JS 抓页面，
+  小程序没有 WebView。与其放个点了没用的入口，不如说清楚。
+-->
+<view class="page pad safe-top">
+  <!-- 标题 -->
+  <view class="head">
+    <view class="grow">
+      <view class="head-title">{{greeting}}</view>
+      <view class="head-sub">{{dateText}}<text wx:if="{{weekText}}"> · {{weekText}}</text></view>
+    </view>
+    <view class="head-btn" bindtap="onOpenSettings">设置</view>
+  </view>
+
+  <!-- 正在上 / 下一节课 -->
+  <block wx:if="{{focus}}">
+    <view class="focus {{focus.live ? 'focus-live' : ''}}">
+      <view class="focus-tag">{{focus.live ? '正在上课' : '下一节'}}</view>
+      <view class="focus-name">{{focus.session.name}}</view>
+      <view class="focus-meta">
+        <text>{{focus.session.startTime}}–{{focus.session.endTime}}</text>
+        <text class="focus-sep">·</text>
+        <text>{{focus.session.room || '地点待定'}}</text>
+      </view>
+      <view wx:if="{{focus.session.teachers}}" class="focus-teacher">
+        {{focus.session.teachers}}
+      </view>
+      <view wx:if="{{focus.session.content}}" class="focus-content">
+        {{focus.session.content}}
+      </view>
+      <!-- 还有多久 -->
+      <view wx:if="{{focus.countdown}}" class="focus-count">{{focus.countdown}}</view>
+    </view>
+  </block>
+
+  <!-- 今日课程列表 -->
+  <view class="sec">
+    <view class="sec-head">
+      <view class="sec-title">今天的课</view>
+      <view class="sec-sub">{{todayList.length}} 节</view>
+    </view>
+
+    <block wx:if="{{todayList.length}}">
+      <view
+        wx:for="{{todayList}}"
+        wx:key="key"
+        class="course-row {{item.past ? 'course-past' : ''}} {{item.live ? 'course-live' : ''}}"
+        data-idx="{{index}}"
+        bindtap="onTapCourse"
+      >
+        <view class="course-time">
+          <view class="course-time-start">{{item.session.startTime}}</view>
+          <view class="course-time-end">{{item.session.endTime}}</view>
+        </view>
+        <view class="grow">
+          <view class="course-name ellipsis">{{item.session.name}}</view>
+          <view class="course-meta ellipsis">
+            {{item.session.room || '地点待定'}}
+            <text wx:if="{{item.session.teachers}}" class="course-sep">·</text>
+            <text wx:if="{{item.session.teachers}}">{{item.session.teachers}}</text>
+          </view>
+        </view>
+        <view wx:if="{{item.live}}" class="course-dot"></view>
+      </view>
+    </block>
+
+    <empty-state
+      wx:else
+      icon="🌤"
+      text="{{loading ? '正在读取…' : '今天没有课'}}"
+      hint="{{loading ? '' : '好好休息'}}"
+    />
+  </view>
+
+  <!-- 本周概览 -->
+  <view wx:if="{{weekStats}}" class="sec">
+    <view class="sec-head">
+      <view class="sec-title">本周概览</view>
+    </view>
+    <view class="stats">
+      <view class="stat">
+        <view class="stat-value">{{weekStats.courses}}</view>
+        <view class="stat-label">门课</view>
+      </view>
+      <view class="stat">
+        <view class="stat-value">{{weekStats.sections}}</view>
+        <view class="stat-label">节课</view>
+      </view>
+      <view class="stat">
+        <view class="stat-value">{{todayList.length}}</view>
+        <view class="stat-label">今天</view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 电费：说明为什么没有 -->
+  <view class="sec">
+    <view class="sec-head">
+      <view class="sec-title">宿舍电量</view>
+    </view>
+    <view class="note">
+      <view class="note-title">小程序里暂时看不了电费</view>
+      <view class="note-body">
+        一卡通只提供网页，没有可以直接读的数据接口，
+        而小程序不能像 App 那样嵌网页去抓。
+        要看电费请用安卓版。
+      </view>
+    </view>
+  </view>
+
+  <view class="tail"></view>
+</view>

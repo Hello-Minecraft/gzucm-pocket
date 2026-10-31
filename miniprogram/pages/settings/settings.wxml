@@ -1,0 +1,167 @@
+<!--
+  设置页。
+
+  分组顺序按「改得多 → 改得少」排：
+  课表设置最常动，网络通道几乎不动，关于放最后。
+
+  「网络」那一组是这版特有的：小程序能不能跑起来，全看请求走哪条通道。
+-->
+<view class="page">
+  <view class="safe-top"></view>
+
+  <view class="nav pad">
+    <view class="nav-back" bindtap="onBack">‹ 返回</view>
+  </view>
+
+  <view class="pad">
+    <view class="head">
+      <view class="head-title">设置</view>
+      <view class="head-sub">{{loggedIn ? '已登录' : '未登录'}}</view>
+    </view>
+
+    <!-- ═══════ 课表 ═══════ -->
+    <view class="group-label">课表</view>
+    <view class="card">
+      <view class="row">
+        <view class="grow">
+          <view class="row-label">默认启动页</view>
+          <view class="row-desc">打开小程序先看哪一页</view>
+        </view>
+        <view class="chips">
+          <view
+            wx:for="{{tabOptions}}"
+            wx:key="value"
+            class="chip {{startTab === index ? 'chip-on' : ''}}"
+            data-idx="{{index}}"
+            bindtap="onPickStartTab"
+          >{{item}}</view>
+        </view>
+      </view>
+
+      <view class="row">
+        <view class="grow">
+          <view class="row-label">重叠课程</view>
+          <view class="row-desc">同一时段两门课时，并排显示还是只显示一门</view>
+        </view>
+        <switch checked="{{overlapMode}}" color="#8FA98F" bindchange="onToggleOverlap" />
+      </view>
+
+      <view class="row">
+        <view class="grow">
+          <view class="row-label">课表网格线</view>
+          <view class="row-desc">用虚线标出每一节和每一天</view>
+        </view>
+        <switch checked="{{gridLines}}" color="#8FA98F" bindchange="onToggleGrid" />
+      </view>
+    </view>
+
+    <!-- ═══════ 背景 ═══════ -->
+    <view class="group-label">课表背景</view>
+    <view class="card">
+      <view class="row">
+        <view class="grow">
+          <view class="row-label">背景图</view>
+          <view class="row-desc">{{bgPath ? '已设置' : '还没选图'}}</view>
+        </view>
+        <view class="btn btn-ghost" bindtap="onPickBg">选择</view>
+        <view wx:if="{{bgPath}}" class="btn btn-ghost btn-danger" bindtap="onClearBg">清除</view>
+      </view>
+
+      <view class="row row-slider">
+        <view class="grow">
+          <view class="row-label">透明度</view>
+          <view class="row-desc">{{bgAlphaPct}}%</view>
+        </view>
+        <slider
+          class="slider"
+          min="0"
+          max="60"
+          value="{{bgAlphaPct}}"
+          activeColor="#8FA98F"
+          backgroundColor="#333C36"
+          block-size="20"
+          bindchanging="onAlphaChanging"
+          bindchange="onAlphaChange"
+        />
+      </view>
+    </view>
+
+    <!-- ═══════ 数据 ═══════ -->
+    <view class="group-label">数据</view>
+    <view class="card">
+      <view class="row">
+        <view class="grow">
+          <view class="row-label">课表</view>
+          <view class="row-desc">{{sessionsCount}} 节课 · {{syncAtText}}</view>
+        </view>
+        <view class="btn btn-ghost" bindtap="onSyncSchedule">同步</view>
+      </view>
+
+      <view class="row">
+        <view class="grow">
+          <view class="row-label">成绩</view>
+          <view class="row-desc">{{gradesCount}} 门 · {{gradesAtText}}</view>
+        </view>
+        <view class="btn btn-ghost" bindtap="onSyncGrades">同步</view>
+      </view>
+
+      <view class="row">
+        <view class="grow">
+          <view class="row-label">本地占用</view>
+          <view class="row-desc">只存课表和成绩，不存账号密码</view>
+        </view>
+        <view class="row-value">{{usageText}}</view>
+      </view>
+
+      <view class="row" bindtap="onClearData">
+        <view class="grow">
+          <view class="row-label row-label-danger">清除本地数据</view>
+          <view class="row-desc">清掉课表和成绩缓存，设置保留</view>
+        </view>
+      </view>
+    </view>
+
+    <!-- ═══════ 网络 ═══════ -->
+    <view class="group-label">网络</view>
+    <view class="card">
+      <view class="row">
+        <view class="grow">
+          <view class="row-label">请求通道</view>
+          <view class="row-desc">{{isProxy ? '云函数转发（正式环境）' : '直连（仅开发调试可用）'}}</view>
+        </view>
+        <switch checked="{{!isProxy}}" color="#C9A86D" bindchange="onToggleProxy" />
+      </view>
+      <view class="note">
+        正式环境必须走云函数转发 —— 学校的域名加不进小程序的请求白名单。
+        直连只在开发者工具里勾选「不校验合法域名」时可用。
+      </view>
+    </view>
+
+    <!-- ═══════ 关于 ═══════ -->
+    <view class="group-label">关于</view>
+    <view class="card">
+      <view class="row">
+        <view class="grow">
+          <view class="row-label">广中医口袋 · 小程序版</view>
+          <view class="row-desc">版本 1.3.0</view>
+        </view>
+      </view>
+      <view class="row">
+        <view class="grow">
+          <view class="row-desc about-body">
+            个人做的工具，不收费、无广告、不收集账号信息。
+            登录凭据只在你手机的本地存储里，请求时随请求带走，用完即弃。
+          </view>
+        </view>
+      </view>
+      <view class="row" bindtap="onLogout">
+        <view class="grow">
+          <view class="row-label row-label-danger">退出登录</view>
+          <view class="row-desc">清掉会话和所有缓存</view>
+        </view>
+      </view>
+    </view>
+
+    <view class="tail"></view>
+  </view>
+</view>

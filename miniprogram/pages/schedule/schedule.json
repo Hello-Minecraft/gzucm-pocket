@@ -1,0 +1,8 @@
+{
+  "navigationStyle": "custom",
+  "usingComponents": {
+    "course-card": "/components/course-card/course-card",
+    "empty-state": "/components/empty-state/empty-state"
+  },
+  "disableScroll": false
+}

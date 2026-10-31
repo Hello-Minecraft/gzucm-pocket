@@ -1,0 +1,241 @@
+.page {
+  min-height: 100vh;
+  background: radial-gradient(circle at 50% 0%, rgba(143, 169, 143, 0.1), transparent 60%),
+    var(--bg);
+}
+
+.wrap {
+  padding: 0 56rpx 60rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* ── 品牌区 ───────────────────────────────────────────── */
+
+.brand {
+  padding-top: 60rpx;
+  padding-bottom: 48rpx;
+  text-align: center;
+}
+
+.brand-mark {
+  width: 96rpx;
+  height: 96rpx;
+  line-height: 96rpx;
+  margin: 0 auto 22rpx;
+  border-radius: 26rpx;
+  background: linear-gradient(150deg, #43554A, #2C3A31);
+  color: #C7D2CA;
+  font-size: 46rpx;
+  font-weight: 600;
+  text-align: center;
+}
+
+.brand-name {
+  font-size: 42rpx;
+  font-weight: 600;
+  letter-spacing: -1rpx;
+}
+
+.brand-sub {
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  color: var(--text-3);
+}
+
+/* ── 二维码 ───────────────────────────────────────────── */
+
+.qr-box {
+  position: relative;
+  width: 480rpx;
+  height: 480rpx;
+  border-radius: 28rpx;
+  background: #ffffff;
+  padding: 24rpx;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.qr-canvas {
+  width: 100%;
+  height: 100%;
+  transition: filter 0.2s ease;
+}
+
+/* 已扫码：把码糊掉，避免重复扫 */
+.qr-blur {
+  filter: blur(10rpx);
+  opacity: 0.5;
+}
+
+.qr-loading {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  text-align: center;
+  font-size: 24rpx;
+  color: #8a8a8a;
+}
+
+.qr-fail {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  text-align: center;
+}
+
+.qr-fail-icon {
+  font-size: 62rpx;
+  opacity: 0.35;
+}
+
+.qr-fail-text {
+  margin-top: 14rpx;
+  font-size: 24rpx;
+  color: #666;
+  padding: 0 30rpx;
+}
+
+/* 已扫码覆盖层 */
+.qr-cover {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.qr-cover-icon {
+  width: 88rpx;
+  height: 88rpx;
+  line-height: 88rpx;
+  border-radius: 44rpx;
+  background: #2C7A3F;
+  color: #fff;
+  font-size: 46rpx;
+  text-align: center;
+}
+
+.qr-cover-text {
+  margin-top: 20rpx;
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.qr-cover-who {
+  margin-top: 8rpx;
+  font-size: 23rpx;
+  color: #555;
+}
+
+.qr-cover-hint {
+  margin-top: 18rpx;
+  font-size: 21rpx;
+  color: #777;
+  text-align: center;
+  padding: 0 40rpx;
+}
+
+/* ── 步骤 ─────────────────────────────────────────────── */
+
+.steps {
+  width: 100%;
+  margin-top: 44rpx;
+}
+
+.step {
+  display: flex;
+  align-items: flex-start;
+  gap: 16rpx;
+  margin-bottom: 18rpx;
+}
+
+.step-num {
+  flex-shrink: 0;
+  width: 34rpx;
+  height: 34rpx;
+  line-height: 34rpx;
+  border-radius: 17rpx;
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: 20rpx;
+  text-align: center;
+}
+
+.step-done .step-num {
+  background: rgba(143, 169, 143, 0.3);
+  color: var(--primary);
+}
+
+.step-text {
+  font-size: 24rpx;
+  color: var(--text-2);
+  line-height: 1.5;
+  padding-top: 2rpx;
+}
+
+.em {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* ── 提示 ─────────────────────────────────────────────── */
+
+.tips {
+  width: 100%;
+  margin-top: 24rpx;
+  padding: 22rpx 24rpx;
+  border-radius: 16rpx;
+  background: var(--surface);
+  border: 1rpx solid var(--line);
+}
+
+.tips-warn {
+  border-color: rgba(143, 169, 143, 0.22);
+  background: rgba(143, 169, 143, 0.06);
+}
+
+.tips-title {
+  font-size: 23rpx;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.tips-body {
+  margin-top: 8rpx;
+  font-size: 21rpx;
+  line-height: 1.65;
+  color: var(--text-3);
+}
+
+/* ── 操作 ─────────────────────────────────────────────── */
+
+.actions {
+  width: 100%;
+  margin-top: 40rpx;
+}
+
+.actions .btn {
+  width: 100%;
+  height: 84rpx;
+  border-radius: 18rpx;
+  font-size: 28rpx;
+}
+
+.foot {
+  margin-top: 44rpx;
+  font-size: 20rpx;
+  color: var(--text-3);
+  opacity: 0.6;
+}

@@ -1,0 +1,252 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── 顶部 ─────────────────────────────────────────────── */
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  padding-top: 12rpx;
+  padding-bottom: 14rpx;
+}
+
+.head-title {
+  font-size: 40rpx;
+  font-weight: 600;
+  letter-spacing: -1rpx;
+}
+
+.head-sub {
+  margin-top: 4rpx;
+  font-size: 22rpx;
+  color: var(--text-3);
+}
+
+.head-dot {
+  margin: 0 8rpx;
+}
+
+.head-btn {
+  padding: 10rpx 20rpx;
+  border-radius: 12rpx;
+  font-size: 22rpx;
+  color: var(--text-2);
+  background: var(--surface-2);
+}
+
+.head-btn:active {
+  opacity: 0.7;
+}
+
+/* ── 周次条 ───────────────────────────────────────────── */
+
+.week-strip {
+  flex-shrink: 0;
+  width: 100%;
+  white-space: nowrap;
+}
+
+.week-row {
+  display: inline-flex;
+  padding: 0 24rpx 12rpx;
+  gap: 10rpx;
+}
+
+.week-chip {
+  flex-shrink: 0;
+  width: 60rpx;
+  height: 60rpx;
+  line-height: 60rpx;
+  text-align: center;
+  border-radius: 14rpx;
+  font-size: 24rpx;
+  color: var(--text-2);
+  background: var(--surface);
+  position: relative;
+}
+
+.week-chip:active {
+  opacity: 0.75;
+}
+
+.week-on {
+  background: var(--primary);
+  color: var(--on-primary);
+  font-weight: 600;
+}
+
+/* 本周没选中时给个小圆点 */
+.week-today::after {
+  content: '';
+  position: absolute;
+  bottom: 6rpx;
+  left: 50%;
+  margin-left: -3rpx;
+  width: 6rpx;
+  height: 6rpx;
+  border-radius: 3rpx;
+  background: var(--primary);
+}
+
+.week-today.week-on::after {
+  background: var(--on-primary);
+}
+
+/* ── 星期表头 ─────────────────────────────────────────── */
+
+.day-head {
+  flex-shrink: 0;
+  display: flex;
+  padding-right: 12rpx;
+  border-bottom: 1rpx solid var(--line);
+}
+
+.day-head-time {
+  width: 76rpx;
+  flex-shrink: 0;
+}
+
+.day-head-cell {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  padding: 8rpx 0 10rpx;
+}
+
+.day-head-name {
+  font-size: 22rpx;
+  color: var(--text-2);
+}
+
+.day-head-date {
+  margin-top: 2rpx;
+  font-size: 18rpx;
+  color: var(--text-3);
+}
+
+.day-on .day-head-name {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.day-on .day-head-date {
+  color: var(--primary-dim);
+}
+
+/* ── 网格 ─────────────────────────────────────────────── */
+
+.grid-wrap {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.grid {
+  position: relative;
+  display: flex;
+  padding-right: 12rpx;
+}
+
+/* 背景网格线。画在课程块**下面**会被半透明卡片盖住，所以 z-index 抬高一层，
+   但 pointer-events 关掉，不挡点击 —— Android 版最初画在下面就看不见 */
+.grid-lines {
+  position: absolute;
+  left: 76rpx;
+  right: 12rpx;
+  top: 0;
+  bottom: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.grid-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-bottom: 1rpx dashed rgba(168, 180, 171, 0.22);
+}
+
+.grid-col-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1rpx;
+  background: rgba(168, 180, 171, 0.16);
+}
+
+/* ── 节次轴 ───────────────────────────────────────────── */
+
+.time-col {
+  width: 76rpx;
+  flex-shrink: 0;
+}
+
+.time-cell {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: 4rpx;
+}
+
+.time-unit {
+  font-size: 20rpx;
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+.time-start {
+  margin-top: 2rpx;
+  font-size: 16rpx;
+  color: var(--text-3);
+}
+
+/* ── 课程区 ───────────────────────────────────────────── */
+
+.course-area {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── 同步 ─────────────────────────────────────────────── */
+
+.sync-fab {
+  position: absolute;
+  left: 50%;
+  bottom: calc(48rpx + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  padding: 20rpx 52rpx;
+  border-radius: 40rpx;
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 28rpx;
+  font-weight: 600;
+}
+
+.sync-fab:active {
+  opacity: 0.8;
+}
+
+.sync-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 20rpx 32rpx calc(20rpx + env(safe-area-inset-bottom));
+  background: var(--surface);
+  border-top: 1rpx solid var(--line);
+}
+
+.sync-label {
+  margin-top: 12rpx;
+  font-size: 22rpx;
+  color: var(--text-3);
+  text-align: center;
+}

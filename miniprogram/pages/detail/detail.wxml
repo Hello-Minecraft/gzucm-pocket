@@ -1,0 +1,129 @@
+<!--
+  详情页。两种模式：
+    · 课程详情（默认）
+    · 成绩详情（?type=grade）
+
+  课程详情要显示的信息，来自教务返回的 40 个字段里挑出的最有用的那些：
+  课名、教师、时间、地点、上课内容、教学环节、教学模式、教学班、学时。
+-->
+<view class="page">
+  <view class="safe-top"></view>
+
+  <!-- 顶部返回 -->
+  <view class="nav pad">
+    <view class="nav-back" bindtap="onBack">‹ 返回</view>
+  </view>
+
+  <!-- ═══════ 课程详情 ═══════ -->
+  <block wx:if="{{!isGrade && course}}">
+    <view class="pad">
+      <!-- 课程头 -->
+      <view class="course-head" style="border-left-color: {{color}};">
+        <view class="course-name">{{course.name}}</view>
+        <view class="course-tags">
+          <text wx:if="{{course.category}}" class="tag">{{course.category}}</text>
+          <text wx:if="{{course.teachingMode}}" class="tag">{{course.teachingMode}}</text>
+          <text wx:if="{{weekLabel}}" class="tag tag-week">{{weekLabel}}</text>
+        </view>
+      </view>
+
+      <!-- 时间地点 -->
+      <view class="card">
+        <view class="kv">
+          <view class="k">时间</view>
+          <view class="v">{{timeLabel}}</view>
+        </view>
+        <view class="kv">
+          <view class="k">地点</view>
+          <view class="v {{course.room ? '' : 'v-mute'}}">{{course.room || '待定'}}</view>
+        </view>
+        <view class="kv">
+          <view class="k">日期</view>
+          <view class="v">{{dateLabel}}</view>
+        </view>
+        <view wx:if="{{course.teachers}}" class="kv">
+          <view class="k">教师</view>
+          <view class="v">{{course.teachers}}</view>
+        </view>
+      </view>
+
+      <!-- 上课内容 -->
+      <view wx:if="{{course.content}}" class="card">
+        <view class="card-label">上课内容</view>
+        <view class="content-text">{{course.content}}</view>
+      </view>
+
+      <!-- 教学信息 -->
+      <view wx:if="{{extra.length}}" class="card">
+        <view class="card-label">教学信息</view>
+        <view wx:for="{{extra}}" wx:key="k" class="kv">
+          <view class="k">{{item.k}}</view>
+          <view class="v">{{item.v}}</view>
+        </view>
+      </view>
+
+      <!-- 同一天的其他课 -->
+      <view wx:if="{{siblings.length}}" class="card">
+        <view class="card-label">同一天还有</view>
+        <view
+          wx:for="{{siblings}}"
+          wx:key="key"
+          class="sib"
+          bindtap="onTapSibling"
+          data-idx="{{index}}"
+        >
+          <view class="sib-time">{{item.startTime}}</view>
+          <view class="grow sib-name ellipsis">{{item.name}}</view>
+          <view class="sib-room ellipsis">{{item.room || '待定'}}</view>
+        </view>
+      </view>
+    </view>
+  </block>
+
+  <!-- ═══════ 成绩详情 ═══════ -->
+  <block wx:if="{{isGrade && grade}}">
+    <view class="pad">
+      <view class="course-head" style="border-left-color: {{grade.pass ? 'var(--primary)' : 'var(--danger)'}};">
+        <view class="course-name">{{grade.name}}</view>
+        <view class="course-tags">
+          <text class="tag">{{grade.term}}</text>
+          <text wx:if="{{grade.category}}" class="tag">{{grade.category}}</text>
+        </view>
+      </view>
+
+      <view class="card">
+        <view class="score-big {{grade.pass ? '' : 'score-fail'}}">{{scoreText}}</view>
+        <view class="score-sub">满分 100</view>
+      </view>
+
+      <view class="card">
+        <view class="kv">
+          <view class="k">绩点</view>
+          <view class="v">{{gpaText}}</view>
+        </view>
+        <view class="kv">
+          <view class="k">学分</view>
+          <view class="v">{{creditText}}</view>
+        </view>
+        <view wx:if="{{grade.classify}}" class="kv">
+          <view class="k">课程分类</view>
+          <view class="v">{{grade.classify}}</view>
+        </view>
+        <view wx:if="{{grade.nature}}" class="kv">
+          <view class="k">考核性质</view>
+          <view class="v">{{grade.nature}}</view>
+        </view>
+        <view wx:if="{{grade.remark}}" class="kv">
+          <view class="k">备注</view>
+          <view class="v v-small">{{grade.remark}}</view>
+        </view>
+      </view>
+
+      <view class="note">
+        加权绩点按「必修 + 限选」计算，公共选修不计入 —— 这是学校评优和保研的口径。
+      </view>
+    </view>
+  </block>
+
+  <view class="tail"></view>
+</view>
