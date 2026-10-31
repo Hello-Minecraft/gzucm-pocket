@@ -1458,7 +1458,8 @@ private fun BoxScope.CourseBlock(
                     // 宽屏字更大，同样高度能塞的行数少一些
                     wide && span >= 6 -> 14
                     wide && span >= 3 -> 9
-                    wide && span == 2 -> 4
+                    // 两节连上的块要挤下 课名 + 教室 + 老师，课名少给一行
+                    wide && span == 2 -> 3
                     wide -> 2
                     span >= 6 -> 20
                     span >= 3 -> 12
@@ -1483,26 +1484,23 @@ private fun BoxScope.CourseBlock(
                     lineHeight = 10.sp,
                 )
                 /*
-                 * 教师：**只有宽屏才显示**，且要求节数 >= 3。
+                 * 教师：宽屏显示，两节连上（span = 2）也算 ——
+                 * 上午的课基本都是两节，之前卡在 span >= 3，
+                 * 结果上午一片没有老师、下午晚上才有，看着像数据丢了。
                  *
-                 * 为什么限这么死：
-                 *   · 手机端一格才 52dp 宽，多一行字只会把课名挤没；
-                 *   · 1-2 节的短课块（约 116dp 高）塞了课名 + 教室 + 教师
-                 *     会溢出，末尾出现「…」，反而比不显示更难看。
-                 * 3 节以上才有约 174dp，三行放得下。
-                 *
-                 * 这一行就是致辉说的「显示更多信息」里之前漏掉的部分 ——
-                 * 当时只做了字号和教室，教师是补的。
+                 * 单节（span = 1）的块只有一节高，塞不下第三行，还是只留课名。
+                 * 手机端宽 52dp 一格，多一行会把课名挤没，也不显示。
                  */
-                if (wide && span >= 3 && session.teachers.isNotBlank()) {
+                if (wide && span >= 2 && session.teachers.isNotBlank()) {
                     Spacer(Modifier.height(2.dp))
                     Text(
                         session.teachers,
-                        fontSize = 9.sp,
+                        fontSize = if (span >= 3) 9.sp else 8.5.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.62f),
-                        maxLines = 2,
+                        // 两节的块只给一行，宁可省略也别把上面挤变形
+                        maxLines = if (span >= 3) 2 else 1,
                         overflow = TextOverflow.Ellipsis,
-                        lineHeight = 11.sp,
+                        lineHeight = if (span >= 3) 11.sp else 10.sp,
                     )
                 }
             }
