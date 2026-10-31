@@ -251,6 +251,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
          * 看到的还是老样子，会以为没修。版本号对不上就丢弃，走重新同步。
          */
         store.dropStaleSessionCache()
+        store.dropStaleGradeCache()
 
         val cachedSessions = readSessionCache()
         val cachedSemester = readSemesterCache()

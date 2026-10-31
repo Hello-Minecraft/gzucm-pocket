@@ -55,6 +55,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -650,7 +651,7 @@ private fun FloatingBar(
                     color = scheme.outlineVariant.copy(alpha = 0.5f),
                     shape = RoundedCornerShape(22.dp),
                 )
-                .padding(vertical = 7.dp),
+                .padding(horizontal = 10.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -659,7 +660,8 @@ private fun FloatingBar(
                 Column(
                     Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(14.dp))
+                        .testTag("tab_${t.name}")
+                        .clip(RoundedCornerShape(16.dp))
                         .clickable { onSelect(t) }
                         .padding(vertical = 5.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -682,7 +684,9 @@ private fun FloatingBar(
                     Spacer(Modifier.height(2.dp))
                     Box(
                         Modifier
-                            .size(if (active) 3.5.dp else 0.dp)
+                            // 始终占 3.5dp：切换 tab 时每个格子高度一致，
+                            // 否则选中项比未选中项高一个圆点的高度，底栏会跳一下
+                            .size(3.5.dp)
                             .clip(CircleShape)
                             .background(if (active) scheme.primary else Color.Transparent),
                     )

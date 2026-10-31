@@ -79,6 +79,14 @@ data class CourseGrade(
     val nature: String,
     val remark: String,
     val passed: Boolean,
+    /**
+     * 课程分类（教务的 `kcflmc`）。只有部分课带值，比如公共选修课会细分
+     * 「美育类」「科学技术与文明类」「人文社科与素养类」等。
+     *
+     * 放在最后并给默认值：一是老缓存没这个字段，反序列化不能炸；
+     * 二是调用方大多按位置传参，插在中间会把 nature / remark 整体错位。
+     */
+    val classify: String = "",
 )
 
 /** 考级成绩（四六级等） */

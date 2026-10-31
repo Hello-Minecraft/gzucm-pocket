@@ -398,6 +398,7 @@ object Jw {
                 gpa = o.str("cjjd").toDoubleOrNull() ?: 0.0,
                 credit = o.str("xf").toDoubleOrNull() ?: 0.0,
                 category = o.str("kcdlmc"),
+                classify = o.str("kcflmc"),
                 nature = o.str("ksxzmc"),
                 remark = o.str("bz"),
                 passed = score >= 60,

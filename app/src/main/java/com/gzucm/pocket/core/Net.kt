@@ -89,6 +89,27 @@ class SessionStore(context: Context) {
             .apply()
     }
 
+    var gradesDataVersion: Int
+        get() = sp.getInt(KEY_GRADES_VERSION, 1)
+        set(v) = sp.edit().putInt(KEY_GRADES_VERSION, v).apply()
+
+    /** 当前代码期望的成绩数据版本。解析新增字段时同步 +1。 */
+    val gradesDataVersionExpected: Int get() = 2
+
+    /**
+     * 成绩缓存是否过期。
+     *
+     * v2 起多解析了 `kcflmc`（美育类 / 科学技术与文明类 …），老缓存里这个字段是空的，
+     * 切到「公选学分」会整片「未分类」。版本不符就丢掉，让下次同步重新拉。
+     */
+    fun dropStaleGradeCache() {
+        if (gradesDataVersion >= gradesDataVersionExpected) return
+        sp.edit()
+            .remove(KEY_CACHE_GRADES)
+            .putInt(KEY_GRADES_VERSION, gradesDataVersionExpected)
+            .apply()
+    }
+
     var cachedPower: String?
         get() = sp.getString(KEY_CACHE_POWER, null)
         set(v) = sp.edit().putString(KEY_CACHE_POWER, v).apply()
@@ -248,6 +269,7 @@ class SessionStore(context: Context) {
         const val KEY_UPDATE_CHECK_DATE = "update_check_date"
         const val KEY_LATEST_VERSION = "latest_version"
         const val KEY_CACHE_GRADES = "cache_grades"
+        const val KEY_GRADES_VERSION = "grades_data_version"
         const val KEY_CACHE_LEVELS = "cache_levels"
         const val KEY_CACHE_FITNESS = "cache_fitness"
         const val KEY_GRADES_AT = "grades_at"

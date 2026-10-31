@@ -231,8 +231,10 @@ private fun CourseTab(
         val avgScore = if (grades.isNotEmpty()) grades.sumOf { it.score } / grades.size else 0.0
         Triple(passedCredit, gpa, avgScore)
     }
-    // 哪张图展开着：0=无 1=绩点折线 2=成绩柱状
+    // 哪张卡展开着：0=无 1=绩点折线 2=成绩柱状 3=学分构成
     var expanded by remember { mutableStateOf(0) }
+    // 学分卡片看哪一面：false = 按课程大类（全部学分），true = 只看公选课的分类学分
+    var publicOnly by remember { mutableStateOf(false) }
     val totalCredit = summary.first
     val weightedGpa = summary.second
     val avgScore = summary.third
@@ -282,18 +284,24 @@ private fun CourseTab(
                     }
                 }
                 item(key = "credit") {
-                    StatPill("已修学分", Fmt.trim1(totalCredit), Modifier.fillMaxWidth())
+                    StatPill(
+                        "已修学分", Fmt.trim1(totalCredit), Modifier.fillMaxWidth(),
+                        onClick = { expanded = if (expanded == 3) 0 else 3 },
+                        selected = expanded == 3,
+                    )
                 }
-                // 展开的图表放在指标卡下方、学分构成上方
+                // 展开的内容放在指标卡下方，同一时间只开一个
                 if (expanded == 1) {
                     item(key = "chart_gpa") { GpaTrendCard(grades) }
                 }
                 if (expanded == 2) {
                     item(key = "chart_score") { ScoreBarCard(grades) }
                 }
-                item(key = "breakdown") {
-                    Spacer(Modifier.height(10.dp))
-                    CategoryBreakdown(grades)
+                if (expanded == 3) {
+                    item(key = "breakdown") {
+                        Spacer(Modifier.height(10.dp))
+                        CategoryBreakdown(grades, publicOnly) { publicOnly = it }
+                    }
                 }
             }
 
@@ -344,12 +352,19 @@ private fun CourseTab(
                         onClick = { expanded = if (expanded == 2) 0 else 2 },
                         selected = expanded == 2,
                     )
-                    // 已修学分暂不做展开
-                    StatPill("已修学分", Fmt.trim1(totalCredit), Modifier.weight(1f))
+                    StatPill(
+                        "已修学分", Fmt.trim1(totalCredit), Modifier.weight(1f),
+                        onClick = { expanded = if (expanded == 3) 0 else 3 },
+                        selected = expanded == 3,
+                    )
                 }
 
                 if (expanded == 1) GpaTrendCard(grades)
                 if (expanded == 2) ScoreBarCard(grades)
+                if (expanded == 3) {
+                    Spacer(Modifier.height(10.dp))
+                    CategoryBreakdown(grades, publicOnly) { publicOnly = it }
+                }
             }
             byTerm.forEach { (term, list) ->
                 item(key = "h_$term") {
@@ -364,27 +379,71 @@ private fun CourseTab(
                 }
                 item(key = "s_$term") { Spacer(Modifier.height(14.dp)) }
             }
-
-            item(key = "breakdown") {
-                CategoryBreakdown(grades)
-            }
         }
     }
     } // BoxWithConstraints
 }
 
-/** 按课程大类汇总，顺便把页面底部填满 */
+/**
+ * 公选课每个模块要修满的学分。
+ * 23 级铁涛班的培养计划是每类 4 学分；别的年级不一样，所以只拿它当进度条分母的
+ * 下限，不拿它判定谁「修够了还是没修够」。
+ */
+private const val PUBLIC_ELECTIVE_FULL = 4.0
+
+/** 公共选修课。教务里写作「公共选修课」，有的年级叫「通识选修」 */
+private val CourseGrade.isPublicElective: Boolean
+    get() = category.contains("公共选修") || category.contains("通识选修")
+
+/**
+ * 学分卡片，两种视角：
+ * - 总学分：按课程大类（公共必修课 / 专业基础课 …）汇总，就是原来的样子；
+ * - 公选：只看公共选修课，按教务的 `kcflmc`（美育类、科学技术与文明类 …）汇总。
+ *
+ * 分类名只有一部分课带值，没带的归「未分类」而不是丢掉 —— 丢掉的话
+ * 各类加起来对不上总数，会让人以为漏算了几门。
+ */
 @Composable
-private fun CategoryBreakdown(grades: List<CourseGrade>) {
+private fun CategoryBreakdown(
+    grades: List<CourseGrade>,
+    publicOnly: Boolean = false,
+    onToggle: (Boolean) -> Unit = {},
+) {
     val scheme = MaterialTheme.colorScheme
-    val grouped = remember(grades) {
-        grades.groupBy { it.category.ifBlank { "其他" } }
+    /*
+     * 口径跟上面那张「已修学分」保持一致：只算及格的。
+     * 挂了课学分没拿到，算进去会让各项加起来比卡片上的数字大，
+     * 点开就对不上，反而让人怀疑哪里算错了。
+     */
+    val passed = remember(grades) { grades.filter { it.passed } }
+    val grouped = remember(passed, publicOnly) {
+        val list = if (publicOnly) passed.filter { it.isPublicElective } else passed
+        list.groupBy {
+            if (publicOnly) it.classify.ifBlank { "未分类" } else it.category.ifBlank { "其他" }
+        }
             .mapValues { (_, v) -> v.sumOf { it.credit } }
             .toList()
             .sortedByDescending { it.second }
     }
-    if (grouped.isEmpty()) return
-    val totalCredit = remember(grouped) { grouped.sumOf { it.second }.coerceAtLeast(0.1) }
+    val courseCount = remember(passed, publicOnly) {
+        if (publicOnly) passed.count { it.isPublicElective } else passed.size
+    }
+    val sum = remember(grouped) { grouped.sumOf { it.second } }
+    /*
+     * 进度条的分母。
+     *
+     * 总学分视角：按各类加起来的总量画，看的是「学分都花在哪了」。
+     * 公选视角：按「每个模块 4 学分算满」画 —— 条填满就等于这个模块修够了，
+     * 一眼能看出哪一类还差。要是有人某一类修到 5 分（真的会有人多选），
+     * 分母就退到那一类的学分，免得进度条冲出格子。
+     */
+    val barMax = remember(grouped, publicOnly) {
+        if (publicOnly) {
+            maxOf(PUBLIC_ELECTIVE_FULL, grouped.maxOfOrNull { it.second } ?: 0.0)
+        } else {
+            sum
+        }.coerceAtLeast(0.1)
+    }
 
     Column(
         Modifier
@@ -394,14 +453,32 @@ private fun CategoryBreakdown(grades: List<CourseGrade>) {
             .background(scheme.surface)
             .padding(horizontal = 16.dp, vertical = 15.dp),
     ) {
-        Text(
-            "学分构成",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Medium,
-        )
-        Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (publicOnly) "公选学分" else "学分构成",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            Spacer(Modifier.weight(1f))
+            ScopeChip("总学分", selected = !publicOnly) { onToggle(false) }
+            Spacer(Modifier.width(4.dp))
+            ScopeChip("公选", selected = publicOnly) { onToggle(true) }
+        }
+        Spacer(Modifier.height(if (publicOnly) 3.dp else 10.dp))
+        if (publicOnly) {
+            Text(
+                if (courseCount == 0) "还没有公共选修课成绩"
+                else "$courseCount 门 · 合计 ${formatCredit(sum)} 学分",
+                fontSize = 11.sp,
+                color = scheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(10.dp))
+        }
+        if (grouped.isEmpty() && !publicOnly) {
+            Text("暂无成绩", fontSize = 12.sp, color = scheme.onSurfaceVariant)
+        }
         grouped.forEach { (cat, credit) ->
-            val ratio = (credit / totalCredit).toFloat()
+            val ratio = (credit / barMax).toFloat()
             Column(Modifier.padding(vertical = 5.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(cat, fontSize = 12.sp, color = scheme.onSurfaceVariant)
@@ -430,7 +507,33 @@ private fun CategoryBreakdown(grades: List<CourseGrade>) {
                 }
             }
         }
+        // 各类别到底要修满多少，各年级培养计划不一样 —— 不猜、不判达标，只提醒去查
+        if (publicOnly && courseCount > 0) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "公选学分需求请自行查培养计划",
+                fontSize = 10.5.sp,
+                color = scheme.onSurfaceVariant.copy(alpha = 0.6f),
+            )
+        }
     }
+}
+
+/** 卡片标题右侧的小切换块 */
+@Composable
+private fun ScopeChip(text: String, selected: Boolean, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Text(
+        text,
+        fontSize = 11.sp,
+        fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+        color = if (selected) scheme.primary else scheme.onSurfaceVariant,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (selected) scheme.primary.copy(alpha = 0.13f) else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 9.dp, vertical = 5.dp),
+    )
 }
 
 @Composable

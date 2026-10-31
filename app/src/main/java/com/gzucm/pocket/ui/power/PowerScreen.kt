@@ -44,6 +44,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.font.FontWeight
 import kotlin.math.roundToInt
@@ -153,6 +157,14 @@ fun PowerScreen(
         }
     }
 
+    /*
+     * 电费设置面板挂在页面最外层。
+     *
+     * 它内部是「全屏遮罩 + 侧栏」，之前塞在余额卡的 Column 里，
+     * 平板上一点开就把卡片撑满整列，看上去是一大块绿色渐变铺满左栏。
+     * 面板本身是覆盖层，本来就不该参与卡片的排版。
+     */
+    Box(Modifier.fillMaxSize()) {
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
@@ -198,11 +210,7 @@ fun PowerScreen(
                     BalanceCard(
                         power = power,
                         avg7 = avg7,
-                        showWhy = showWhy,
-                        onShowWhyChange = { showWhy = it },
-                        powerAlertOn = powerAlertOn,
-                        onPowerAlertChange = onPowerAlertChange,
-                        onOpenRebindGuide = onOpenRebindGuide,
+                        onOpenWhy = { showWhy = true },
                     )
                     if (daily.size >= 3) {
                         // 趋势卡吃掉剩余高度，内部两图再按 62:38 分
@@ -265,11 +273,7 @@ fun PowerScreen(
                 BalanceCard(
                     power = power,
                     avg7 = avg7,
-                    showWhy = showWhy,
-                    onShowWhyChange = { showWhy = it },
-                    powerAlertOn = powerAlertOn,
-                    onPowerAlertChange = onPowerAlertChange,
-                    onOpenRebindGuide = onOpenRebindGuide,
+                    onOpenWhy = { showWhy = true },
                 )
             }
             if (daily.size >= 3) {
@@ -289,6 +293,17 @@ fun PowerScreen(
         }
     }
     } // BoxWithConstraints
+
+    PowerWhySheet(
+        visible = showWhy,
+        roomLabel = power.roomLabel,
+        onDismiss = { showWhy = false },
+        alertOn = powerAlertOn,
+        onAlertChange = onPowerAlertChange,
+        // 先收起设置面板：两层面板叠在一起会互相挡
+        onBuyInMiniProgram = { showWhy = false; onOpenRebindGuide() },
+    )
+    } // Box
 }
 
 /** 表头：宿舍电量标签 + 上次更新时间 + 手动更新入口。 */
@@ -349,11 +364,7 @@ private fun PowerHeader(updatedText: String, onSync: () -> Unit) {
 private fun BalanceCard(
     power: PowerInfo,
     avg7: Double,
-    showWhy: Boolean,
-    onShowWhyChange: (Boolean) -> Unit,
-    powerAlertOn: Boolean,
-    onPowerAlertChange: (Boolean) -> Unit,
-    onOpenRebindGuide: () -> Unit,
+    onOpenWhy: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
     Column(
@@ -380,7 +391,7 @@ private fun BalanceCard(
             Row(
                 Modifier
                     .clip(RoundedCornerShape(6.dp))
-                    .clickable { onShowWhyChange(true) }
+                    .clickable { onOpenWhy() }
                     .padding(horizontal = 3.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -400,15 +411,6 @@ private fun BalanceCard(
                 )
             }
         }
-        PowerWhySheet(
-            visible = showWhy,
-            roomLabel = power.roomLabel,
-            onDismiss = { onShowWhyChange(false) },
-            alertOn = powerAlertOn,
-            onAlertChange = onPowerAlertChange,
-            // 先收起设置面板：两层面板叠在一起会互相挡
-            onBuyInMiniProgram = { onShowWhyChange(false); onOpenRebindGuide() },
-        )
         Spacer(Modifier.height(10.dp))
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
@@ -605,6 +607,7 @@ private fun DeltaBars(points: List<PowerDaily>, height: androidx.compose.ui.unit
     val scheme = MaterialTheme.colorScheme
     val over = scheme.primary
     val under = scheme.secondary
+    val measurer = rememberTextMeasurer()
 
     val avg = remember(points) {
         val valid = points.filter { it.usage > 0 }
@@ -617,13 +620,50 @@ private fun DeltaBars(points: List<PowerDaily>, height: androidx.compose.ui.unit
         points.maxOfOrNull { kotlin.math.abs(it.usage - avg) }?.toFloat()?.coerceAtLeast(0.1f) ?: 0.1f
     }
 
+    var sel by remember(points) { mutableIntStateOf(-1) }
+    val picked = points.getOrNull(sel)
+    // 纵轴数字占的宽度。柱子从这条线右边开始画，不跟数字抢地方。
+    val axisW = 26.dp
+
     Column(Modifier.fillMaxSize()) {
-        Text(
-            "相对日均 ${Fmt.d2(avg)} 度",
-            fontSize = 10.5.sp,
-            color = scheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(6.dp))
+        /*
+         * 顶部读数。原来这里只写「相对日均 X 度」，选中某天时改写成
+         * 那一天的日期和差值 —— 图本身太矮，再单开一行会把柱子压没。
+         */
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (picked != null) {
+                val delta = picked.usage - avg
+                Text(
+                    picked.date,
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = scheme.onSurface,
+                )
+                Text(
+                    if (delta >= 0) "超过日均 ${Fmt.d2(delta)} 度"
+                    else "低于日均 ${Fmt.d2(-delta)} 度",
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = if (delta >= 0) over else under,
+                )
+            } else {
+                Text(
+                    "相对日均 ${Fmt.d2(avg)} 度",
+                    fontSize = 10.5.sp,
+                    color = scheme.onSurfaceVariant,
+                )
+                Text(
+                    "左右滑动查看每一天",
+                    fontSize = 9.5.sp,
+                    color = scheme.onSurfaceVariant.copy(alpha = 0.55f),
+                )
+            }
+        }
+        Spacer(Modifier.height(5.dp))
         /*
          * Canvas 用 weight(1f) 吃掉剩余高度，不写死 ——
          * 写死的话，父容器给了多少高度它都用不上，
@@ -632,35 +672,108 @@ private fun DeltaBars(points: List<PowerDaily>, height: androidx.compose.ui.unit
         Canvas(
             Modifier
                 .fillMaxWidth()
-                .weight(1f),
+                .weight(1f)
+                .testTag("delta_bars")
+                .pointerInput(points) {
+                    // 柱状图是按等分格子排的，不是折线那种点连线，所以按 slot 取索引
+                    fun pick(x: Float) {
+                        val axisPx = axisW.toPx()
+                        val chartW = (size.width - axisPx).coerceAtLeast(1f)
+                        if (size.width <= 0) return
+                        val slot = chartW / points.size
+                        val rel = (x - axisPx).coerceIn(0f, chartW - 0.01f)
+                        sel = (rel / slot).toInt().coerceIn(0, points.lastIndex)
+                    }
+                    detectDragGestures(
+                        onDragStart = { off -> pick(off.x) },
+                        onDrag = { change, _ -> pick(change.position.x); change.consume() },
+                    )
+                }
+                .pointerInput(points) {
+                    detectTapGestures { off ->
+                        val axisPx = axisW.toPx()
+                        val chartW = (size.width - axisPx).coerceAtLeast(1f)
+                        val slot = chartW / points.size
+                        val rel = (off.x - axisPx).coerceIn(0f, chartW - 0.01f)
+                        val i = (rel / slot).toInt().coerceIn(0, points.lastIndex)
+                        // 再点同一根柱子就取消选中
+                        sel = if (sel == i) -1 else i
+                    }
+                },
         ) {
             val n = points.size
-            val slot = size.width / n
+            val axisX = axisW.toPx()
+            val chartW = (size.width - axisX).coerceAtLeast(1f)
+            val slot = chartW / n
             val barW = (slot * 0.58f).coerceAtLeast(1.5f)
             val mid = size.height / 2f
             // 上下各留 6% 余量，柱顶不贴边
             val amp = size.height * 0.44f
 
-            // 零轴：一条很淡的横线，说明「这条是日均」
+            // 三条参考线：+max / 0 / -max。零轴最重，另两条压到很浅。
             drawLine(
-                color = scheme.onSurfaceVariant.copy(alpha = 0.25f),
-                start = Offset(0f, mid),
+                color = scheme.onSurfaceVariant.copy(alpha = 0.14f),
+                start = Offset(axisX, mid - amp),
+                end = Offset(size.width, mid - amp),
+                strokeWidth = 1f,
+            )
+            drawLine(
+                color = scheme.onSurfaceVariant.copy(alpha = 0.12f),
+                start = Offset(axisX, mid + amp),
+                end = Offset(size.width, mid + amp),
+                strokeWidth = 1f,
+            )
+            drawLine(
+                color = scheme.onSurfaceVariant.copy(alpha = 0.26f),
+                start = Offset(axisX, mid),
                 end = Offset(size.width, mid),
                 strokeWidth = 1f,
             )
 
+            // 纵轴数字：跟三条线一一对应，右对齐贴在轴左侧
+            val labelStyle = TextStyle(
+                fontSize = 8.5.sp,
+                color = scheme.onSurfaceVariant.copy(alpha = 0.7f),
+            )
+            listOf(
+                "+" + Fmt.d1(maxAbs.toDouble()) to mid - amp,
+                "0" to mid,
+                "-" + Fmt.d1(maxAbs.toDouble()) to mid + amp,
+            ).forEach { (label, y) ->
+                val layout = measurer.measure(label, labelStyle)
+                drawText(
+                    layout,
+                    topLeft = Offset(
+                        axisX - layout.size.width - 5f,
+                        (y - layout.size.height / 2f).coerceAtLeast(0f),
+                    ),
+                )
+            }
+
             points.forEachIndexed { i, p ->
                 val delta = (p.usage - avg).toFloat()
                 val h = (delta / maxAbs) * amp
-                val cx = slot * i + slot / 2f
+                val cx = axisX + slot * i + slot / 2f
                 val top = if (delta >= 0) mid - h else mid
                 val bottom = if (delta >= 0) mid else mid + kotlin.math.abs(h)
                 // 高度太小时给 1px，否则「几乎等于日均」的那几天会凭空消失
                 val drawH = (bottom - top).coerceAtLeast(1f)
+                // 选中的那根加深，其余半透明，一眼能找到拖到哪了
+                val emphasis = if (sel < 0 || sel == i) 0.85f else 0.4f
                 drawRect(
-                    color = if (delta >= 0) over.copy(alpha = 0.85f) else under.copy(alpha = 0.85f),
+                    color = (if (delta >= 0) over else under).copy(alpha = emphasis),
                     topLeft = Offset(cx - barW / 2f, if (delta >= 0) mid - drawH else mid),
                     size = androidx.compose.ui.geometry.Size(barW, drawH),
+                )
+            }
+
+            if (sel >= 0) {
+                val cx = axisX + slot * sel + slot / 2f
+                drawLine(
+                    color = scheme.onSurface.copy(alpha = 0.35f),
+                    start = Offset(cx, 0f),
+                    end = Offset(cx, size.height),
+                    strokeWidth = 1.2f,
                 )
             }
         }
@@ -671,6 +784,7 @@ private fun DeltaBars(points: List<PowerDaily>, height: androidx.compose.ui.unit
                 fontSize = 9.sp,
                 lineHeight = 11.sp,
                 color = scheme.onSurfaceVariant.copy(alpha = 0.55f),
+                modifier = Modifier.padding(start = axisW),
             )
             Text(
                 points.last().date.takeLast(5),

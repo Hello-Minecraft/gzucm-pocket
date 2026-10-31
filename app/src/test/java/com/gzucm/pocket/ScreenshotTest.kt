@@ -8,7 +8,13 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import com.gzucm.pocket.core.CourseGrade
@@ -132,6 +138,12 @@ class ScreenshotTest {
         CourseGrade("2025-2026-1", "中医诊断学", 78.0, 2.8, 4.5, "专业课", "考试", "", true),
         CourseGrade("2025-2026-1", "方剂学", 91.0, 4.1, 5.0, "专业课", "考试", "", true),
         CourseGrade("2025-2026-1", "医用生物学", 58.0, 0.0, 2.0, "基础课", "考试", "", false),
+        // 公选课：教务带 kcflmc 分类，值照抄真实数据
+        CourseGrade("2025-2026-1", "音乐鉴赏", 87.0, 3.7, 2.0, "公共选修课", "考试", "", true, "美育类"),
+        CourseGrade("2024-2025-1", "影像技术与技能(摄影与摄像)(慕课)", 70.2, 2.0, 2.0, "公共选修课", "考试", "", true, "美育类"),
+        CourseGrade("2024-2025-2", "人格心理学(慕课)", 90.0, 4.0, 2.0, "公共选修课", "考试", "", true, "人文社科与素养类"),
+        CourseGrade("2024-2025-2", "普通话训练与口才艺术", 85.0, 3.5, 2.0, "公共选修课", "考试", "", true, "人文社科与素养类"),
+        CourseGrade("2025-2026-1", "从爱因斯坦到霍金的宇宙", 85.6, 3.6, 3.0, "公共选修课", "考试", "", true, "网络课程类"),
     )
 
     private val levels = listOf(
@@ -162,6 +174,10 @@ class ScreenshotTest {
         dark: Boolean = true,
         /** 额外推进主线程时钟的毫秒数：用于等 LaunchedEffect 里的 delay/动画 */
         settleMs: Long = 0L,
+        /** 按下并保持，用来拍 ripple / 触摸反馈的静态形态（传 testTag） */
+        pressTag: String? = null,
+        /** 截图前的额外交互，比如点一下切换开关 */
+        prepare: (() -> Unit)? = null,
         block: @androidx.compose.runtime.Composable () -> Unit,
     ) {
         rule.setContent {
@@ -170,6 +186,22 @@ class ScreenshotTest {
             }
         }
         rule.waitForIdle()
+
+        // 先滚动再 prepare：LazyColumn 只组合视口内的项，
+        // 没滚到的话节点压根不存在，prepare 里会找不到。
+
+        // 按住不放：ripple 只在按下期间可见，松手就淡出了
+        if (pressTag != null) {
+            val node = rule.onNodeWithTag(pressTag)
+            println("pressed tab bounds = ${node.getUnclippedBoundsInRoot()}")
+            node.performTouchInput { down(center) }
+            rule.waitForIdle()
+            // ripple 的展开是带时钟的动画，Robolectric 不会自己走完
+            org.robolectric.shadows.ShadowLooper.idleMainLooper(
+                400, java.util.concurrent.TimeUnit.MILLISECONDS,
+            )
+            rule.waitForIdle()
+        }
 
         // Compose 的 LaunchedEffect 里用真实时钟 delay，waitForIdle 不会等它。
         // 需要验证「延迟后才发生的动作」时，靠 ShadowLooper 把主线程时间推过去。
@@ -183,6 +215,11 @@ class ScreenshotTest {
         // 需要看底部时，把内容滚到尽头
         repeat(scrollUp) {
             rule.onRoot().performTouchInput { swipeUp() }
+            rule.waitForIdle()
+        }
+
+        if (prepare != null) {
+            prepare()
             rule.waitForIdle()
         }
 
@@ -271,6 +308,100 @@ class ScreenshotTest {
         GradesScreen(grades, levels, fitness, false, 0, 0, null, 0L, {})
     }
 
+    /** 点「已修学分」展开学分构成，再切到「公选」看分类汇总 */
+    @Test
+    fun gradesPublicCredit() = shot(
+        "72_grades_public",
+        prepare = {
+            rule.onNodeWithText("已修学分").performClick()
+            rule.waitForIdle()
+            rule.onNodeWithText("公选").performClick()
+        },
+    ) {
+        GradesScreen(grades, levels, fitness, false, 0, 0, null, 0L, {})
+    }
+
+    /** 有人把某一类修超了（6 学分）：分母退到 6，其余 4 分的条变成 2/3，不能溢出 */
+    @Test
+    fun gradesPublicOverflow() = shot(
+        "77_grades_public_overflow",
+        prepare = {
+            rule.onNodeWithText("已修学分").performClick()
+            rule.waitForIdle()
+            rule.onNodeWithText("公选").performClick()
+        },
+    ) {
+        GradesScreen(
+            grades + listOf(
+                CourseGrade("2025-2026-1", "美术鉴赏", 88.0, 3.8, 2.0, "公共选修课", "考试", "", true, "美育类"),
+            ),
+            levels, fitness, false, 0, 0, null, 0L, {},
+        )
+    }
+
+    /** 切到公选后再切回总学分，不能卡在空态 */
+    @Test
+    fun gradesPublicBackToTotal() = shot(
+        "73_grades_public_back",
+        prepare = {
+            rule.onNodeWithText("已修学分").performClick()
+            rule.waitForIdle()
+            rule.onNodeWithText("公选").performClick()
+            rule.waitForIdle()
+            rule.onNodeWithText("总学分").performClick()
+        },
+    ) {
+        GradesScreen(grades, levels, fitness, false, 0, 0, null, 0L, {})
+    }
+
+    /** 点「已修学分」展开「学分构成」（总学分视角） */
+    @Test
+    fun gradesCreditExpanded() = shot(
+        "74_grades_credit_expanded",
+        prepare = { rule.onNodeWithText("已修学分").performClick() },
+    ) {
+        GradesScreen(grades, levels, fitness, false, 0, 0, null, 0L, {})
+    }
+
+    /** 再点一次要能收起来，不能只开不合 */
+    @Test
+    fun gradesCreditCollapsed() = shot(
+        "75_grades_credit_collapsed",
+        prepare = {
+            rule.onNodeWithText("已修学分").performClick()
+            rule.waitForIdle()
+            rule.onNodeWithText("已修学分").performClick()
+        },
+    ) {
+        GradesScreen(grades, levels, fitness, false, 0, 0, null, 0L, {})
+    }
+
+    /** 平板打开「电费设置」：余额卡要保持原尺寸，不能被全屏面板撑变形 */
+    @Test
+    @Config(sdk = [34], qualifiers = "w872dp-h900dp-xhdpi")
+    fun powerWhySheet() = shot(
+        "78_power_why_sheet",
+        prepare = { rule.onNodeWithText("电费设置").performClick() },
+    ) {
+        PowerScreen(power = power, daily = daily, loading = false)
+    }
+
+    /** 差值图拖动选中某一天：竖线定位、其余柱变淡、顶部换成当天读数 */
+    @Test
+    @Config(sdk = [34], qualifiers = "w872dp-h900dp-xhdpi")
+    fun powerDeltaSelected() = shot(
+        "76_power_delta_selected",
+        prepare = {
+            rule.onNodeWithTag("delta_bars").performTouchInput {
+                down(androidx.compose.ui.geometry.Offset(width * 0.18f, height / 2f))
+                moveTo(androidx.compose.ui.geometry.Offset(width * 0.55f, height / 2f))
+                up()
+            }
+        },
+    ) {
+        PowerScreen(power = power, daily = daily, loading = false)
+    }
+
     @Test
     @Config(sdk = [34], qualifiers = "w872dp-h900dp-xhdpi")
     fun powerTablet() = shot("51_power_tablet") {
@@ -291,6 +422,36 @@ class ScreenshotTest {
         ) {
             TodayScreen(semester, 8, sessions, power, daily, 0L, {}, {}, {}, {}, false, 0, 0, false, null)
         }
+    }
+
+    /** 底栏按下态：ripple 高亮块与底栏外框之间的间距（静止态看不出来） */
+    @Test
+    fun bottomBarPressed() = shot("61_bottom_bar_pressed", pressTag = "tab_Today") {
+        com.gzucm.pocket.ui.MainScaffold(
+            tab = com.gzucm.pocket.ui.Tab.Today,
+            onSelect = {},
+        ) {
+            TodayScreen(semester, 8, sessions, power, daily, 0L, {}, {}, {}, {}, false, 0, 0, false, null)
+        }
+    }
+
+    /** 扫码登录模式：提示必须真的看得见，不能被 WebView 盖住 */
+    @Test
+    fun loginQrHint() = shot(
+        "70_login_qr",
+        prepare = { rule.onNodeWithText("扫码登录").performClick() },
+    ) {
+        com.gzucm.pocket.ui.login.LoginScreen(onLoggedIn = { _, _ -> })
+    }
+
+    /** 扫码提示在浅色下也要看得清 */
+    @Test
+    fun loginQrHintLight() = shot(
+        "71_login_qr_light",
+        dark = false,
+        prepare = { rule.onNodeWithText("扫码登录").performClick() },
+    ) {
+        com.gzucm.pocket.ui.login.LoginScreen(onLoggedIn = { _, _ -> })
     }
 
     /** 课表页在骨架里，看底栏会不会压住最后一行课 */

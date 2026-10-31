@@ -255,11 +255,14 @@ fun LoginScreen(
 
             StepBar(stage = stage)
 
-            Box(
+            // 网页在上面、提示在下面会被 WebView 整块盖住（Box 里后声明的画在上层），
+            // 所以改成纵向排列：提示占自己的一行，网页吃掉剩下的高度。
+            Column(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp)
+                    .clip(RoundedCornerShape(18.dp))
                     .background(
                         MaterialTheme.colorScheme.surface,
                         RoundedCornerShape(18.dp),
@@ -301,7 +304,7 @@ fun LoginScreen(
                 }
 
                 AndroidView(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxWidth().weight(1f),
                     factory = { ctx ->
                         WebView(ctx).apply {
                             layoutParams = ViewGroup.LayoutParams(
