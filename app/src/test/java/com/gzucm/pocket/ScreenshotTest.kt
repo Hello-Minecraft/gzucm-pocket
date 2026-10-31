@@ -412,6 +412,16 @@ class ScreenshotTest {
         )
     }
 
+    /** 冲突课表 · 浅色模式：专门用来看文字可读性 */
+    @Test
+    fun conflictDemoLight() = shot("22_conflict_light", dark = false) {
+        ScheduleScreen(
+            com.gzucm.pocket.core.ConflictDemo.semester(),
+            com.gzucm.pocket.core.ConflictDemo.sessions(),
+            8, 8, {}, {},
+        )
+    }
+
     /** 冲突排布：并排分列模式（对照叠压） */
     @Test
     fun conflictSplitMode() = shot("22_conflict_split") {

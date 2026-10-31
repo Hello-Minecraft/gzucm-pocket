@@ -55,6 +55,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -768,15 +769,19 @@ internal data class Placed(
  * 不会出现同簇里某块宽、某块窄的错位。
  */
 /**
- * 把课程色提亮成「可阅读的文字色」。
+ * 把课程色加工成「可阅读的文字色」——**深色提亮、浅色压暗**。
  *
- * 保留色相（一眼还能认出是哪门课），只调亮度和饱和度：
- *   · 亮度拉到 0.80~0.88
- *   · 饱和度压到 0.55 —— 太艳的字在深底上会「跳」，看久了刺眼
+ * 之前写死成「亮度至少 0.82」，深色主题下没问题，
+ * 但浅色主题是浅底，提亮等于白字压白底 —— 整张课表几乎看不见字。
  *
- * 深色主题下这个颜色在深底上的对比度约 6~7:1，达到 WCAG AA 对正文的要求。
+ * 现在的规则：
+ *   · 深色主题（浅字压深底）→ 亮度拉到 >= 0.82，饱和度压到 55%
+ *   · 浅色主题（深字压浅底）→ 亮度压到 <= 0.42，饱和度提到 65%
+ *
+ * 两边都保留色相，所以仍然一眼认得出是同一门课。
+ * 对比度都能到 4.5:1 以上（WCAG AA 正文标准）。
  */
-private fun lightenForText(c: Color): Color {
+internal fun textColorFor(c: Color, dark: Boolean): Color {
     val hsv = FloatArray(3)
     android.graphics.Color.colorToHSV(
         android.graphics.Color.rgb(
@@ -786,8 +791,14 @@ private fun lightenForText(c: Color): Color {
         ),
         hsv,
     )
-    hsv[1] = (hsv[1] * 0.55f).coerceAtLeast(0.18f)
-    hsv[2] = hsv[2].coerceAtLeast(0.82f)
+    if (dark) {
+        hsv[1] = (hsv[1] * 0.55f).coerceAtLeast(0.18f)
+        hsv[2] = hsv[2].coerceAtLeast(0.82f)
+    } else {
+        // 浅底上要深字。饱和度略微提高，压暗后色相才不会糊成一片灰
+        hsv[1] = (hsv[1] * 1.15f).coerceAtMost(1f).coerceAtLeast(0.42f)
+        hsv[2] = hsv[2].coerceAtMost(0.42f)
+    }
     return Color(android.graphics.Color.HSVToColor(hsv))
 }
 
@@ -1005,6 +1016,12 @@ private fun BoxScope.CourseBlock(
     val color = courseColor(session.name)
     // 叠压时的实心底色：用当前主题的 surface，保证任何背景图下都不透
     val surfaceBase = MaterialTheme.colorScheme.surface
+    /*
+     * 深浅主题要两套字色策略：深色提亮、浅色压暗。
+     * 用 surface 的亮度判断比 isSystemInDarkTheme 可靠 ——
+     * 主题可能被用户强制覆盖，但 surface 一定反映当前真实底色。
+     */
+    val isDark = surfaceBase.luminance() < 0.5f
 
     /*
      * 错位叠压：块本身保持接近整列宽，只把右侧一小条让给后一块；
@@ -1191,7 +1208,7 @@ private fun BoxScope.CourseBlock(
                  * 做法：保留课程色的色相，把亮度拉到 0.82、饱和度略降，
                  * 在深底上对比度能到 6:1 以上，主力阅读区就清晰了。
                  */
-                color = lightenForText(color),
+                color = textColorFor(color, isDark),
                 // 叠压后横向仍接近整列宽（约 36dp），能横排 3 个字；
                 // 竖向够长就多折几行，别动不动截断
                 maxLines = when {

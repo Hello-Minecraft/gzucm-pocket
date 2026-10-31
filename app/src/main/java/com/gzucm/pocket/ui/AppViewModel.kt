@@ -102,25 +102,56 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * 失败不提示、不记日期 —— 网络问题下次打开还能再试；
      * 只有真正拿到结果才写日期，避免失败一次就整天不检查。
      */
+    /**
+     * 正在检查更新的标记。
+     *
+     * 为什么需要它：bootstrap 和 ON_RESUME 几乎同时触发检查，
+     * 第二次执行时第一次的结果还没写回 lastUpdateCheckDate，
+     * 于是会重复请求一次 GitHub。加这个标记挡掉并发。
+     *
+     * 用普通的 Boolean 而不是 AtomicBoolean：所有读写都在主线程
+     * （viewModelScope 默认 Dispatchers.Main.immediate），不存在竞态。
+     */
+    private var updateChecking = false
+
     private fun checkUpdateSilently() {
         val today = LocalDate.now().toString()
         if (store.lastUpdateCheckDate == today) return
+        // 已经有一次在飞行中：直接返回，别重复打 GitHub
+        if (updateChecking) return
+        updateChecking = true
         viewModelScope.launch {
-            when (val r = com.gzucm.pocket.core.Updater.check()) {
-                is com.gzucm.pocket.core.Updater.Result.Newer -> {
-                    store.latestVersion = r.info.latestVersion
-                    store.lastUpdateCheckDate = today
-                    hasUpdate = true
+            try {
+                val r = com.gzucm.pocket.core.Updater.check()
+                when (r) {
+                    is com.gzucm.pocket.core.Updater.Result.Newer -> {
+                        store.latestVersion = r.info.latestVersion
+                        store.lastUpdateCheckDate = today
+                        hasUpdate = true
+                    }
+                    com.gzucm.pocket.core.Updater.Result.UpToDate -> {
+                        store.latestVersion = null
+                        store.lastUpdateCheckDate = today
+                        hasUpdate = false
+                    }
+                    // 失败不写日期：网络问题下次打开还能再试，
+                    // 不能因为一次失败就整天不检查
+                    is com.gzucm.pocket.core.Updater.Result.Failed -> Unit
                 }
-                com.gzucm.pocket.core.Updater.Result.UpToDate -> {
-                    store.latestVersion = null
-                    store.lastUpdateCheckDate = today
-                    hasUpdate = false
-                }
-                is com.gzucm.pocket.core.Updater.Result.Failed -> Unit
+            } finally {
+                // 无论成功失败都要解锁，否则一次异常会让之后永远不再检查
+                updateChecking = false
             }
         }
     }
+
+    /**
+     * 给 UI 用的「如果今天还没查过就查一次」。
+     *
+     * 从后台切回前台时调用。内部是幂等的（checkUpdateSilently 自带日期判断），
+     * 所以频繁调用也不会重复打 GitHub。
+     */
+    fun checkUpdateIfStale() = checkUpdateSilently()
 
     /** 关于页手动查过之后同步一下红点状态 */
     fun refreshUpdateBadge() {
@@ -228,6 +259,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         viewModelScope.launch {
+            /*
+             * 先查更新，再管登录态。
+             *
+             * 踩过的坑：原来把它放在这个 launch 的最后，前面有两个 return@launch
+             * （未登录、教务 ping 失败），结果只要停在登录页就**永远不查更新** ——
+             * 用户看到的现象是「有新版本但一点提示都没有」。
+             *
+             * 检查更新打的是 api.github.com，跟学校登录态没有任何关系，
+             * 放在最前面才不会被打断。
+             */
+            checkUpdateSilently()
+
             val loggedIn = Net.cookies.has("jw.gzucm.edu.cn")
             if (!loggedIn) {
                 state = state.copy(phase = Phase.NeedLogin)
@@ -244,7 +287,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             state = state.copy(phase = Phase.Ready)
             syncQuietly()
             loadPowerQuietly()
-            checkUpdateSilently()
         }
     }
 
@@ -270,6 +312,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (ecardCookies.isNotEmpty()) Net.cookies.seed("ecard.gzucm.edu.cn", ecardCookies)
         state = state.copy(phase = Phase.Ready, message = null)
         loginExpired = false
+        /*
+         * 登录成功后再查一次更新。
+         *
+         * checkUpdateSilently 内部有「今天查过就跳过」的判断，
+         * 所以这里补调不会重复请求；但如果是「启动时没登录」的情况，
+         * 这一次补调就是唯一的检查机会 —— 少了它，用户从登录页进来后
+         * 一整天都看不到新版本提示。
+         */
+        checkUpdateSilently()
         // 课表可能已经在 onJwReady 时抓过了，别重复
         if (state.sessions.isEmpty() && !state.syncing) syncQuietly()
         // 电费：登录后打个待刷新标记，用户进电费页时弹窗同步一次

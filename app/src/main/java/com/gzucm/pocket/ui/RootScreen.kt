@@ -141,6 +141,19 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
     var tab by remember {
         mutableStateOf(Tab.entries.getOrElse(prefs.startTab) { Tab.Today })
     }
+    /*
+     * 从后台切回前台时补查更新。
+     *
+     * 原来只有「冷启动」查一次。手机上的 App 常常挂后台几天不退出，
+     * 那几天就永远不会知道自己有新版本。
+     * 这里监听 ON_RESUME，内部有「今天查过就跳过」的幂等判断，重复调用无副作用。
+     */
+    androidx.lifecycle.compose.LifecycleEventEffect(
+        androidx.lifecycle.Lifecycle.Event.ON_RESUME
+    ) {
+        vm.checkUpdateIfStale()
+    }
+
     var detail by remember { mutableStateOf<CourseSession?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var showEcardSync by remember { mutableStateOf(false) }
