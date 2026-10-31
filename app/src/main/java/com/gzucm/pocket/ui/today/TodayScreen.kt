@@ -5,15 +5,19 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -112,180 +116,339 @@ fun TodayScreen(
     }
     val showingTomorrow = todayDone && tomorrowSessions.isNotEmpty()
 
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .statusBarsPadding()
-            .padding(horizontal = 18.dp),
-    ) {
-        Spacer(Modifier.height(10.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "${today.monthValue} 月 ${today.dayOfMonth} 日",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Box(
+    /*
+     * 按可用宽度分两套排版。
+     *
+     * 【宽屏】整页**不滚动**，顶部标题栏跨全宽，下面两列各自独立滚动。
+     *   左列 = 电费卡 + 本周概览，右列 = 今日课程。
+     *   （课程放右边是致辉定的，权重 1 : 1.35 保持不动。）
+     *
+     * 【窄屏】沿用原来的单列 + 整页 verticalScroll，视觉零变化。
+     *
+     * 为什么宽屏不能共用外层 verticalScroll：
+     * 外层有 verticalScroll 时，里面的 LazyColumn 会被判定为
+     * 「infinity maximum height constraints」直接抛异常崩溃。
+     * 两套容器分开写是唯一干净的解法。
+     */
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val wide = maxWidth >= 840.dp
+        val hPad = if (wide) 32.dp else 18.dp
+
+        if (wide) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .padding(horizontal = hPad),
+            ) {
+                Spacer(Modifier.height(10.dp))
+
+                TodayTitleBar(
+                    today = today,
+                    currentWeek = currentWeek,
+                    count = todaySessions.size,
+                    syncing = syncing,
+                    hasUpdate = hasUpdate,
+                    onRefresh = onRefresh,
+                    onOpenSettings = onOpenSettings,
+                    // 宽屏：同步/设置已搬到左侧导航栏底部
+                    hideActions = true,
+                )
+
+                Spacer(Modifier.height(16.dp))
+
+                if (!notice.isNullOrBlank()) {
+                    NoticeBar(notice = notice, onOpenLogin = onOpenLogin)
+                    Spacer(Modifier.height(12.dp))
+                }
+
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(28.dp),
+                ) {
+                    /*
+                     * 左列不滚动，靠 weight 撑满剩余高度。
+                     *
+                     * 内容只有两张卡，正常情况下装得下；真装不下时 Column
+                     * 会溢出而不是崩 —— 比塞一层滚动让内外互相抢手势好。
+                     */
+                    Column(
                         Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f))
-                            .padding(horizontal = 7.dp, vertical = 2.dp),
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(18.dp),
                     ) {
-                        Text(
-                            "第 $currentWeek 周",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.primary,
+                        PowerCard(
+                            power = power,
+                            daily = powerDaily,
+                            checkedAt = powerCheckedAt,
+                            onClick = onOpenPower,
                         )
+                        WeekOverview(sessions = weekSessions, currentWeek = currentWeek)
+                    }
+                    LazyColumn(
+                        Modifier
+                            .weight(1.35f)
+                            .fillMaxHeight(),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                            bottom = LocalFloatingBarInset.current,
+                        ),
+                    ) {
+                        item {
+                            CourseSection(
+                                title = if (showingTomorrow) "明日课程" else "今日课程",
+                                sessions = if (showingTomorrow) tomorrowSessions else todaySessions,
+                                syncing = syncing,
+                                allEmpty = sessions.isEmpty(),
+                                progressDone = progressDone,
+                                progressTotal = progressTotal,
+                                onCourseClick = onCourseClick,
+                            )
+                        }
                     }
                 }
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    "${Cn[today.dayOfWeek.value - 1]} · 今天 ${todaySessions.size} 节课",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
-            if (syncing) {
-                androidx.compose.material3.CircularProgressIndicator(
-                    modifier = Modifier.size(17.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.primary,
+        } else {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .statusBarsPadding()
+                    .padding(horizontal = hPad),
+            ) {
+                Spacer(Modifier.height(10.dp))
+
+                TodayTitleBar(
+                    today = today,
+                    currentWeek = currentWeek,
+                    count = todaySessions.size,
+                    syncing = syncing,
+                    hasUpdate = hasUpdate,
+                    onRefresh = onRefresh,
+                    onOpenSettings = onOpenSettings,
                 )
-                Spacer(Modifier.width(10.dp))
-            } else {
+
+                Spacer(Modifier.height(16.dp))
+
+                if (!notice.isNullOrBlank()) {
+                    NoticeBar(notice = notice, onOpenLogin = onOpenLogin)
+                    Spacer(Modifier.height(12.dp))
+                }
+
+                PowerCard(
+                    power = power,
+                    daily = powerDaily,
+                    checkedAt = powerCheckedAt,
+                    onClick = onOpenPower,
+                )
+                Spacer(Modifier.height(18.dp))
+                CourseSection(
+                    title = if (showingTomorrow) "明日课程" else "今日课程",
+                    sessions = if (showingTomorrow) tomorrowSessions else todaySessions,
+                    syncing = syncing,
+                    allEmpty = sessions.isEmpty(),
+                    progressDone = progressDone,
+                    progressTotal = progressTotal,
+                    onCourseClick = onCourseClick,
+                )
+                Spacer(Modifier.height(20.dp))
+                WeekOverview(sessions = weekSessions, currentWeek = currentWeek)
+
+                // 悬浮底栏占位，避免最后一张卡被压在底栏下面
+                Spacer(Modifier.height(LocalFloatingBarInset.current))
+            }
+        }
+    }
+}
+
+/**
+ * 顶部标题栏：日期 + 周次徽标 + 同步 / 设置。
+ *
+ * 抽出来是因为双列和单列都要用同一套标题栏 ——
+ * 复制两份的话，以后加一个按钮必然改一处漏一处。
+ */
+@Composable
+private fun TodayTitleBar(
+    today: LocalDate,
+    currentWeek: Int,
+    count: Int,
+    syncing: Boolean,
+    hasUpdate: Boolean,
+    onRefresh: () -> Unit,
+    onOpenSettings: () -> Unit,
+    /**
+     * 隐藏右侧的同步 / 设置按钮。
+     *
+     * 宽屏下这两个按钮搬到了左侧导航栏底部 —— 留着会同时出现两处入口，
+     * 用户不知道该点哪个，而且标题栏右侧会被占掉一块。
+     */
+    hideActions: Boolean = false,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "${today.monthValue} 月 ${today.dayOfMonth} 日",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Medium,
+                )
+                Spacer(Modifier.width(8.dp))
                 Box(
                     Modifier
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surface)
-                        .clickable(onClick = onRefresh),
-                    contentAlignment = Alignment.Center,
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(scheme.primary.copy(alpha = 0.14f))
+                        .padding(horizontal = 7.dp, vertical = 2.dp),
                 ) {
-                    androidx.compose.material3.Icon(
-                        androidx.compose.material.icons.Icons.Rounded.Refresh,
-                        contentDescription = "同步",
-                        modifier = Modifier.size(17.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    Text(
+                        "第 $currentWeek 周",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = scheme.primary,
                     )
                 }
-                Spacer(Modifier.width(8.dp))
             }
+            Spacer(Modifier.height(3.dp))
+            Text(
+                "${Cn[today.dayOfWeek.value - 1]} · 今天 $count 节课",
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+            )
+        }
+        if (hideActions) return@Row
+        if (syncing) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(17.dp),
+                strokeWidth = 2.dp,
+                color = scheme.primary,
+            )
+            Spacer(Modifier.width(10.dp))
+        } else {
             Box(
                 Modifier
                     .size(34.dp)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surface)
-                    .clickable(onClick = onOpenSettings),
+                    .background(scheme.surface)
+                    .clickable(onClick = onRefresh),
                 contentAlignment = Alignment.Center,
             ) {
-                androidx.compose.material3.Icon(
-                    androidx.compose.material.icons.Icons.Rounded.Settings,
-                    contentDescription = "设置",
+                Icon(
+                    Icons.Rounded.Refresh,
+                    contentDescription = "同步",
                     modifier = Modifier.size(17.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                // 有新版本：右上角一颗小红点，白描边保证在深色主题也看得见
-                if (hasUpdate) {
-                    Box(
-                        Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(top = 6.dp, end = 6.dp)
-                            .size(7.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.error),
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-
-        if (!notice.isNullOrBlank()) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.13f))
-                    .padding(horizontal = 13.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    notice,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.tertiary,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    "去登录",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickable(onClick = onOpenLogin).padding(start = 10.dp),
+                    tint = scheme.onSurfaceVariant,
                 )
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.width(8.dp))
         }
+        Box(
+            Modifier
+                .size(34.dp)
+                .clip(CircleShape)
+                .background(scheme.surface)
+                .clickable(onClick = onOpenSettings),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Rounded.Settings,
+                contentDescription = "设置",
+                modifier = Modifier.size(17.dp),
+                tint = scheme.onSurfaceVariant,
+            )
+            // 有新版本：右上角一颗小红点，白描边保证在深色主题也看得见
+            if (hasUpdate) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 6.dp, end = 6.dp)
+                        .size(7.dp)
+                        .clip(CircleShape)
+                        .background(scheme.error),
+                )
+            }
+        }
+    }
+}
 
-        PowerCard(
-            power = power,
-            daily = powerDaily,
-            checkedAt = powerCheckedAt,
-            onClick = onOpenPower,
-        )
-
-        Spacer(Modifier.height(18.dp))
-
+/** 登录过期之类的提示条，带「去登录」动作。 */
+@Composable
+private fun NoticeBar(notice: String, onOpenLogin: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(scheme.tertiary.copy(alpha = 0.13f))
+            .padding(horizontal = 13.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Text(
-            if (showingTomorrow) "明日课程" else "今日课程",
-            style = MaterialTheme.typography.titleMedium,
+            notice,
+            style = MaterialTheme.typography.bodySmall,
+            color = scheme.tertiary,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            "去登录",
+            style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = scheme.primary,
+            modifier = Modifier.clickable(onClick = onOpenLogin).padding(start = 10.dp),
         )
-        Spacer(Modifier.height(10.dp))
+    }
+}
 
-        if (showingTomorrow) {
-            Timeline(sessions = tomorrowSessions, onCourseClick = onCourseClick)
-        } else if (todaySessions.isEmpty()) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(MaterialTheme.colorScheme.surface)
-                    .padding(vertical = if (syncing && sessions.isEmpty()) 26.dp else 30.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                // 还在抓数据时说「今天没有课」是错的 —— 那是假话，用户会以为今天真没课
-                if (syncing && sessions.isEmpty()) {
-                    com.gzucm.pocket.ui.components.SyncPlaceholder(
-                        done = progressDone,
-                        total = progressTotal,
-                    )
-                } else {
-                    Text(
-                        "今天没有课",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+/**
+ * 一节课的列表区：小标题 + 时间轴，或空态。
+ *
+ * [allEmpty] 用来区分「真的今天没课」和「课表还没抓完」——
+ * 同步中且一条数据都没有时说「今天没有课」是在骗人。
+ */
+@Composable
+private fun CourseSection(
+    title: String,
+    sessions: List<CourseSession>,
+    syncing: Boolean,
+    allEmpty: Boolean,
+    progressDone: Int,
+    progressTotal: Int,
+    onCourseClick: (CourseSession) -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Text(
+        title,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Medium,
+        color = scheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.height(10.dp))
+
+    if (sessions.isEmpty()) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(scheme.surface)
+                .padding(vertical = if (syncing && allEmpty) 26.dp else 30.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (syncing && allEmpty) {
+                com.gzucm.pocket.ui.components.SyncPlaceholder(
+                    done = progressDone,
+                    total = progressTotal,
+                )
+            } else {
+                Text(
+                    "今天没有课",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = scheme.onSurfaceVariant,
+                )
             }
-        } else {
-            Timeline(sessions = todaySessions, onCourseClick = onCourseClick)
         }
-
-        Spacer(Modifier.height(20.dp))
-
-        WeekOverview(
-            sessions = weekSessions,
-            currentWeek = currentWeek,
-        )
-
-        // 悬浮底栏占位，避免最后一张卡被压在底栏下面
-        Spacer(Modifier.height(LocalFloatingBarInset.current))
+    } else {
+        Timeline(sessions = sessions, onCourseClick = onCourseClick)
     }
 }
 
@@ -379,27 +542,41 @@ private fun WeekOverview(sessions: List<CourseSession>, currentWeek: Int) {
         }
         if (next != null) {
             Spacer(Modifier.height(14.dp))
-            Row(
+            /*
+             * 两行布局，不是一行三个元素。
+             *
+             * 原来写成「下次上课 | 课名(weight=1f) | 时间地点」一行排，
+             * 课名又没设 maxLines —— 空间不够时就把「中医儿科学」折成
+             * 「中医儿科」+「学」两行，看着像写错了。
+             * 平板双列把右列压窄到 330dp 后这个问题特别明显。
+             *
+             * 改成课名一行、时间地点一行，两边都不挤，而且手机端也更好读。
+             */
+            Column(
                 Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(10.dp))
                     .background(scheme.primary.copy(alpha = 0.07f))
                     .padding(horizontal = 12.dp, vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    "下次上课",
-                    fontSize = 10.5.sp,
-                    color = scheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.width(9.dp))
-                Text(
-                    next.first,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = scheme.primary,
-                    modifier = Modifier.weight(1f),
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "下次上课",
+                        fontSize = 10.5.sp,
+                        color = scheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(9.dp))
+                    Text(
+                        next.first,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = scheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Spacer(Modifier.height(3.dp))
                 Text(
                     next.second,
                     fontSize = 10.5.sp,

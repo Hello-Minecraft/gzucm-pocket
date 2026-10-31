@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import com.gzucm.pocket.ui.adaptive.AdaptiveSheet
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -37,6 +38,15 @@ import androidx.compose.ui.unit.sp
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PowerWhySheet(
+    /**
+     * 显隐。由调用方传真实状态、**外层不要再包 if**。
+     *
+     * 包 if 的话组件第一次进组合时 visible 就已经是 true，
+     * AnimatedVisibility 认为「初始就可见」，进入动画不播、
+     * 退场时整棵子树被直接摘掉 —— 面板会「啪」地出现，
+     * 平板侧栏完全没有滑动效果。
+     */
+    visible: Boolean = true,
     roomLabel: String,
     onDismiss: () -> Unit,
     alertOn: Boolean = true,
@@ -55,11 +65,10 @@ fun PowerWhySheet(
             .format(java.util.Date(ts))
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = scheme.surface,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+    AdaptiveSheet(
+        visible = visible,
+        onDismiss = onDismiss,
+        paneTitle = "电费说明",
     ) {
         Column(
             Modifier

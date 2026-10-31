@@ -25,6 +25,7 @@ import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import com.gzucm.pocket.ui.adaptive.AdaptiveSheet
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -73,26 +74,89 @@ private val Tiers = listOf(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DonateSheet(onDismiss: () -> Unit) {
-    val scheme = MaterialTheme.colorScheme
+fun DonateSheet(
+    onDismiss: () -> Unit,
+    /**
+     * 显隐。由调用方传真实状态、**外层不要再包 if**。
+     *
+     * 包 if 的话组件第一次进组合时 visible 就已经是 true，
+     * AnimatedVisibility 认为「初始就可见」，进入动画不播、
+     * 退场时整棵子树被直接摘掉 —— 面板会「啪」地出现，
+     * 平板侧栏完全没有滑动效果。
+     */
+    visible: Boolean = true,
+) {
+    AdaptiveSheet(
+        visible = visible,
+        onDismiss = onDismiss,
+        paneTitle = "打赏作者",
+    ) {
+        DonateContent(onBack = onDismiss)
+    }
+}
+
+/**
+ * 打赏正文，**不含容器**。
+ *
+ * 用途：作为设置面板里的一个子页面（跟「关于软件」同一层级）直接嵌进去。
+ * 这时候不需要再套一层 AdaptiveSheet —— 套了就是两层面板叠着，
+ * 标题重复、返回时两层动画先后退，层级看着很乱。
+ *
+ * [onBack] 从收款码大图回到三档列表；已经在列表页时相当于「关闭」。
+ * 外层（设置面板）负责真正关闭整个面板，所以这里只往回退一级。
+ */
+@Composable
+fun DonateContent(onBack: () -> Unit) {
     var selected by remember { mutableStateOf<Tier?>(null) }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = scheme.surface,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-    ) {
-        AnimatedContent(
-            targetState = selected,
-            transitionSpec = { fadeIn() togetherWith fadeOut() },
-            label = "donate",
-        ) { tier ->
-            if (tier == null) {
+    /*
+     * 返回键的两级语义：
+     *   · 在收款码大图 → 回到三档列表
+     *   · 已在列表   → 让外层关掉整个面板
+     */
+    androidx.activity.compose.BackHandler(enabled = selected != null) {
+        selected = null
+    }
+
+    AnimatedContent(
+        targetState = selected,
+        transitionSpec = { fadeIn() togetherWith fadeOut() },
+        label = "donate",
+    ) { tier ->
+        if (tier == null) {
+            Column {
+                // 顶栏自带「返回设置」，跟关于软件那个返回一致
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(start = 18.dp, end = 18.dp, bottom = 6.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                ) {
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable(onClick = onBack)
+                            .padding(vertical = 6.dp, horizontal = 2.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            androidx.compose.material.icons.Icons.Rounded.ArrowBack,
+                            contentDescription = null,
+                            modifier = Modifier.size(17.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            "返回设置",
+                            fontSize = 12.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 TierList(onPick = { selected = it })
-            } else {
-                TierDetail(tier = tier, onBack = { selected = null })
             }
+        } else {
+            TierDetail(tier = tier, onBack = { selected = null })
         }
     }
 }

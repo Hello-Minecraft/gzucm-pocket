@@ -5,12 +5,15 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -135,226 +138,578 @@ fun PowerScreen(
         if (l.isEmpty()) 0.0 else l.sumOf { it.usage } / l.size
     }
 
-    LazyColumn(
+    /*
+     * 上次更新时间要提到布局之前算。
+     *
+     * 原来它写在 LazyColumn 的 item 里，两套布局（左右分栏 / 单列）
+     * 都要用同一个值 —— 留在 item 里就得算两遍，而且分栏后左列单独滚动，
+     * item 复用时机不一样，值可能不一致。
+     */
+    val updatedText = remember(power) {
+        val ts = com.gzucm.pocket.core.SessionStore(ctx.applicationContext).powerCheckedAt
+        if (ts <= 0) "" else {
+            val fmt = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.CHINA)
+            "更新于 " + fmt.format(java.util.Date(ts))
+        }
+    }
+
+    BoxWithConstraints(
         Modifier
             .fillMaxSize()
             .statusBarsPadding(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-            start = 18.dp, end = 18.dp, top = 12.dp,
-            bottom = LocalFloatingBarInset.current + 12.dp,
-        ),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // 表头：手动更新入口。自动同步每天只跑一次，想看最新数据就点这里（会弹窗）
-        item {
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "宿舍电量",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.weight(1f))
-                // 上次更新时间：小小字，压在「更新」左边
-                val updatedText = remember(power) {
-                    val ts = com.gzucm.pocket.core.SessionStore(
-                        ctx.applicationContext
-                    ).powerCheckedAt
-                    if (ts <= 0) "" else {
-                        val d = java.util.Date(ts)
-                        val fmt = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.CHINA)
-                        "更新于 " + fmt.format(d)
-                    }
-                }
-                if (updatedText.isNotEmpty()) {
-                    Text(
-                        updatedText,
-                        fontSize = 9.5.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-                        modifier = Modifier.padding(end = 2.dp),
-                    )
-                    Spacer(Modifier.width(4.dp))
-                }
-                Row(
-                    Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onSync)
-                        .padding(horizontal = 9.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        Icons.Rounded.Refresh,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        "更新",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-            }
-        }
+    val wide = maxWidth >= 840.dp
+    val hPad = if (wide) 32.dp else 18.dp
 
-        item {
-            Column(
+    if (wide) {
+        /*
+         * 宽屏：左右分栏。左边**不滚动**、三块按可用高度均分撑满；右边独立滚动。
+         *
+         * 左列三块（表头 / 余额卡 / 趋势卡）的分配：
+         *   表头是固定高度，不参与分配；
+         *   余额卡按内容实测高度（它有自己的内边距和固定字号，硬拉会变形）；
+         *   趋势卡吃掉剩下的全部高度，内部再把「折线」和「差值柱」按比例分。
+         *
+         * 为什么用 BoxWithConstraints 量高度而不是权重均分：
+         * 余额卡的高度由字号和内边距决定，不是弹性容器 ——
+         * 用 weight 分它会把它拉长，中间留一片空白反而更难看。
+         * 量出来它真实占多少，剩下的全给趋势图，才真的「撑满」。
+         */
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = hPad),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            PowerHeader(updatedText = updatedText, onSync = onSync)
+
+            Row(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(
-                        Brush.linearGradient(
-                            listOf(
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
-                                MaterialTheme.colorScheme.surface,
-                            ),
-                        ),
-                    )
-                    .padding(horizontal = 20.dp, vertical = 20.dp),
+                    .weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(24.dp),
             ) {
-                // 房号 + 「电费设置」提示
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        power.roomLabel,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Row(
-                        Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .clickable { showWhy = true }
-                            .padding(horizontal = 3.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        // 原来的「!」圆圈换成调节图标，跟「设置」这个语义更搭
-                        Icon(
-                            Icons.Rounded.Tune,
-                            contentDescription = null,
-                            modifier = Modifier.size(13.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            "电费设置",
-                            fontSize = 10.5.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textDecoration = TextDecoration.Underline,
-                        )
-                    }
-                }
-                if (showWhy) {
-                    PowerWhySheet(
-                        roomLabel = power.roomLabel,
-                        onDismiss = { showWhy = false },
-                        alertOn = powerAlertOn,
-                        onAlertChange = onPowerAlertChange,
-                        // 先收起设置面板：两层 ModalBottomSheet 叠在一起会互相挡
-                        onBuyInMiniProgram = { showWhy = false; onOpenRebindGuide() },
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(
-                        formatNum(power.balance),
-                        fontSize = 44.sp,
-                        fontWeight = FontWeight.Medium,
-                        letterSpacing = (-1.5).sp,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        power.unit,
-                        fontSize = 15.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 8.dp),
-                    )
-                }
-                if (avg7 > 0) {
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        "近 7 天日均 ${Fmt.d2(avg7)} 度 · " + run {
-                            val days = power.balance / avg7
-                            when {
-                                days < 1 -> "不足 1 天，建议充值"
-                                days > 999 -> "可用很久"
-                                else -> "可用约 ${days.toInt()} 天"
-                            }
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-
-        if (daily.size >= 3) {
-            item {
                 Column(
                     Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(MaterialTheme.colorScheme.surface)
-                        .padding(horizontal = 16.dp, vertical = 15.dp),
+                        .weight(1.12f)
+                        .fillMaxHeight(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Text(
-                        "用电趋势",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Medium,
+                    BalanceCard(
+                        power = power,
+                        avg7 = avg7,
+                        showWhy = showWhy,
+                        onShowWhyChange = { showWhy = it },
+                        powerAlertOn = powerAlertOn,
+                        onPowerAlertChange = onPowerAlertChange,
+                        onOpenRebindGuide = onOpenRebindGuide,
                     )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        "最近 ${minOf(daily.size, 30)} 天",
-                        fontSize = 10.5.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(14.dp))
-                    UsageChart(daily.takeLast(30))
+                    if (daily.size >= 3) {
+                        // 趋势卡吃掉剩余高度，内部两图再按 62:38 分
+                        Box(Modifier.weight(1f)) {
+                            TrendCard(
+                                daily = daily,
+                                fillHeight = true,
+                                showDelta = true,
+                            )
+                        }
+                    }
+                }
+
+                LazyColumn(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        bottom = LocalFloatingBarInset.current + 12.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    item {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "每日明细",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Spacer(Modifier.weight(1f))
+                            Text(
+                                "共 ${daily.size} 天",
+                                fontSize = 10.5.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    items(daily.reversed(), key = { it.date }) { d ->
+                        DailyRow(day = d)
+                    }
                 }
             }
         }
+    } else {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                start = hPad, end = hPad, top = 12.dp,
+                bottom = LocalFloatingBarInset.current + 12.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item { PowerHeader(updatedText = updatedText, onSync = onSync) }
+            item {
+                BalanceCard(
+                    power = power,
+                    avg7 = avg7,
+                    showWhy = showWhy,
+                    onShowWhyChange = { showWhy = it },
+                    powerAlertOn = powerAlertOn,
+                    onPowerAlertChange = onPowerAlertChange,
+                    onOpenRebindGuide = onOpenRebindGuide,
+                )
+            }
+            if (daily.size >= 3) {
+                item { TrendCard(daily = daily) }
+            }
+            item {
+                Text(
+                    "每日明细",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
+                )
+            }
+            items(daily.reversed(), key = { it.date }) { d ->
+                DailyRow(day = d)
+            }
+        }
+    }
+    } // BoxWithConstraints
+}
 
-        item {
+/** 表头：宿舍电量标签 + 上次更新时间 + 手动更新入口。 */
+@Composable
+private fun PowerHeader(updatedText: String, onSync: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "宿舍电量",
+            fontSize = 13.sp,
+            color = scheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.weight(1f))
+        if (updatedText.isNotEmpty()) {
             Text(
-                "每日明细",
-                style = MaterialTheme.typography.titleMedium,
+                updatedText,
+                fontSize = 9.5.sp,
+                color = scheme.onSurfaceVariant.copy(alpha = 0.55f),
+                modifier = Modifier.padding(end = 2.dp),
+            )
+            Spacer(Modifier.width(4.dp))
+        }
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(onClick = onSync)
+                .padding(horizontal = 9.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Rounded.Refresh,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+                tint = scheme.primary,
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                "更新",
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
+                color = scheme.primary,
             )
         }
+    }
+}
 
-        items(daily.reversed(), key = { it.date }) { d ->
+/**
+ * 余额卡：房号 + 大号余额 + 可用天数。
+ *
+ * 「电费设置」的入口和它自己的面板都放在这里 ——
+ * 面板状态 `showWhy` 由外层持有，因为这个卡在两套布局里都要用，
+ * 状态不能跟着卡片一起重建。
+ */
+@Composable
+private fun BalanceCard(
+    power: PowerInfo,
+    avg7: Double,
+    showWhy: Boolean,
+    onShowWhyChange: (Boolean) -> Unit,
+    powerAlertOn: Boolean,
+    onPowerAlertChange: (Boolean) -> Unit,
+    onOpenRebindGuide: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        scheme.primary.copy(alpha = 0.14f),
+                        scheme.surface,
+                    ),
+                ),
+            )
+            .padding(horizontal = 20.dp, vertical = 20.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                power.roomLabel,
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.width(10.dp))
             Row(
                 Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(11.dp))
-                    .background(MaterialTheme.colorScheme.surface)
-                    .padding(horizontal = 14.dp, vertical = 11.dp),
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable { onShowWhyChange(true) }
+                    .padding(horizontal = 3.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    d.date,
-                    fontSize = 12.5.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                // 原来的「!」圆圈换成调节图标，跟「设置」这个语义更搭
+                Icon(
+                    Icons.Rounded.Tune,
+                    contentDescription = null,
+                    modifier = Modifier.size(13.dp),
+                    tint = scheme.onSurfaceVariant.copy(alpha = 0.65f),
                 )
-                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.width(4.dp))
                 Text(
-                    "用 ${Fmt.d2(d.usage)}",
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.Medium,
-                )
-                Spacer(Modifier.width(14.dp))
-                Text(
-                    "余 ${Fmt.d2(d.remain)}",
-                    fontSize = 11.5.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    "电费设置",
+                    fontSize = 10.5.sp,
+                    color = scheme.onSurfaceVariant,
+                    textDecoration = TextDecoration.Underline,
                 )
             }
         }
+        PowerWhySheet(
+            visible = showWhy,
+            roomLabel = power.roomLabel,
+            onDismiss = { onShowWhyChange(false) },
+            alertOn = powerAlertOn,
+            onAlertChange = onPowerAlertChange,
+            // 先收起设置面板：两层面板叠在一起会互相挡
+            onBuyInMiniProgram = { onShowWhyChange(false); onOpenRebindGuide() },
+        )
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                formatNum(power.balance),
+                fontSize = 44.sp,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = (-1.5).sp,
+                color = scheme.primary,
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                power.unit,
+                fontSize = 15.sp,
+                color = scheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+        }
+        if (avg7 > 0) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "近 7 天日均 ${Fmt.d2(avg7)} 度 · " + run {
+                    val days = power.balance / avg7
+                    when {
+                        days < 1 -> "不足 1 天，建议充值"
+                        days > 999 -> "可用很久"
+                        else -> "可用约 ${days.toInt()} 天"
+                    }
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * 用电趋势卡片：折线 + 相对日均的差值柱。
+ *
+ * [chartHeight] 让宽屏把它拉高 —— 平板上左列内容本来就少，
+ * 图矮矮一条会显得整页空荡荡。
+ *
+ * 差值柱是致辉要的：折线只告诉你「用了多少」，
+ * 差值柱直接说「这天比平时多用了还是少用了」，一眼就能看出异常天。
+ */
+@Composable
+private fun TrendCard(
+    daily: List<PowerDaily>,
+    chartHeight: androidx.compose.ui.unit.Dp = 110.dp,
+    showDelta: Boolean = false,
+    /** 撑满父容器剩余高度，并把两张图按可用空间分配（宽屏左列用） */
+    fillHeight: Boolean = false,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val pts = remember(daily) { daily.takeLast(30) }
+
+    val outer = if (fillHeight) {
+        Modifier.fillMaxSize()
+    } else {
+        Modifier.fillMaxWidth()
+    }
+
+    Column(
+        outer
+            .clip(RoundedCornerShape(16.dp))
+            .background(scheme.surface)
+            .padding(horizontal = 16.dp, vertical = 15.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "用电趋势",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "最近 ${minOf(daily.size, 30)} 天",
+                    fontSize = 10.5.sp,
+                    color = scheme.onSurfaceVariant,
+                )
+            }
+            DeltaLegend(show = showDelta)
+        }
+        Spacer(Modifier.height(14.dp))
+
+        if (fillHeight) {
+            /*
+             * 撑满模式：先用 BoxWithConstraints 量出卡片内剩余多少高度，
+             * 再按 62 : 38 分给折线图和差值柱。
+             *
+             * 为什么不留固定高度：平板横屏 900dp、竖屏 1200dp、
+             * 分屏后可能只有 600dp —— 写死高度总有一档是错的：
+             * 高了会溢出画到卡片外面，矮了底部留一片空白。
+             * 量出来再分，任何高度都刚好撑满。
+             *
+             * 两张图各自也有下限（折线 90dp、差值柱 56dp），
+             * 扣掉固定开销后剩余不足时按比例压缩，不会出现负数高度。
+             */
+            BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+                /*
+                 * 折线和差值柱按 55 : 45 分，但**折线设上限 240dp**。
+                 *
+                 * 一开始按 62 : 38 分，横屏 900dp 高时折线被拉到 380dp ——
+                 * 8 个数据点摊在这么高的画布上，线陡得像心电图，
+                 * 反而不如矮一点时看得清趋势。
+                 * 折线超过 240dp 之后信息量不再增加，多出来的高度给差值柱更划算。
+                 *
+                 * 底部还要留 20dp：差值柱的日期标签在最下方，
+                 * 不留的话会被卡片内边距切掉半个字。
+                 */
+                val fixedOverhead = (if (showDelta) 30.dp else 0.dp) + 20.dp
+                val avail = (maxHeight - fixedOverhead).coerceAtLeast(120.dp)
+                val lineH = if (showDelta) {
+                    (avail * 0.55f).coerceAtMost(240.dp).coerceAtLeast(90.dp)
+                } else {
+                    avail
+                }
+                // 差值柱拿走折线用剩的全部高度，但至少 56dp 才读得出正负
+                val deltaH = if (showDelta) {
+                    (avail - lineH).coerceAtLeast(56.dp)
+                } else {
+                    0.dp
+                }
+
+                Column(Modifier.fillMaxSize()) {
+                    UsageChart(pts, height = lineH)
+                    if (showDelta) {
+                        Spacer(Modifier.height(10.dp))
+                        // 剩余高度全给差值柱，它内部再按「标题 / 柱区 / 日期标签」分
+                        Box(Modifier.weight(1f).fillMaxWidth()) {
+                            DeltaBars(pts, height = deltaH)
+                        }
+                    }
+                }
+            }
+        } else {
+            UsageChart(pts, height = chartHeight)
+            if (showDelta) {
+                Spacer(Modifier.height(18.dp))
+                DeltaBars(pts, height = chartHeight * 0.62f)
+            }
+        }
+    }
+}
+
+/** 差值柱的图例：两个小色块 + 说明。只在显示差值柱时出现。 */
+@Composable
+private fun DeltaLegend(show: Boolean) {
+    if (!show) return
+    val scheme = MaterialTheme.colorScheme
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .size(7.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(scheme.secondary),
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            "省",
+            fontSize = 9.5.sp,
+            color = scheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(10.dp))
+        Box(
+            Modifier
+                .size(7.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(scheme.primary),
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            "超日均",
+            fontSize = 9.5.sp,
+            color = scheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * 每天用量相对「近 7 天日均」的差值柱，零轴居中。
+ *
+ * 颜色用主题正负搭配（致辉选的）：超出日均用 primary、低于日均用 secondary。
+ * 不用 error 红是因为「今天多用了两度电」算不上错误，
+ * 用告警色会把日常波动搞得像出了事故。
+ *
+ * 基线取整段数据的日均而不是固定 7 天 —— 图里只有 8 天时，
+ * 「近 7 天日均」和全段日均几乎一样，但在 30 天视图里
+ * 用全段日均更能反映「这段时间的常态」。
+ */
+@Composable
+private fun DeltaBars(points: List<PowerDaily>, height: androidx.compose.ui.unit.Dp) {
+    if (points.size < 2) return
+    val scheme = MaterialTheme.colorScheme
+    val over = scheme.primary
+    val under = scheme.secondary
+
+    val avg = remember(points) {
+        val valid = points.filter { it.usage > 0 }
+        if (valid.isEmpty()) 0.0 else valid.sumOf { it.usage } / valid.size
+    }
+    if (avg <= 0) return
+
+    // 最大偏离量决定纵向缩放；至少给 0.1 免得全零时除零
+    val maxAbs = remember(points, avg) {
+        points.maxOfOrNull { kotlin.math.abs(it.usage - avg) }?.toFloat()?.coerceAtLeast(0.1f) ?: 0.1f
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        Text(
+            "相对日均 ${Fmt.d2(avg)} 度",
+            fontSize = 10.5.sp,
+            color = scheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(6.dp))
+        /*
+         * Canvas 用 weight(1f) 吃掉剩余高度，不写死 ——
+         * 写死的话，父容器给了多少高度它都用不上，
+         * 多出来的空间全变成卡片底部的空白。
+         */
+        Canvas(
+            Modifier
+                .fillMaxWidth()
+                .weight(1f),
+        ) {
+            val n = points.size
+            val slot = size.width / n
+            val barW = (slot * 0.58f).coerceAtLeast(1.5f)
+            val mid = size.height / 2f
+            // 上下各留 6% 余量，柱顶不贴边
+            val amp = size.height * 0.44f
+
+            // 零轴：一条很淡的横线，说明「这条是日均」
+            drawLine(
+                color = scheme.onSurfaceVariant.copy(alpha = 0.25f),
+                start = Offset(0f, mid),
+                end = Offset(size.width, mid),
+                strokeWidth = 1f,
+            )
+
+            points.forEachIndexed { i, p ->
+                val delta = (p.usage - avg).toFloat()
+                val h = (delta / maxAbs) * amp
+                val cx = slot * i + slot / 2f
+                val top = if (delta >= 0) mid - h else mid
+                val bottom = if (delta >= 0) mid else mid + kotlin.math.abs(h)
+                // 高度太小时给 1px，否则「几乎等于日均」的那几天会凭空消失
+                val drawH = (bottom - top).coerceAtLeast(1f)
+                drawRect(
+                    color = if (delta >= 0) over.copy(alpha = 0.85f) else under.copy(alpha = 0.85f),
+                    topLeft = Offset(cx - barW / 2f, if (delta >= 0) mid - drawH else mid),
+                    size = androidx.compose.ui.geometry.Size(barW, drawH),
+                )
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(
+                points.first().date.takeLast(5),
+                fontSize = 9.sp,
+                lineHeight = 11.sp,
+                color = scheme.onSurfaceVariant.copy(alpha = 0.55f),
+            )
+            Text(
+                points.last().date.takeLast(5),
+                fontSize = 9.sp,
+                lineHeight = 11.sp,
+                color = scheme.onSurfaceVariant.copy(alpha = 0.55f),
+            )
+        }
+    }
+}
+
+/** 每日明细的一行：日期 …… 用量 · 余量。 */
+@Composable
+private fun DailyRow(day: PowerDaily) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(11.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 14.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            day.date,
+            fontSize = 12.5.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            "用 ${Fmt.d2(day.usage)}",
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.Medium,
+        )
+        Spacer(Modifier.width(14.dp))
+        Text(
+            "余 ${Fmt.d2(day.remain)}",
+            fontSize = 11.5.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -365,7 +720,10 @@ fun PowerScreen(
  * 日期与用量显示在图**上方**（图内空间太挤，字会压线）。
  */
 @Composable
-private fun UsageChart(points: List<PowerDaily>) {
+private fun UsageChart(
+    points: List<PowerDaily>,
+    height: androidx.compose.ui.unit.Dp = 110.dp,
+) {
     val scheme = MaterialTheme.colorScheme
     val line = scheme.primary
     val maxV = (points.maxOfOrNull { it.usage } ?: 0.1).coerceAtLeast(0.1)
@@ -411,7 +769,7 @@ private fun UsageChart(points: List<PowerDaily>) {
         Canvas(
             Modifier
                 .fillMaxWidth()
-                .height(110.dp)
+                .height(height)
                 .pointerInput(points) {
                     // 拖动时按 x 落到最近的点；手指不用精确对准
                     fun pick(x: Float) {

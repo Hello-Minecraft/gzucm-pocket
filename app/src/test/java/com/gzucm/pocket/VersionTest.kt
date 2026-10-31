@@ -13,15 +13,24 @@ import org.junit.Test
  */
 class VersionTest {
 
+    /**
+     * 去掉 `-beta` / `-rc1` 这类预发布后缀，只留 x.y.z。
+     *
+     * versionName 允许带后缀（Android 本身不限制格式），
+     * 但 versionCode 必须仍然是三个数字段推出来的，
+     * 否则升级判定会乱。
+     */
+    private val core: String get() = BuildConfig.VERSION_NAME.substringBefore("-")
+
     @Test
     fun `版本名与期望值一致`() {
-        assertEquals("1.2.7", BuildConfig.VERSION_NAME)
-        assertEquals(10207, BuildConfig.VERSION_CODE)
+        assertEquals("1.2.8-beta", BuildConfig.VERSION_NAME)
+        assertEquals(10208, BuildConfig.VERSION_CODE)
     }
 
     @Test
     fun `版本名是语义化格式`() {
-        val parts = BuildConfig.VERSION_NAME.split(".")
+        val parts = core.split(".")
         assertEquals("版本名应为 x.y.z 三段", 3, parts.size)
         parts.forEach { assertTrue("每段必须是数字：$it", it.all(Char::isDigit)) }
     }
@@ -29,7 +38,7 @@ class VersionTest {
     @Test
     fun `版本号与版本名一致`() {
         // 约定：versionCode = 主*10000 + 次*100 + 修订
-        val parts = BuildConfig.VERSION_NAME.split(".").map { it.toInt() }
+        val parts = core.split(".").map { it.toInt() }
         val expectedCode = parts[0] * 10000 + parts[1] * 100 + parts[2]
         assertEquals(
             "versionCode 应为 $expectedCode（由 ${BuildConfig.VERSION_NAME} 推出）",

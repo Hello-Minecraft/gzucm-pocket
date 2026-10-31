@@ -57,6 +57,38 @@ class SessionStore(context: Context) {
         get() = sp.getString(KEY_CACHE_SESSIONS, null)
         set(v) = sp.edit().putString(KEY_CACHE_SESSIONS, v).apply()
 
+    /**
+     * 课表缓存的数据版本。算法改了（比如修了周次错位）就 +1，
+     * 旧的缓存会被判定失效并清掉，强制重新同步。
+     *
+     * 为什么需要这个：周次错位的修复只改了「怎么算周」，
+     * 已经缓存下来的旧数据仍然是错位的。用户升级后不重新同步的话，
+     * 看到的还是错的，会以为没修好。
+     *
+     * 版本历史：
+     *   1 = 初始
+     *   2 = 修正「教务周从周日起、App 从周一起」导致的周日课错位
+     */
+    var sessionsDataVersion: Int
+        get() = sp.getInt(KEY_SESSIONS_VERSION, 1)
+        set(v) = sp.edit().putInt(KEY_SESSIONS_VERSION, v).apply()
+
+    /** 当前代码期望的数据版本。改周次/日期算法时同步 +1。 */
+    val sessionsDataVersionExpected: Int get() = 2
+
+    /**
+     * 缓存是否因算法升级而失效。
+     *
+     * 失效时调用方应当清掉 [cachedSessions] 并重新同步。
+     */
+    fun dropStaleSessionCache() {
+        if (sessionsDataVersion >= sessionsDataVersionExpected) return
+        sp.edit()
+            .remove(KEY_CACHE_SESSIONS)
+            .putInt(KEY_SESSIONS_VERSION, sessionsDataVersionExpected)
+            .apply()
+    }
+
     var cachedPower: String?
         get() = sp.getString(KEY_CACHE_POWER, null)
         set(v) = sp.edit().putString(KEY_CACHE_POWER, v).apply()
@@ -88,6 +120,18 @@ class SessionStore(context: Context) {
     var courseBgAlpha: Float
         get() = sp.getFloat(KEY_BG_ALPHA, 0.45f)
         set(v) = sp.edit().putFloat(KEY_BG_ALPHA, v).apply()
+
+    /**
+     * 课表是否显示虚线网格。
+     *
+     * 平板端课程会并排分列，一格挨着一格，肉眼很难判断「这块属于星期几」。
+     * 画上横竖虚线（行 = 第几节，列 = 星期几）之后边界就清楚了。
+     *
+     * 默认关闭：手机上列本来就窄，加网格线只会显得脏。
+     */
+    var courseGridLines: Boolean
+        get() = sp.getBoolean(KEY_GRID_LINES, false)
+        set(v) = sp.edit().putBoolean(KEY_GRID_LINES, v).apply()
 
     /** 缓存的当月每日明细（JSON）。余额缓存了明细没缓存，导致重启后折线图和明细是空的 */
     var cachedPowerDaily: String?
@@ -186,12 +230,14 @@ class SessionStore(context: Context) {
         const val KEY_SYNC_AT = "sync_at"
         const val KEY_CACHE_SEM = "cache_semester"
         const val KEY_CACHE_SESSIONS = "cache_sessions"
+        const val KEY_SESSIONS_VERSION = "sessions_data_version"
         const val KEY_CACHE_POWER = "cache_power"
         const val KEY_POWER_DAYS = "power_days"
         const val KEY_POWER_AT = "power_at"
         const val KEY_POWER_ALERT = "power_alert_date"
         const val KEY_BG_PATH = "course_bg_path"
         const val KEY_BG_ALPHA = "course_bg_alpha"
+        const val KEY_GRID_LINES = "course_grid_lines"
         const val KEY_START_TAB = "start_tab"
         const val KEY_THEME_SEED = "theme_seed"
         const val KEY_OVERLAP_MODE = "overlap_mode"

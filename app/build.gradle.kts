@@ -17,8 +17,8 @@ android {
         targetSdk = 35
         // versionCode 由 versionName 推出：主*10000 + 次*100 + 修订
         // 1.2.5 → 10205。改版本名必须同步改 code，VersionTest 会校验。
-        versionCode = 10207
-        versionName = "1.2.7"
+        versionCode = 10208
+        versionName = "1.2.8-beta"
         resourceConfigurations += listOf("zh", "en")
     }
 
@@ -84,6 +84,18 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
+
+            /*
+             * Robolectric 的临时目录改到 D 盘。
+             *
+             * C 盘只有 89G 且已满（剩 300 多 MB），每次跑截图测试要往
+             * %TEMP% 写几百 MB 的 native runtime 和模拟器镜像，
+             * 写不进去就整片失败 —— 报的是「磁盘空间不足」，
+             * 看起来像代码坏了，其实是环境问题。
+             */
+            all {
+                it.systemProperty("java.io.tmpdir", "D:/App/_android/tmp")
+            }
         }
     }
 

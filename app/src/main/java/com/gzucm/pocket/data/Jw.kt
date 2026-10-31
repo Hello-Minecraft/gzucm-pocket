@@ -133,9 +133,13 @@ object Jw {
 
             val startUnit = o.str("ps").toIntOrNull() ?: 0
             val endUnit = (o.str("pe").toIntOrNull() ?: startUnit).coerceAtLeast(startUnit)
-            val mainRoom = o.str("jxcdmc")
-            val c2 = o.str("jxcdmc2")
+            val mainRoom = o.roomName()
 
+            /*
+             * 逐周教室：`jxcdmc2` 形如「场地A-3,场地B-4」。
+             * 主字段 jxcdmc 有值时以它为准，避免逐周串被误当主场地。
+             */
+            val c2 = o.str("jxcdmc2").trim()
             val pairs: List<Pair<Int, String>> = if (c2.isNotBlank()) {
                 c2.split(",").mapNotNull { tok ->
                     val t = tok.trim()
@@ -144,14 +148,25 @@ object Jw {
                     if (m == null) null
                     else {
                         val week = m.groupValues[2].toIntOrNull() ?: return@mapNotNull null
-                        val room = m.groupValues[1].trim().ifBlank { mainRoom }
+                        val room = if (mainRoom.isNotBlank()) mainRoom
+                        else m.groupValues[1].trim()
                         week to room
                     }
                 }
             } else {
                 o.str("zc").split(",").mapNotNull { w ->
-                    val week = w.trim().toIntOrNull() ?: return@mapNotNull null
-                    week to mainRoom
+                    val zcWeek = w.trim().toIntOrNull() ?: return@mapNotNull null
+                    /*
+                     * 总表没有 qsrq，只能用 zc 换算，换算规则同上：
+                     * 教务的周是周日~周六，App 的是周一~周日 ——
+                     * 教务第 N 周的**周日**在 App 里属于第 N-1 周
+                     * （比如教务第 8 周的周日 10-25，是 App 第 7 周的周日）。
+                     * 周日且 N=1 时算出来是第 0 周，说明那天在学期开始之前，
+                     * 直接丢掉（return@mapNotNull null）。
+                     */
+                    val appWeek = if (weekday == 7) zcWeek - 1 else zcWeek
+                    if (appWeek < 1) return@mapNotNull null
+                    appWeek to mainRoom
                 }
             }
             if (pairs.isEmpty()) continue
@@ -202,11 +217,28 @@ object Jw {
             ),
             referer = "$BASE/new/student/xsgrkb/main.page",
         )
-        return parseWeekly(text, week)
+        return parseWeekly(text, week, semester)
     }
 
-    /** 解析按周查询的响应。每行就是一次具体的课，不需要再展开周次串。 */
-    internal fun parseWeekly(text: String, fallbackWeek: Int): List<CourseSession> {
+    /**
+     * 解析按周查询的响应。每行就是一次具体的课，不需要再展开周次串。
+     *
+     * **[semester] 必须传**：周次不能直接信接口传进去的 `zc`。
+     *
+     * 踩过的坑（用户反馈「周日的课对不上日期」）：
+     * 教务的「第 N 周」是**周日 ~ 周六**，App 的「第 N 周」是**周一 ~ 周日**。
+     * 传 `zc=8` 拿回来的是 10-25(周日)~10-31(周六)，
+     * 如果全标成 week=8，App 日历里第 8 周却是 10-26~11-01 ——
+     * 于是「第 8 周周日」列上挂着 10-25 的课，日期和周次互相矛盾。
+     *
+     * 现在改用每行的 `qsrq`（教务给的真实日期）反推周次，
+     * 周次和日期就永远自洽：10-25 会落到第 7 周，11-01 落到第 8 周。
+     */
+    internal fun parseWeekly(
+        text: String,
+        fallbackWeek: Int,
+        semester: Semester? = null,
+    ): List<CourseSession> {
         val root = runCatching { Net.json.parseToJsonElement(text).jsonObject }
             .getOrElse { return emptyList() }
         val arr = root["data"]?.jsonArray ?: return emptyList()
@@ -222,10 +254,26 @@ object Jw {
             val startUnit = o.str("ps").toIntOrNull() ?: 0
             val endUnit = (o.str("pe").toIntOrNull() ?: startUnit).coerceAtLeast(startUnit)
 
+            /*
+             * 周次：优先用本行真实日期反推（见上面注释），
+             * 拿不到日期时才退回接口参数。
+             */
+            val realDate = o.str("qsrq").take(10)
+            val weekFromDate = if (semester != null && realDate.length == 10) {
+                runCatching { semester.weekOf(java.time.LocalDate.parse(realDate)) }
+                    .getOrNull()
+                    ?.takeIf { it in 1..semester.totalWeeks }
+            } else {
+                null
+            }
             // 正常就是单周；万一服务端返回多周，逐周展开
-            val weeks = o.str("zc").split(",")
-                .mapNotNull { it.trim().toIntOrNull() }
-                .ifEmpty { listOf(fallbackWeek) }
+            val weeks = if (weekFromDate != null) {
+                listOf(weekFromDate)
+            } else {
+                o.str("zc").split(",")
+                    .mapNotNull { it.trim().toIntOrNull() }
+                    .ifEmpty { listOf(fallbackWeek) }
+            }
 
             for (w in weeks) {
                 out += CourseSession(
@@ -238,7 +286,7 @@ object Jw {
                     endUnit = endUnit,
                     startTime = o.str("qssj").take(5),
                     endTime = o.str("jssj").take(5),
-                    room = o.str("jxcdmc"),
+                    room = o.roomName(week = w),
                     category = o.str("jxhjmc"),
                     teachingMode = o.str("jxmsmc"),
                     mergedClasses = o.str("jxbmc"),
@@ -296,7 +344,16 @@ object Jw {
         exclude: Int,
         onEach: (done: Int) -> Unit = {},
     ): List<CourseSession> = coroutineScope {
-        val weeks = (1..semester.totalWeeks).filter { it != exclude }
+        /*
+         * 范围要包到 totalWeeks + 1。
+         *
+         * 教务的周是周日~周六，App 的是周一~周日 ——
+         * App 第 totalWeeks 周的**周日**落在教务第 totalWeeks+1 周里，
+         * 只抓到 totalWeeks 就会漏掉学期最后一天（周日）的课。
+         * 多抓一周的代价只是一次请求，漏一天课的代价是用户找不到课。
+         */
+        val lastWeek = semester.totalWeeks + 1
+        val weeks = (1..lastWeek).filter { it != exclude }
         if (weeks.isEmpty()) return@coroutineScope emptyList()
         val gate = Semaphore(5)
         val counter = java.util.concurrent.atomic.AtomicInteger(0)
@@ -450,6 +507,37 @@ object Jw {
         val root = Net.json.parseToJsonElement(text).jsonObject
         root.str("code") == "0"
     }.getOrDefault(false)
+}
+
+/**
+ * 解析「教学场地」。
+ *
+ * 只取 `jxcdmc` 是不够的 —— 实际见过三种情况：
+ *   ① `jxcdmc` 是空字符串（教务没配教室，线上课/场地待定）；
+ *   ② 值里只有全角空格或零宽字符，看着有内容其实是空的，
+ *      这种在教务网页上会渲染成一个方框，`isBlank()` 又判 true，
+ *      于是详情页整行「地点」都不显示，用户以为 App 读丢了；
+ *   ③ 场地放在 `jxcdmc2`（逐周教室，格式「场地-周次」）或 `cdmc` 里。
+ *
+ * 所以这里按优先级依次回退，并且**统一 trim**。
+ * `str()` 本身不 trim，直接拿去判断会把「　」当成有值。
+ */
+internal fun JsonObject.roomName(week: Int? = null): String {
+    val main = str("jxcdmc").trim()
+    if (main.isNotBlank()) return main
+
+    // 逐周教室：「场地A-3,场地B-4」，取匹配当前周的那条；没有周次信息就取第一段
+    val weekly = str("jxcdmc2").trim()
+    if (weekly.isNotBlank()) {
+        val tokens = weekly.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        if (week != null) {
+            val hit = tokens.firstOrNull { it.endsWith("-$week") }
+            if (hit != null) return hit.substringBeforeLast("-").trim()
+        }
+        return tokens.firstOrNull()?.substringBeforeLast("-")?.trim().orEmpty()
+    }
+
+    return str("cdmc").trim()
 }
 
 /** 取字符串字段，兼容 JSON 里数字被写成 number 的情况 */

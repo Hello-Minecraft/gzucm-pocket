@@ -6,6 +6,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Switch
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -13,6 +16,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import com.gzucm.pocket.ui.adaptive.LocalIsWidePane
+import com.gzucm.pocket.ui.adaptive.AdaptiveSheet
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -31,19 +36,23 @@ import androidx.compose.ui.unit.sp
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BackgroundSheet(
+    /** 显隐由调用方控制，好让退场动画播得完 */
+    visible: Boolean = true,
     hasBg: Boolean,
     alpha: Float,
+    /** 虚线网格开关 */
+    gridLines: Boolean = false,
+    onGridLinesChange: (Boolean) -> Unit = {},
     onPick: () -> Unit,
     onAlphaChange: (Float) -> Unit,
     onClear: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = scheme.surface,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+    AdaptiveSheet(
+        visible = visible,
+        onDismiss = onDismiss,
+        paneTitle = "课表外观",
     ) {
         Column(
             Modifier
@@ -51,12 +60,18 @@ fun BackgroundSheet(
                 .padding(horizontal = 22.dp)
                 .padding(bottom = 28.dp),
         ) {
-            Text(
-                "课表背景",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Medium,
-            )
-            Spacer(Modifier.height(4.dp))
+            /*
+             * 标题在手机上还是留在正文里（底部 Sheet 没有顶栏），
+             * 平板上则由侧栏的顶栏负责显示 —— 否则会出现两遍标题。
+             */
+            if (!LocalIsWidePane.current) {
+                Text(
+                    "课表外观",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Medium,
+                )
+                Spacer(Modifier.height(4.dp))
+            }
             Text(
                 if (hasBg) "调透明度让背景更淡或更清楚" else "选一张图当课表背景",
                 fontSize = 12.sp,
@@ -106,6 +121,45 @@ fun BackgroundSheet(
                     "调低更淡，字更清楚；调高更清楚看到图片",
                     fontSize = 10.5.sp,
                     color = scheme.onSurfaceVariant.copy(alpha = 0.7f),
+                )
+            }
+
+            /*
+             * 虚线网格开关。
+             *
+             * 平板端课程会并排分列，一块紧挨着一块 —— 不看列线很难判断
+             * 「这块属于星期几」。打开后在课表上画灰色虚线，
+             * 横线分「第几节」、竖线分「星期几」。
+             *
+             * 放在背景设置里而不是单独入口：它和背景一样属于「课表外观」，
+             * 不需要在标题栏再挤一个按钮。
+             */
+            Spacer(Modifier.height(20.dp))
+            HorizontalDivider(color = scheme.onSurfaceVariant.copy(alpha = 0.12f))
+            Spacer(Modifier.height(16.dp))
+
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "显示网格线",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        "用灰色虚线划分每一节课和每一天，方便看清课程属于哪一格",
+                        fontSize = 10.5.sp,
+                        lineHeight = 14.sp,
+                        color = scheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Switch(
+                    checked = gridLines,
+                    onCheckedChange = onGridLinesChange,
                 )
             }
         }

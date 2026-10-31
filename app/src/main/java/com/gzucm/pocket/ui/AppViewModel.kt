@@ -37,6 +37,15 @@ data class UiState(
     val levels: List<LevelGrade> = emptyList(),
     val fitness: List<FitnessGrade> = emptyList(),
     val syncing: Boolean = false,
+    /**
+     * 最近一次手动同步的结果，用来弹一次轻提示。
+     *
+     * 用「递增序号 + 文案」而不是纯字符串：同样的文案连续两次失败时，
+     * 字符串没变化 → StateFlow 不发射 → 第二次 Toast 弹不出来。
+     * seq 每次都变，UI 侧按 seq 判断「这是新的一条」。
+     */
+    val syncResultSeq: Int = 0,
+    val syncResultText: String? = null,
     val gradesLoading: Boolean = false,
     /** 成绩分批抓取进度：已完成 / 总数（课程 → 等级 → 体测） */
     val gradesDone: Int = 0,
@@ -234,6 +243,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // ── 启动 ────────────────────────────────────────────────────────────
 
     private fun bootstrap() {
+        /*
+         * 先看缓存是不是「旧算法」留下的。
+         *
+         * 周次错位（教务周从周日起、App 从周一起）修好之后，
+         * 已经缓存的数据仍然是错位的 —— 不清掉的话用户升级后
+         * 看到的还是老样子，会以为没修。版本号对不上就丢弃，走重新同步。
+         */
+        store.dropStaleSessionCache()
+
         val cachedSessions = readSessionCache()
         val cachedSemester = readSemesterCache()
         if (cachedSessions.isNotEmpty() && cachedSemester != null) {
@@ -255,7 +273,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 // 缓存里的周也算「已到达」，否则断网时每周都显示「还在路上」一直转圈
                 loadedWeeks = (1..cachedSemester.totalWeeks).toSet(),
                 progressDone = cachedSemester.totalWeeks,
-                progressTotal = cachedSemester.totalWeeks,
+                // +1：fetchWeeksExcept 会多抓一周（最后一周的周日落在教务下一周）
+                progressTotal = cachedSemester.totalWeeks + 1,
             )
         }
         viewModelScope.launch {
@@ -347,14 +366,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // 所以这里只打标记，不做无用的后台请求
         powerDirty = true
         if (state.syncing) return
-        viewModelScope.launch { doSync() }
+        viewModelScope.launch { doSync(manual = true) }
     }
 
     private fun syncQuietly() {
         viewModelScope.launch { doSync() }
     }
 
-    private suspend fun doSync() {
+    /**
+     * @param manual 用户主动点的同步。只有手动同步才弹「成功 / 失败」提示 ——
+     *   后台静默同步（冷启动、切前台）弹提示会变成噪音。
+     */
+    private suspend fun doSync(manual: Boolean = false) {
         state = state.copy(syncing = true, message = null)
 
         // ── 第一阶段：学期周历 + 当前周 ──────────────────────────────
@@ -385,6 +408,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             state = state.copy(
                 syncing = false,
                 message = if (showIt) describe(e) else state.message,
+                syncResultSeq = if (manual) state.syncResultSeq + 1 else state.syncResultSeq,
+                syncResultText = if (manual) "同步失败：${describe(e)}" else state.syncResultText,
                 phase = if (state.sessions.isEmpty()) Phase.NeedLogin else Phase.Ready,
                 // 失败时别让课表停在「加载中」：有缓存就按缓存全量展示
                 loadedWeeks = if (sem != null && state.sessions.isNotEmpty())
@@ -402,7 +427,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 sessions = weekSessions.sortedWith(compareBy({ it.week }, { it.weekday }, { it.startUnit })),
                 loadedWeeks = setOf(week),
                 progressDone = 1,
-                progressTotal = sem.totalWeeks,
+                progressTotal = sem.totalWeeks + 1,
                 syncing = true,
             )
         }
@@ -447,11 +472,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 syncing = false,
                 lastSync = store.lastSyncAt,
                 message = null,
+                syncResultSeq = if (manual) state.syncResultSeq + 1 else state.syncResultSeq,
+                syncResultText = if (manual) "同步完成 · 共 ${sessions.size} 节课" else state.syncResultText,
             )
         } else {
             state = state.copy(
                 syncing = false,
                 message = if (state.sessions.isEmpty()) "没能拿到课表数据，稍后可以下拉重试" else null,
+                syncResultSeq = if (manual) state.syncResultSeq + 1 else state.syncResultSeq,
+                syncResultText = if (manual) "同步失败：没拿到课表数据" else state.syncResultText,
             )
         }
     }

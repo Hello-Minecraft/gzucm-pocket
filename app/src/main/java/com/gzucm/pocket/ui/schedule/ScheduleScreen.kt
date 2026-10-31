@@ -128,6 +128,8 @@ fun ScheduleScreen(
     val store = remember { com.gzucm.pocket.core.SessionStore(ctx.applicationContext) }
     var bgPath by remember { mutableStateOf(store.courseBgPath) }
     var bgAlpha by remember { mutableStateOf(store.courseBgAlpha) }
+    // 虚线网格：默认关，背景设置面板里可开
+    var gridLines by remember { mutableStateOf(store.courseGridLines) }
     var showBgSheet by remember { mutableStateOf(false) }
     /*
      * 冲突排布固定用「层叠」。
@@ -204,6 +206,16 @@ fun ScheduleScreen(
     // 表头/日期跟着跟手位置走，滑动过程中就能看到目标周的日期
     val shownWeek = (pagerState.currentPage + 1).coerceIn(1, totalWeeks)
 
+    /*
+     * 按当前可用宽度决定是否走宽屏布局。
+     *
+     * 这里用 BoxWithConstraints 而不是查设备型号：平板开分屏、
+     * 或者自由窗口拖窄了，都应该退回手机布局，而不是硬撑。
+     * 阈值和左侧导航栏保持一致（840dp）。
+     */
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val wide = maxWidth >= 840.dp
+
     Box(Modifier.fillMaxSize()) {
         // 自定义背景在最底层，课程块浮在上面
         CourseBackground(bgPath, bgAlpha)
@@ -228,7 +240,7 @@ fun ScheduleScreen(
             onSelect = onWeekChange,
         )
         Spacer(Modifier.height(8.dp))
-        WeekdayStrip(semester, shownWeek, currentWeek)
+        WeekdayStrip(semester, shownWeek, currentWeek, wide = wide)
 
         Spacer(Modifier.height(8.dp))
 
@@ -251,6 +263,8 @@ fun ScheduleScreen(
                 },
                 isTodayOf = { wd -> isTodayOf(semester, week, wd) },
                 overlapMode = overlapMode,
+                wide = wide,
+                showGrid = gridLines,
                 rotationSnapshot = rotations
                     .filterKeys { it.startsWith("$week-") }
                     .mapKeys { it.key.substringAfter("-").toIntOrNull() ?: -1 },
@@ -265,10 +279,24 @@ fun ScheduleScreen(
         }
     }
 
-    if (showBgSheet) {
+    /*
+     * **不套 if**：常驻组合树，靠 visible 控制显隐。
+     *
+     * 原来写成 `if (showBgSheet) { BackgroundSheet(...) }`，
+     * 关掉时整棵子树被直接从组合里摘掉，退场动画永远播不完 ——
+     * 表现为面板「啪」地消失。交给 AdaptiveSheet 内部的
+     * AnimatedVisibility 管显隐，动画才能跑完整。
+     */
+    run {
         BackgroundSheet(
+            visible = showBgSheet,
             hasBg = bgPath != null,
             alpha = bgAlpha,
+            gridLines = gridLines,
+            onGridLinesChange = {
+                gridLines = it
+                store.courseGridLines = it
+            },
             onPick = {
                 picker.launch(
                     androidx.activity.result.PickVisualMediaRequest(
@@ -290,6 +318,7 @@ fun ScheduleScreen(
             onDismiss = { showBgSheet = false },
         )
     }
+    } // BoxWithConstraints
 }
 
 /** 单周网格。每个分页各自持有纵向滚动状态。 */
@@ -301,6 +330,10 @@ private fun WeekGrid(
     byWeekday: Map<Int, List<CourseSession>>,
     isTodayOf: (Int) -> Boolean,
     overlapMode: Boolean = true,
+    /** 宽屏档位：节次列更宽、字号更大、重叠课改并排 */
+    wide: Boolean = false,
+    /** 是否画虚线网格（行列分隔） */
+    showGrid: Boolean = false,
     /** 这一周每个簇轮了几次（clusterId → 次数）。用快照而非 lambda，保证能触发重算 */
     rotationSnapshot: Map<Int, Int> = emptyMap(),
     onRotateCluster: (Int) -> Unit = {},
@@ -332,36 +365,74 @@ private fun WeekGrid(
             .fillMaxSize()
             .verticalScroll(rememberScrollState()),
     ) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp),
-        ) {
-            SlotColumn(slots)
-            Row(Modifier.weight(1f)) {
-                for (wd in 1..7) {
-                    DayColumn(
-                        modifier = Modifier.weight(1f),
-                        weekday = wd,
-                        slots = slots,
-                        sessions = byWeekday[wd].orEmpty(),
-                        isToday = isTodayOf(wd),
-                        overlapMode = overlapMode,
-                        rotationSnapshot = rotationSnapshot,
-                        onRotateCluster = onRotateCluster,
-                        onCourseClick = onCourseClick,
-                    )
+        Box(Modifier.fillMaxWidth()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp),
+            ) {
+                SlotColumn(
+                    slots = slots,
+                    width = if (wide) slotColumnWide else slotColumnPhone,
+                    big = wide,
+                )
+                Row(Modifier.weight(1f)) {
+                    for (wd in 1..7) {
+                        DayColumn(
+                            modifier = Modifier.weight(1f),
+                            weekday = wd,
+                            slots = slots,
+                            sessions = byWeekday[wd].orEmpty(),
+                            isToday = isTodayOf(wd),
+                            overlapMode = overlapMode,
+                            wide = wide,
+                            rotationSnapshot = rotationSnapshot,
+                            onRotateCluster = onRotateCluster,
+                            onCourseClick = onCourseClick,
+                        )
+                    }
                 }
+            }
+
+            /*
+             * 虚线网格：画在课程块**上面**。
+             *
+             * 一开始画在下面当背景，结果完全看不见 —— 课程块的底色虽然是
+             * 半透明的，叠起来仍然把底下的线盖掉了（扫像素确认过，
+             * 那一行全是课程块的颜色，没有一根线的像素）。
+             *
+             * 画在上面就没这个问题，而且线压在课程块上反而更容易
+             * 判断「这块到哪一行为止」。透明度要足够低，不能影响读字。
+             */
+            if (showGrid) {
+                GridLines(
+                    slotWidth = if (wide) slotColumnWide else slotColumnPhone,
+                    rowCount = slots.size,
+                    height = cellHeight * slots.size,
+                )
             }
         }
         Spacer(Modifier.height(LocalFloatingBarInset.current))
     }
 }
 
+/**
+ * 左侧节次列。
+ *
+ * 手机上只有 30dp 宽，塞三行小字（节次号 / 上课时间 / 下课时间）已经很勉强；
+ * 平板上放宽到 56dp，字号也能提一档，读起来不费劲。
+ *
+ * [width] 和 [big] 由调用方按当前档位决定，不在这里判断断点 ——
+ * 保持这个组件的单一职责，断点判断集中在一处。
+ */
 @Composable
-private fun SlotColumn(slots: List<Int>) {
+private fun SlotColumn(
+    slots: List<Int>,
+    width: androidx.compose.ui.unit.Dp = 30.dp,
+    big: Boolean = false,
+) {
     val scheme = MaterialTheme.colorScheme
-    Column(Modifier.width(30.dp)) {
+    Column(Modifier.width(width)) {
         slots.forEach { unit ->
             Column(
                 Modifier
@@ -372,21 +443,21 @@ private fun SlotColumn(slots: List<Int>) {
             ) {
                 Text(
                     "$unit",
-                    fontSize = 11.sp,
+                    fontSize = if (big) 13.sp else 11.sp,
                     fontWeight = FontWeight.Medium,
                     color = scheme.onSurfaceVariant,
                 )
                 Text(
                     SlotTimes[unit] ?: "",
-                    fontSize = 7.5.sp,
-                    lineHeight = 9.sp,
+                    fontSize = if (big) 9.5.sp else 7.5.sp,
+                    lineHeight = if (big) 11.sp else 9.sp,
                     color = scheme.onSurfaceVariant.copy(alpha = 0.55f),
                 )
                 // 下课时间：比上课时间更淡，两行不至于抢注意力
                 Text(
                     SlotEndTimes[unit] ?: "",
-                    fontSize = 7.sp,
-                    lineHeight = 8.sp,
+                    fontSize = if (big) 9.sp else 7.sp,
+                    lineHeight = if (big) 10.sp else 8.sp,
                     color = scheme.onSurfaceVariant.copy(alpha = 0.35f),
                 )
             }
@@ -394,7 +465,82 @@ private fun SlotColumn(slots: List<Int>) {
     }
 }
 
+/**
+ * 课表的虚线网格：横线分隔「第几节」，竖线分隔「星期几」。
+ *
+ * 只用一种灰 + 低透明度，不抢课程块的注意力 ——
+ * 它的作用是「让你看清边界」，不是装饰。
+ *
+ * 竖线位置：左边留出节次列的宽度，然后 7 等分。
+ * 这样竖线正好压在两天之间的缝上，不会穿过课程块中心。
+ */
+@Composable
+private fun GridLines(
+    slotWidth: androidx.compose.ui.unit.Dp,
+    rowCount: Int,
+    height: androidx.compose.ui.unit.Dp,
+) {
+    val scheme = MaterialTheme.colorScheme
+    // 灰色 + 22% 透明度，虚线 4dp/4dp：看得见但不刺眼
+    val lineColor = scheme.onSurfaceVariant.copy(alpha = 0.22f)
+    val strokeWidth = with(androidx.compose.ui.platform.LocalDensity.current) { 1.dp.toPx() }
+    val dash = with(androidx.compose.ui.platform.LocalDensity.current) { 4.dp.toPx() }
+    val gap = with(androidx.compose.ui.platform.LocalDensity.current) { 4.dp.toPx() }
+
+    androidx.compose.foundation.Canvas(
+        Modifier
+            .fillMaxWidth()
+            .height(height)
+            .padding(horizontal = 10.dp),
+    ) {
+        val slotPx = slotWidth.toPx()
+        val contentWidth = size.width - slotPx
+        val dayWidth = contentWidth / 7f
+        val rowH = size.height / rowCount.coerceAtLeast(1)
+
+        // 横线：每节课的分界（含最上面一条）
+        for (i in 0..rowCount) {
+            val y = (rowH * i).coerceIn(0f, size.height)
+            drawLine(
+                color = lineColor,
+                start = androidx.compose.ui.geometry.Offset(slotPx, y),
+                end = androidx.compose.ui.geometry.Offset(size.width, y),
+                strokeWidth = strokeWidth,
+                pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
+                    floatArrayOf(dash, gap), 0f,
+                ),
+            )
+        }
+
+        // 竖线：7 天之间的分界（含右边界）
+        for (i in 0..7) {
+            val x = slotPx + dayWidth * i
+            drawLine(
+                color = lineColor,
+                start = androidx.compose.ui.geometry.Offset(x, 0f),
+                end = androidx.compose.ui.geometry.Offset(x, size.height),
+                strokeWidth = strokeWidth,
+                pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
+                    floatArrayOf(dash, gap), 0f,
+                ),
+            )
+        }
+    }
+}
+
 private val cellHeight = 58.dp
+
+/**
+ * 左侧节次列的宽度，按档位取值。
+ *
+ * 手机 30dp：只够放三行小字；
+ * 平板 56dp：字号能提两档，时间读起来不费劲。
+ *
+ * 周表头和课程网格**必须**用同一个值，否则日期会偏离课程列 ——
+ * 早先这两处写死不同 padding，日期数字明显偏在列中间之外。
+ */
+private val slotColumnPhone = 30.dp
+private val slotColumnWide = 56.dp
 
 private fun isTodayOf(semester: Semester, week: Int, weekday: Int): Boolean {
     val today = LocalDate.now()
@@ -508,10 +654,15 @@ private fun weekRangeText(semester: Semester, week: Int): String {
  * 两边坐标系对不上，日期数字就明显偏在课程列中间之外。
  */
 @Composable
-private fun WeekdayStrip(semester: Semester, week: Int, currentWeek: Int) {
+private fun WeekdayStrip(
+    semester: Semester,
+    week: Int,
+    currentWeek: Int,
+    wide: Boolean = false,
+) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp)) {
         // 与 SlotColumn 同宽，占位不画内容
-        Box(Modifier.width(30.dp))
+        Box(Modifier.width(if (wide) slotColumnWide else slotColumnPhone))
         Row(Modifier.weight(1f)) {
             for (wd in 1..7) {
                 val date = semester.dateOf(week, wd)
@@ -553,6 +704,8 @@ private fun DayColumn(
     sessions: List<CourseSession>,
     isToday: Boolean,
     overlapMode: Boolean = true,
+    /** 宽屏档位：节次列更宽、课程块字号更大、重叠排布用并排 */
+    wide: Boolean = false,
     /** 这一周每个簇轮了几次（clusterId → 次数） */
     rotationSnapshot: Map<Int, Int> = emptyMap(),
     onRotateCluster: (Int) -> Unit = {},
@@ -569,8 +722,14 @@ private fun DayColumn(
      *
      * 现在把整张 rotations 快照传进来当 key，值一变就必定重算。
      */
-    val placed = remember(sessions, overlapMode, rotationSnapshot, weekday) {
-        placeSessions(sessions, overlapMode, { cid -> rotationSnapshot[cid] ?: 0 }, weekday)
+    val placed = remember(sessions, overlapMode, rotationSnapshot, weekday, wide) {
+        placeSessions(
+            sessions = sessions,
+            overlap = overlapMode,
+            rotationOf = { cid -> rotationSnapshot[cid] ?: 0 },
+            dayOffset = weekday,
+            wide = wide,
+        )
     }
 
     // 用 BoxWithConstraints 拿到这一列的实际宽度，才能算出每块该多宽、从哪开始
@@ -638,13 +797,22 @@ private fun DayColumn(
                 session = s,
                 span = span,
                 topOffset = cellHeight * startIdx,
-                slotWidth = (maxWidth - shrink).coerceAtLeast(10.dp),
-                xOffset = gap / 2,
+                /*
+                 * 宽度和位置都要用 placeSessions 算好的比例。
+                 *
+                 * 之前这里写死成「整列宽 - 卡片缩进」，xOffset 也固定 gap/2 ——
+                 * 那是卡片叠放时代的写法。加了宽屏并排分支后就出问题了：
+                 * 并排算出 wFrac=1/3、xFrac=1/3，但渲染时全被忽略，
+                 * 三块都画成满宽叠在一起，看起来还是层叠。
+                 */
+                slotWidth = (maxWidth * p.wFrac - shrink).coerceAtLeast(10.dp),
+                xOffset = maxWidth * p.xFrac + gap / 2,
                 cols = p.cols,
                 z = p.z,
                 cardShrink = shrink,
                 coveredRight = coveredRight,
                 showText = showText,
+                wide = wide,
                 /*
                  * 顶部被上层压住多少。
                  *
@@ -671,8 +839,13 @@ private fun DayColumn(
          * 原来是每块内部各挂一个，但只有最上层那块能点到 ——
          * 三课程重叠时下面两层根本点不着。现在按簇分组，一组只画一个。
          * 点它整组轮换：A-B-C → B-C-A → C-A-B → A-B-C（点三次回到原样）。
+         *
+         * **宽屏不显示这个按钮**：平板上所有重叠课已经并排分列，
+         * 每门课都完整可见，没有「被压在下面看不到」的问题，
+         * 轮换就成了多余操作 —— 反而占掉课程块右下角那块地方。
+         * 手机端仍然是层叠，按钮保留。
          */
-        if (overlapMode) {
+        if (overlapMode && !wide) {
             placed.groupBy { it.clusterId }
                 .filter { (_, group) -> group.size >= 2 }
                 .forEach { (cid, group) ->
@@ -812,6 +985,14 @@ internal fun placeSessions(
     /** 某个簇轮了几次，用来决定谁在最上面 */
     rotationOf: (Int) -> Int = { 0 },
     /**
+     * 宽屏档位。
+     *
+     * 手机上一天只有 55dp，重叠的课只能靠「缩进层叠」挤出一点点可见区域；
+     * 平板上一天有 110dp 以上，够并排放两块 —— 那就该并排，
+     * 因为并排能同时读清两门课，层叠再怎么说也只会露出边角。
+     */
+    wide: Boolean = false,
+    /**
      * 这一天的编号（1..7）。
      *
      * 簇编号原本是按天独立从 0 开始的，于是周一的 0 号簇和周二的 0 号簇
@@ -932,10 +1113,58 @@ internal fun placeSessions(
             val sameSpan = cluster.all {
                 it.startUnit == cluster[0].startUnit && it.endUnit == cluster[0].endUnit
             }
-            val nested = sameSpan ||
-                (maxLen > 0 && (maxLen - minLen) * 2 > maxLen)
+            /*
+             * 「嵌套」= 短课整段落在长课里，包含两种情况：
+             *   ① 节次完全相同（sameSpan）
+             *   ② 长度差超过一半
+             *
+             * 但**宽屏下 ① 要单独处理**：完全重叠时并排最合理（各占 1/n），
+             * 层叠只会露出两条边、看不到课名。手机上反过来，并排太窄只能层叠。
+             *
+             * 所以这里拆成两个变量：
+             *   nested  —— 真的「一大一小」嵌套，两个档位都层叠
+             *   same    —— 完全重叠，手机层叠、平板并排
+             */
+            val nested = maxLen > 0 && (maxLen - minLen) * 2 > maxLen
+            val same = sameSpan
 
+            // 轮换次数要提前取：宽屏分支和层叠分支都要用
             val rot = rotationOf(clusterId)
+
+            /*
+             * 宽屏：**所有重叠都并排分列**，不做任何层叠。
+             *
+             * 层叠在手机上是没办法的办法 —— 一天只有 55dp，放不下两块，
+             * 只能让下层露个边角提示「还有课」。
+             *
+             * 平板一天 110dp 起，两块各 55dp 完全够写。
+             * 之前我留了个「长度差超过一半就层叠」的例外，结果周一（毛概套医学伦理学）、
+             * 周三（马拉松嵌在大学心理里）、周日（三门完全重叠）全都不分列，
+             * 只露出一门 —— 用户看到的只有「怎么都没分开」。
+             *
+             * 一致性比「好不好看」重要：只要重叠就分列，用户永远知道
+             * 「这一列有几门课、各占哪一段」。
+             */
+            if (wide) {
+                val n = cluster.size
+                val w = 1f / n
+                val rotW = rot % n
+                val orderW = List(n) { (it + rotW) % n }
+                orderW.forEachIndexed { visual, idx ->
+                    out += Placed(
+                        session = cluster[idx],
+                        col = visual,
+                        cols = cols,
+                        xFrac = w * visual,
+                        wFrac = w,
+                        z = 0f,
+                        clusterId = clusterId,
+                        level = 0,
+                    )
+                }
+                return@forEachIndexed
+            }
+
             val order = cluster.indices.map { (it + rot) % cluster.size }
 
             /*
@@ -950,7 +1179,15 @@ internal fun placeSessions(
              * 【B】对称错位（长度相近、互相错开时用）
              *   两块几乎一样长，谁也不含谁，就各错 10% 叠着。
              */
-            if (nested) {
+            /*
+             * 手机上「完全重叠」也要层叠。
+             *
+             * 完全重叠（same）现在不算 nested（宽屏下要并排），
+             * 但手机上没并排的空间 —— 一天只有 55dp，
+             * 两门课各占一半就只剩 27dp，字全糊了。
+             * 所以这里把 same 也算进层叠分支。
+             */
+            if (nested || same) {
                 /*
                  * 谁在下面？长的在下面（它的边缘露出来更有信息量），
                  * 轮换时整体左移，谁都能被翻到最上面。
@@ -1009,6 +1246,8 @@ private fun BoxScope.CourseBlock(
     coverTopDp: androidx.compose.ui.unit.Dp = 0.dp,
     /** 卡片叠放时本层往下缩进多少（露出下层的下边缘） */
     cardShrink: androidx.compose.ui.unit.Dp = 0.dp,
+    /** 宽屏档位：字号更大、多显示教师 */
+    wide: Boolean = false,
     /** 有重叠且本块在最上层时，右下角显示轮换按钮；null = 不显示 */
     onRotate: (() -> Unit)? = null,
     onClick: () -> Unit,
@@ -1196,7 +1435,11 @@ private fun BoxScope.CourseBlock(
             Text(
                 session.name,
                 // 错位后仍有接近整列宽，字号不用缩太多
-                fontSize = if (overlapped) 8.5.sp else 9.5.sp,
+                fontSize = when {
+                    wide -> if (overlapped) 11.sp else 12.sp
+                    overlapped -> 8.5.sp
+                    else -> 9.5.sp
+                },
                 fontWeight = FontWeight.Medium,
                 /*
                  * 文字要**提亮**，不能用和底色同一个课程色。
@@ -1212,24 +1455,56 @@ private fun BoxScope.CourseBlock(
                 // 叠压后横向仍接近整列宽（约 36dp），能横排 3 个字；
                 // 竖向够长就多折几行，别动不动截断
                 maxLines = when {
+                    // 宽屏字更大，同样高度能塞的行数少一些
+                    wide && span >= 6 -> 14
+                    wide && span >= 3 -> 9
+                    wide && span == 2 -> 4
+                    wide -> 2
                     span >= 6 -> 20
                     span >= 3 -> 12
                     span == 2 -> 7
                     else -> 4
                 },
                 overflow = TextOverflow.Ellipsis,
-                lineHeight = if (overlapped) 10.5.sp else 12.sp,
+                lineHeight = when {
+                    wide -> if (overlapped) 14.sp else 15.sp
+                    overlapped -> 10.5.sp
+                    else -> 12.sp
+                },
             )
-            if (span >= 2 && !overlapped) {
-                Spacer(Modifier.height(2.5.dp))
+            if (span >= 2 && (!overlapped || wide)) {
+                Spacer(Modifier.height(if (wide) 3.dp else 2.5.dp))
                 Text(
                     session.room.ifBlank { "地点待定" },
-                    fontSize = 8.sp,
+                    fontSize = if (wide) 9.5.sp else 8.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
                     maxLines = if (span >= 3) 3 else 2,
                     overflow = TextOverflow.Ellipsis,
                     lineHeight = 10.sp,
                 )
+                /*
+                 * 教师：**只有宽屏才显示**，且要求节数 >= 3。
+                 *
+                 * 为什么限这么死：
+                 *   · 手机端一格才 52dp 宽，多一行字只会把课名挤没；
+                 *   · 1-2 节的短课块（约 116dp 高）塞了课名 + 教室 + 教师
+                 *     会溢出，末尾出现「…」，反而比不显示更难看。
+                 * 3 节以上才有约 174dp，三行放得下。
+                 *
+                 * 这一行就是致辉说的「显示更多信息」里之前漏掉的部分 ——
+                 * 当时只做了字号和教室，教师是补的。
+                 */
+                if (wide && span >= 3 && session.teachers.isNotBlank()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        session.teachers,
+                        fontSize = 9.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.62f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        lineHeight = 11.sp,
+                    )
+                }
             }
         }
     }

@@ -514,16 +514,16 @@ private fun ThemeCard() {
         }
     }
 
-    if (showPicker) {
-        com.gzucm.pocket.ui.settings.ColorPickerSheet(
-            initial = if (isCustom) current else 0L,
-            onPick = { picked ->
-                apply(picked)
-                showPicker = false
-            },
-            onDismiss = { showPicker = false },
-        )
-    }
+    // 常驻 + visible：包 if 会让进入/退场动画都不播
+    com.gzucm.pocket.ui.settings.ColorPickerSheet(
+        initial = if (isCustom) current else 0L,
+        visible = showPicker,
+        onPick = { picked ->
+            apply(picked)
+            showPicker = false
+        },
+        onDismiss = { showPicker = false },
+    )
 }
 
 private fun labelOf(seed: Long): String =

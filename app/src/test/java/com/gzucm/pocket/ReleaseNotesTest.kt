@@ -33,18 +33,31 @@ class ReleaseNotesTest {
         }
     }
 
+    /**
+     * 去掉 `-beta` / `-rc1` 这类预发布后缀，只留 x.y.z 用来比大小。
+     *
+     * 版本名允许带后缀（比如测试包叫 1.2.8-beta），
+     * 但排序和格式校验只关心数字那三段。
+     */
+    private fun coreOf(v: String) = v.substringBefore("-")
+
     @Test
     fun `版本号按从新到旧排列`() {
+        fun key(v: String): List<Int> = coreOf(v).split(".").map { it.toIntOrNull() ?: 0 }
         val vers = ReleaseNotes.entries.map { it.version }
-        val sorted = vers.sortedWith(compareBy({ it.split(".")[0].toInt() }, { it.split(".")[1].toInt() }, { it.split(".")[2].toInt() }))
-            .reversed()
+        val sorted = vers.sortedWith(
+            compareBy({ key(it)[0] }, { key(it)[1] }, { key(it)[2] }),
+        ).reversed()
         assertEquals(sorted, vers)
     }
 
     @Test
     fun `版本号三段格式`() {
         ReleaseNotes.entries.forEach {
-            assertTrue("${it.version} 应为 主.次.修订", Regex("""\d+\.\d+\.\d+""").matches(it.version))
+            assertTrue(
+                "${it.version} 应为 主.次.修订（可带 -beta 后缀）",
+                Regex("""\d+\.\d+\.\d+(-[A-Za-z0-9.]+)?""").matches(it.version),
+            )
         }
     }
 }

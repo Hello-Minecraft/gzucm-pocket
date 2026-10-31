@@ -25,6 +25,10 @@ import com.gzucm.pocket.ui.schedule.ScheduleScreen
 import com.gzucm.pocket.ui.theme.GzucmTheme
 import com.gzucm.pocket.ui.today.TodayScreen
 import org.junit.Rule
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.ui.unit.dp
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -212,9 +216,65 @@ class ScreenshotTest {
         TodayScreen(semester, 8, sessions, power, daily, 0L, {}, {}, {}, {}, false, 0, 0, false, null)
     }
 
+    /**
+     * 平板横屏的今日页（872dp）：应该是双列 Dashboard。
+     *
+     * 用真机的宽高比（872×1200 竖着的平板转横屏会矮一些，这里取 872×600 更接近），
+     * 高度不够会被裁掉下半截，看不出「一屏能看多少」这个关键收益。
+     */
+    /**
+     * 侧栏底部动作区：同步中 / 空闲两种状态。
+     *
+     * 这张图是为了锁住「同步时按钮变成进度圈」——
+     * 实机上同步失败只要 100ms，进度圈一闪而过，截不到，
+     * 所以用截图测试直接把 spinning = true 的状态渲染出来看。
+     *
+     * 踩过的坑：转圈一直不显示，原因不是组件坏了，是调用方传的
+     * `syncing && sessions.isEmpty()` —— 有课表时永远 false。
+     */
+    @Test
+    @Config(sdk = [34], qualifiers = "w872dp-h900dp-xhdpi")
+    fun railActions() = shot("53_rail_actions") {
+        androidx.compose.foundation.layout.Row(
+            androidx.compose.ui.Modifier.padding(20.dp),
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp),
+        ) {
+            com.gzucm.pocket.ui.adaptive.RailActionButton(
+                icon = androidx.compose.material.icons.Icons.Rounded.Refresh,
+                label = "同步中",
+                spinning = true,
+                onClick = {},
+            )
+            com.gzucm.pocket.ui.adaptive.RailActionButton(
+                icon = androidx.compose.material.icons.Icons.Rounded.Refresh,
+                label = "同步",
+                spinning = false,
+                onClick = {},
+            )
+            com.gzucm.pocket.ui.adaptive.RailActionButton(
+                icon = androidx.compose.material.icons.Icons.Rounded.Settings,
+                label = "设置",
+                badge = true,
+                onClick = {},
+            )
+        }
+    }
+
+    @Test
+    @Config(sdk = [34], qualifiers = "w872dp-h900dp-xhdpi")
+    fun todayTablet() = shot("50_today_tablet") {
+        TodayScreen(semester, 8, sessions, power, daily, 0L, {}, {}, {}, {}, false, 0, 0, false, null)
+    }
+
     @Test
     fun grades() = shot("03_grades") {
         GradesScreen(grades, levels, fitness, false, 0, 0, null, 0L, {})
+    }
+
+    @Test
+    @Config(sdk = [34], qualifiers = "w872dp-h900dp-xhdpi")
+    fun powerTablet() = shot("51_power_tablet") {
+        PowerScreen(power = power, daily = daily, loading = false)
     }
 
     @Test
@@ -413,6 +473,84 @@ class ScreenshotTest {
     }
 
     /** 冲突课表 · 浅色模式：专门用来看文字可读性 */
+    /**
+     * 平板横屏（872dp，小米平板 6 Pro 的典型可用宽度）。
+     *
+     * 这一档应该切到左导航栏 + 内容区，而不是底部 Tab。
+     * 用 411dp 的手机尺寸看不出区别，必须换 qualifiers。
+     *
+     * 内容故意用一个带文字的占位 Box —— 这里要验证的是**骨架分叉**，
+     * 不是具体页面。接入真实页面是第二步的事。
+     */
+    @Test
+    @Config(sdk = [34], qualifiers = "w872dp-h600dp-xhdpi")
+    fun tabletWide() = shot("40_tablet_wide") {
+        com.gzucm.pocket.ui.MainScaffold(tab = com.gzucm.pocket.ui.Tab.Today, onSelect = {}) {
+            androidx.compose.foundation.layout.Box(
+                androidx.compose.ui.Modifier.fillMaxSize(),
+                contentAlignment = androidx.compose.ui.Alignment.Center,
+            ) {
+                androidx.compose.material3.Text("内容区")
+            }
+        }
+    }
+
+    /**
+     * 平板横屏的课表页（872dp）。
+     *
+     * 用冲突演示数据，能一次看到：时间轴加宽、字号变大、
+     * 重叠课从层叠改成并排。
+     */
+    /** 平板横屏的成绩页（872dp）：学期块应该排成两列。 */
+    /** 平板体测页：验证「项目名 / 数值」两列排布有没有挤到一起。 */
+    @Test
+    @Config(sdk = [34], qualifiers = "w872dp-h1000dp-xhdpi")
+    fun fitnessTablet() = shot("54_fitness_tablet") {
+        GradesScreen(
+            grades, levels, fitness, false, 0, 0, null, 0L, {},
+            initialTabIndex = 2,
+        )
+    }
+
+    /** 手机体测页对照：两列在这个宽度下应该刚好，不能改坏。 */
+    @Test
+    fun fitnessPhone() = shot("55_fitness_phone") {
+        GradesScreen(
+            grades, levels, fitness, false, 0, 0, null, 0L, {},
+            initialTabIndex = 2,
+        )
+    }
+
+    @Test
+    @Config(sdk = [34], qualifiers = "w872dp-h1000dp-xhdpi")
+    fun gradesTablet() = shot("52_grades_tablet") {
+        GradesScreen(grades, levels, fitness, false, 0, 0, null, 0L, {})
+    }
+
+    @Test
+    @Config(sdk = [34], qualifiers = "w872dp-h600dp-xhdpi")
+    fun tabletSchedule() = shot("42_tablet_schedule") {
+        ScheduleScreen(
+            com.gzucm.pocket.core.ConflictDemo.semester(),
+            com.gzucm.pocket.core.ConflictDemo.sessions(),
+            8, 8, {}, {},
+        )
+    }
+
+    /** 平板竖屏（768dp）：应该还是底部 Tab（Compact 档）。 */
+    @Test
+    @Config(sdk = [34], qualifiers = "w768dp-h1000dp-xhdpi")
+    fun tabletNarrow() = shot("41_tablet_narrow") {
+        com.gzucm.pocket.ui.MainScaffold(tab = com.gzucm.pocket.ui.Tab.Today, onSelect = {}) {
+            androidx.compose.foundation.layout.Box(
+                androidx.compose.ui.Modifier.fillMaxSize(),
+                contentAlignment = androidx.compose.ui.Alignment.Center,
+            ) {
+                androidx.compose.material3.Text("内容区")
+            }
+        }
+    }
+
     @Test
     fun conflictDemoLight() = shot("22_conflict_light", dark = false) {
         ScheduleScreen(

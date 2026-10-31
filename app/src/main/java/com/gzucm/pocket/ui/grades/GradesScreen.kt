@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -53,7 +54,7 @@ import com.gzucm.pocket.core.FitnessGrade
 import com.gzucm.pocket.core.LevelGrade
 import com.gzucm.pocket.ui.components.Fmt
 
-private enum class Tab(val label: String) {
+internal enum class Tab(val label: String) {
     Course("课程成绩"), Level("考级"), Fitness("体测")
 }
 
@@ -72,8 +73,16 @@ fun GradesScreen(
     /** 登录已失效：成绩空着不是「没有成绩」，是看不了 */
     needLogin: Boolean = false,
     onOpenLogin: () -> Unit = {},
+    /**
+     * 初始标签页索引：0=课程成绩 1=考级 2=体测。
+     *
+     * 用 Int 而不是 Tab：Tab 是 private enum，公开函数的参数不能用它
+     * （编译报 "Function 'public' exposes its 'internal' parameter type"）。
+     * 给截图测试切到体测页用，正常运行保持默认 0。
+     */
+    initialTabIndex: Int = 0,
 ) {
-    var tab by remember { mutableStateOf(Tab.Course) }
+    var tab by remember { mutableStateOf(Tab.entries.getOrElse(initialTabIndex) { Tab.Course }) }
 
     Column(
         Modifier
@@ -228,56 +237,140 @@ private fun CourseTab(
     val weightedGpa = summary.second
     val avgScore = summary.third
 
-    LazyColumn(
-        Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-            start = 18.dp, end = 18.dp, top = 2.dp,
-            bottom = LocalFloatingBarInset.current + 12.dp,
-        ),
-        verticalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        item(key = "summary") {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val wide = maxWidth >= 840.dp
+    val hPad = if (wide) 32.dp else 18.dp
+
+    /*
+     * 宽屏：左列 40% 放指标卡 + 展开的图表 + 学分构成，右列单独滚动成绩列表。
+     *
+     * 这样右列可以长条滚下去翻各学期的课，左列那些「总览性质」的内容
+     * 一直留在视野里 —— 翻到 2024 学期时还能看见加权绩点是多少。
+     *
+     * 两列各自 LazyColumn 独立滚动。外层套 verticalScroll 再镶 LazyColumn
+     * 会因无限高度约束直接崩，所以分栏时不能有外层滚动。
+     */
+    if (wide) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(24.dp),
+        ) {
+            LazyColumn(
+                Modifier.weight(0.4f),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    top = 2.dp, bottom = LocalFloatingBarInset.current + 12.dp,
+                ),
             ) {
-                StatPill(
-                    "加权绩点", Fmt.d2(weightedGpa), Modifier.weight(1f),
-                    onClick = { expanded = if (expanded == 1) 0 else 1 },
-                    selected = expanded == 1,
-                )
-                StatPill(
-                    "平均分", Fmt.trim1(avgScore), Modifier.weight(1f),
-                    onClick = { expanded = if (expanded == 2) 0 else 2 },
-                    selected = expanded == 2,
-                )
-                // 已修学分暂不做展开
-                StatPill("已修学分", Fmt.trim1(totalCredit), Modifier.weight(1f))
+                item(key = "summary") {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        StatPill(
+                            "加权绩点", Fmt.d2(weightedGpa), Modifier.weight(1f),
+                            onClick = { expanded = if (expanded == 1) 0 else 1 },
+                            selected = expanded == 1,
+                        )
+                        StatPill(
+                            "平均分", Fmt.trim1(avgScore), Modifier.weight(1f),
+                            onClick = { expanded = if (expanded == 2) 0 else 2 },
+                            selected = expanded == 2,
+                        )
+                    }
+                }
+                item(key = "credit") {
+                    StatPill("已修学分", Fmt.trim1(totalCredit), Modifier.fillMaxWidth())
+                }
+                // 展开的图表放在指标卡下方、学分构成上方
+                if (expanded == 1) {
+                    item(key = "chart_gpa") { GpaTrendCard(grades) }
+                }
+                if (expanded == 2) {
+                    item(key = "chart_score") { ScoreBarCard(grades) }
+                }
+                item(key = "breakdown") {
+                    Spacer(Modifier.height(10.dp))
+                    CategoryBreakdown(grades)
+                }
             }
 
-            if (expanded == 1) GpaTrendCard(grades)
-            if (expanded == 2) ScoreBarCard(grades)
-        }
-        byTerm.forEach { (term, list) ->
-            item(key = "h_$term") {
-                TermHeader(term, list)
+            LazyColumn(
+                Modifier.weight(0.6f),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    top = 2.dp, bottom = LocalFloatingBarInset.current + 12.dp,
+                ),
+            ) {
+                byTerm.forEach { (term, list) ->
+                    item(key = "h_$term") {
+                        TermHeader(term, list)
+                    }
+                    items(
+                        items = sortedByTerm[term].orEmpty(),
+                        key = { g -> "$term|${g.name}|${g.credit}" },
+                    ) { g ->
+                        GradeRow(g)
+                    }
+                    item(key = "s_$term") { Spacer(Modifier.height(14.dp)) }
+                }
             }
-            items(
-                items = sortedByTerm[term].orEmpty(),
-                // 稳定的 key 让 LazyColumn 能复用 item，滚动时不重建
-                key = { g -> "$term|${g.name}|${g.credit}" },
-            ) { g ->
-                GradeRow(g)
-            }
-            item(key = "s_$term") { Spacer(Modifier.height(14.dp)) }
         }
+    } else {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                start = hPad, end = hPad, top = 2.dp,
+                bottom = LocalFloatingBarInset.current + 12.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            item(key = "summary") {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    StatPill(
+                        "加权绩点", Fmt.d2(weightedGpa), Modifier.weight(1f),
+                        onClick = { expanded = if (expanded == 1) 0 else 1 },
+                        selected = expanded == 1,
+                    )
+                    StatPill(
+                        "平均分", Fmt.trim1(avgScore), Modifier.weight(1f),
+                        onClick = { expanded = if (expanded == 2) 0 else 2 },
+                        selected = expanded == 2,
+                    )
+                    // 已修学分暂不做展开
+                    StatPill("已修学分", Fmt.trim1(totalCredit), Modifier.weight(1f))
+                }
 
-        item(key = "breakdown") {
-            CategoryBreakdown(grades)
+                if (expanded == 1) GpaTrendCard(grades)
+                if (expanded == 2) ScoreBarCard(grades)
+            }
+            byTerm.forEach { (term, list) ->
+                item(key = "h_$term") {
+                    TermHeader(term, list)
+                }
+                items(
+                    items = sortedByTerm[term].orEmpty(),
+                    // 稳定的 key 让 LazyColumn 能复用 item，滚动时不重建
+                    key = { g -> "$term|${g.name}|${g.credit}" },
+                ) { g ->
+                    GradeRow(g)
+                }
+                item(key = "s_$term") { Spacer(Modifier.height(14.dp)) }
+            }
+
+            item(key = "breakdown") {
+                CategoryBreakdown(grades)
+            }
         }
     }
+    } // BoxWithConstraints
 }
 
 /** 按课程大类汇总，顺便把页面底部填满 */
@@ -901,26 +994,51 @@ private fun FitnessTab(
                     }
                 }
                 Spacer(Modifier.height(10.dp))
+                /*
+                 * 体测项两列排布。
+                 *
+                 * 关键点：**项目名不要用 weight(1f) 撑满**。
+                 *
+                 * 之前写成 `Text(label, Modifier.weight(1f))` + 值 ——
+                 * 标签被推到最左、值被推到最右。单看一项没问题，
+                 * 但两列并排时，左项的值正好顶在右项的项目名上：
+                 *     「身高        172体重        62.3」
+                 * 手机和平板都这样，平板因为列更宽还更明显。
+                 *
+                 * 现在让标签和值紧挨着成组（中间只隔 6dp），
+                 * 右列靠内边距拉开距离。视觉上一项是「一对数据」，
+                 * 而不是被拉到两端的两个孤立文字。
+                 */
                 f.items.chunked(2).forEach { pair ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-                        pair.forEach { item ->
-                            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                        pair.forEachIndexed { col, item ->
+                            Row(
+                                Modifier
+                                    .weight(1f)
+                                    // 右列左侧留 20dp，两列之间才有明显分隔
+                                    .padding(start = if (col == 0) 0.dp else 20.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
                                 Text(
                                     item.label,
                                     fontSize = 11.5.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
+                                Spacer(Modifier.width(6.dp))
                                 Text(
                                     item.value,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
                                 )
                                 if (item.score.isNotBlank()) {
                                     Text(
                                         " (${item.score})",
                                         fontSize = 10.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                        maxLines = 1,
                                     )
                                 }
                             }

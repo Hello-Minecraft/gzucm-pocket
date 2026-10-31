@@ -9,10 +9,16 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import com.gzucm.pocket.ui.adaptive.AppNavigationRail
+import com.gzucm.pocket.ui.adaptive.NavRailItem
+import com.gzucm.pocket.ui.adaptive.rememberLayout
+import com.gzucm.pocket.ui.adaptive.usesNavigationRail
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -26,6 +32,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Insights
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.WbSunny
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -33,6 +41,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -82,8 +91,101 @@ internal enum class Tab(val label: String, val icon: ImageVector) {
  * 内边距 —— 不同机器差 20~48dp，写死常量必然漏掉一截，最后一行内容就被压住。
  * 量出来的值加一段额外留白后通过 [LocalFloatingBarInset] 下发给各页做底部 padding。
  */
+/**
+ * 页面骨架，按可用宽度分成两套：
+ *
+ * 【手机 / 窄窗口】内容铺满，悬浮底栏叠在上面（原有实现，不动）
+ * 【平板 / 宽窗口】左侧固定导航栏 + 右侧内容区
+ *
+ * 判断依据是 `BoxWithConstraints` 拿到的**实际可用宽度**，
+ * 不是设备型号也不是屏幕物理尺寸 —— 平板开分屏后可能只剩 500dp，
+ * 那时应当退回底部 Tab 布局，否则内容区会被挤成一条。
+ */
 @Composable
 internal fun MainScaffold(
+    tab: Tab,
+    onSelect: (Tab) -> Unit,
+    /** 宽屏侧栏底部「同步」按钮 */
+    onSyncClick: () -> Unit = {},
+    /** 宽屏侧栏底部「设置」按钮 */
+    onSettingsClick: () -> Unit = {},
+    /** 有新版本时，侧栏设置按钮右上角显示小红点 */
+    hasUpdate: Boolean = false,
+    syncing: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val layout = rememberLayout(maxWidth)
+
+        if (layout.usesNavigationRail) {
+            WideScaffold(
+                tab = tab,
+                onSelect = onSelect,
+                onSyncClick = onSyncClick,
+                onSettingsClick = onSettingsClick,
+                hasUpdate = hasUpdate,
+                syncing = syncing,
+                content = content,
+            )
+        } else {
+            PhoneScaffold(tab = tab, onSelect = onSelect, content = content)
+        }
+    }
+}
+
+/** 宽窗口：左侧导航栏 + 内容区。内容区不再需要底部留白，把 inset 归零。 */
+@Composable
+private fun WideScaffold(
+    tab: Tab,
+    onSelect: (Tab) -> Unit,
+    onSyncClick: () -> Unit,
+    onSettingsClick: () -> Unit,
+    hasUpdate: Boolean,
+    syncing: Boolean,
+    content: @Composable () -> Unit,
+) {
+    /*
+     * 底部 inset 置 0：平板的导航条在左侧，内容区可以一直铺到屏幕底边。
+     * 之前给底部 Tab 留的那一截在这里是纯浪费 —— 课表会因此少显示半节课。
+     */
+    CompositionLocalProvider(LocalFloatingBarInset provides 0.dp) {
+        Row(Modifier.fillMaxSize()) {
+            AppNavigationRail(
+                items = Tab.entries.map { NavRailItem(it.label, it.icon) },
+                selected = Tab.entries.indexOf(tab),
+                onSelect = { onSelect(Tab.entries[it]) },
+                bottomInset = 0.dp,
+                bottomActions = {
+                    /*
+                     * 同步 / 设置从首页标题栏搬到这里。
+                     *
+                     * 首页的标题栏在宽屏下就只剩日期和红点位置，干净很多；
+                     * 侧栏底部是拇指最容易够到的地方（平板握持在两侧）。
+                     */
+                    com.gzucm.pocket.ui.adaptive.RailActionButton(
+                        icon = Icons.Rounded.Refresh,
+                        label = "同步",
+                        spinning = syncing,
+                        onClick = onSyncClick,
+                    )
+                    com.gzucm.pocket.ui.adaptive.RailActionButton(
+                        icon = Icons.Rounded.Settings,
+                        label = "设置",
+                        badge = hasUpdate,
+                        onClick = onSettingsClick,
+                    )
+                },
+            )
+            Box(Modifier.weight(1f).fillMaxHeight()) {
+                content()
+            }
+        }
+    }
+}
+
+/** 手机 / 窄窗口：原实现，内容铺满 + 悬浮底栏。 */
+@Composable
+private fun PhoneScaffold(
     tab: Tab,
     onSelect: (Tab) -> Unit,
     content: @Composable () -> Unit,
@@ -193,12 +295,44 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 onJwReady = vm::onJwReady,
             )
 
-            else -> MainScaffold(tab = tab, onSelect = { tab = it }) {
+            else -> MainScaffold(
+                tab = tab,
+                onSelect = { tab = it },
+                /*
+                 * 宽屏侧栏底部的两个动作。
+                 *
+                 * 用 vm 的方法而不是直接改 tab —— 「同步」在这里的语义
+                 * 跟首页标题栏那个刷新按钮一致：触发一次同步，不跳页。
+                 * 「有新版本」小红点也一起传下去，原来在标题栏设置图标上的。
+                 */
+                onSyncClick = { vm.sync() },
+                onSettingsClick = { showSettings = true },
+                hasUpdate = vm.hasUpdate,
+                /*
+                 * 原来写的是 `syncing && sessions.isEmpty()` —— 那是首页
+                 * 「首次加载占位」的判据，不是「同步进行中」。
+                 * 已经有课表时 sessions 非空，条件永远 false，转圈永远不出现。
+                 * 侧栏按钮只需要知道「现在是不是在同步」。
+                 */
+                syncing = vm.state.syncing,
+            ) {
+                /*
+                 * 切 Tab 时保留各页状态。
+                 *
+                 * AnimatedContent 在切走时会把旧页彻底销毁，`rememberSaveable`
+                 * 存的东西跟着没了 —— 表现是「看课表滑到第 12 节，切去成绩再回来，
+                 * 又回到顶上了」。
+                 *
+                 * SaveableStateHolder 按 key 把状态寄存起来，切回来时原样恢复。
+                 * key 用 Tab 本身，一个 Tab 一份。
+                 */
+                val stateHolder = rememberSaveableStateHolder()
                 AnimatedContent(
                     targetState = tab,
                     transitionSpec = { fadeIn() togetherWith fadeOut() },
                     label = "tab",
                 ) { t ->
+                    stateHolder.SaveableStateProvider(t.name) {
                     when (t) {
                         Tab.Today -> TodayScreen(
                             semester = state.semester,
@@ -274,15 +408,31 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                             )
                         }
                     }
+                    } // SaveableStateProvider
                 }
             }
         }
     }
 
-    if (showDonate) {
-        com.gzucm.pocket.ui.settings.DonateSheet(onDismiss = { showDonate = false })
-    }
+    // 打赏已并入设置面板作为子页面（见下方 AdaptiveSheet 里的 showDonate 分支），
+    // 这里不再单独开一层面板 —— 两层叠着会让层级关系变乱。
 
+    /*
+     * 课程详情：手机用底部 Sheet，平板用右侧滑出面板。
+     *
+     * 判断依据是**实际可用宽度**（和课表、左导航用同一套断点），
+     * 不是设备型号 —— 平板分屏后窄了，应该退回底部 Sheet。
+     *
+     * 用 BoxWithConstraints 包住：只有详情打开时才需要知道宽度，
+     * 不该为了这件事给整个页面加一层约束。
+     */
+    /*
+     * 课程详情。
+     *
+     * 容器由 SessionSheet 内部自己选（平板侧栏 / 手机底部 Sheet），
+     * 这里不再手动分叉 —— 所有面板统一走 AdaptiveSheet，
+     * 免得每个调用点各写一遍断点判断。
+     */
     detail?.let { s ->
         /*
          * 同一时段的其他课。
@@ -302,9 +452,9 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
         )
     }
 
-    if (showEcardSync) {
-        com.gzucm.pocket.ui.power.EcardSyncSheet(
-            onDone = { info, daily, err ->
+    com.gzucm.pocket.ui.power.EcardSyncSheet(
+        visible = showEcardSync,
+        onDone = { info, daily, err ->
                 showEcardSync = false
                 if (info != null) {
                     vm.applyEcardSync(info, daily)
@@ -314,31 +464,61 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                     if (err != null) vm.showPowerError(err)
                 }
             },
-            onDismiss = { showEcardSync = false },
-        )
+        onDismiss = { showEcardSync = false },
+    )
+
+    com.gzucm.pocket.ui.power.RebindGuideSheet(
+        onDismiss = { showRebindGuide = false },
+        visible = showRebindGuide,
+    )
+
+    /*
+     * 手动同步结束后弹一次轻提示。
+     *
+     * 用 Android 原生 Toast 而不是 Snackbar：Snackbar 要挂在 Scaffold 上，
+     * 而这里整个页面是自绘的骨架（没有 Scaffold），为了一个提示重构布局不值得。
+     * Toast 的定位也符合「操作完了给个回执」这个轻量语义。
+     *
+     * 按 syncResultSeq 判断是不是新的一条 —— 连续两次同样的失败文案，
+     * 光看字符串会以为还是上次那条，Toast 就不弹第二次了。
+     */
+    val ctxToast = androidx.compose.ui.platform.LocalContext.current
+    var lastToastSeq by remember { mutableIntStateOf(0) }
+    LaunchedEffect(state.syncResultSeq) {
+        if (state.syncResultSeq > lastToastSeq) {
+            lastToastSeq = state.syncResultSeq
+            state.syncResultText?.let { text ->
+                android.widget.Toast.makeText(ctxToast, text, android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
-    if (showRebindGuide) {
-        com.gzucm.pocket.ui.power.RebindGuideSheet(onDismiss = { showRebindGuide = false })
-    }
-
-    if (showSettings) {
+    /*
+     * 设置面板**常驻组合树**，靠 visible 控制显隐。
+     *
+     * 之前写成 `if (showSettings) { AdaptiveSheet(...) }` ——
+     * 面板第一次进组合时 visible 就已经是 true，AnimatedVisibility
+     * 认为「初始状态就是可见」，进入动画根本不会播（退场也一样，
+     * 整棵子树被直接摘掉）。表现就是面板「啪」地出现、没有滑出效果。
+     *
+     * 常驻之后 AnimatedVisibility 能观察到 false → true 的变化，
+     * 才会真的从侧边滑进来。
+     */
+    run {
         val lastSync = state.lastSync.let { ts ->
             if (ts <= 0) "—"
             else java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.CHINA)
                 .format(java.util.Date(ts))
         }
-        androidx.compose.material3.ModalBottomSheet(
-            /**
-             * 打开就全展开。
-             *
-             * 默认是「半展开」（约半屏高），设置页内容比半屏长得多，
-             * 一进去只能看到上面几项，想找「重新登录」还得先把面板往上拖 —— 没人知道能拖。
-             */
-            sheetState = androidx.compose.material3.rememberModalBottomSheetState(
-                skipPartiallyExpanded = true,
-            ),
-            onDismissRequest = {
+        /*
+         * 设置用侧栏形态（平板）/ 底部 Sheet（手机）。
+         *
+         * 侧栏宽 460dp：设置项多、还有滑块和颜色选择器，
+         * 380dp 会让「上课提醒」那几行折行。
+         */
+        com.gzucm.pocket.ui.adaptive.AdaptiveSheet(
+            visible = showSettings,
+            onDismiss = {
                 focusRelogin = false
                 // 注意：这里必须把两个标志都清掉。
                 // 之前只清一个，导致「在关于页下拉关掉面板」后 showSettings 还是 true，
@@ -346,15 +526,55 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 showAbout = false
                 showSettings = false
             },
-            containerColor = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+            paneWidth = 460.dp,
+            paneTitle = when {
+                showAbout -> "关于软件"
+                showDonate -> "打赏作者"
+                else -> "设置"
+            },
+            // 设置页和关于页正文自带 verticalScroll，这里必须关掉
+            scrollable = false,
+            // 平板横屏导航栏在左边，面板也从左边出来
+            fromLeft = true,
         ) {
+            // 不可见时正文不渲染：面板常驻了，内容没必要跟着一直算
+            if (!showSettings) return@AdaptiveSheet
+
+            /*
+             * 返回键分层：子页面 → 设置主页面 → 关闭面板。
+             *
+             * 之前没有这层处理，在「关于软件 / 打赏作者」里按返回会直接把
+             * 整个设置面板关掉，用户以为退出了设置。跟系统设置的习惯相反。
+             */
+            androidx.activity.compose.BackHandler(
+                enabled = showAbout || showDonate,
+            ) {
+                showAbout = false
+                showDonate = false
+            }
             if (showAbout) {
                 com.gzucm.pocket.ui.settings.AboutScreen(
                     onBack = { showAbout = false },
                     onChecked = { vm.refreshUpdateBadge() },
                 )
-                return@ModalBottomSheet
+                return@AdaptiveSheet
+            }
+            /*
+             * 打赏作为设置面板里的**子页面**，跟「关于软件」同一层级。
+             *
+             * 原来它是独立一层面板（root 里另开一个 DonateSheet），
+             * 表现是：从设置点进打赏 → 又一个面板盖在上面 →
+             * 标题变成「打赏作者」，但底下还压着设置那一层，
+             * 返回时是两层动画叠着退回，层级关系看着很乱。
+             *
+             * 现在跟关于软件一致：同一块侧栏，只换正文和标题，
+             * 关闭/返回都回到设置本身，层级是平的。
+             */
+            if (showDonate) {
+                com.gzucm.pocket.ui.settings.DonateContent(
+                    onBack = { showDonate = false },
+                )
+                return@AdaptiveSheet
             }
             com.gzucm.pocket.ui.settings.SettingsScreen(
                 onSync = { vm.sync(); showSettings = false },
