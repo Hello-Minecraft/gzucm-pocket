@@ -114,6 +114,10 @@ keyPassword=****
 | `ParsingTest` / `SemesterTest` | 成绩解析、教学周历计算 |
 | `LoginFlowTest` | 登录跳转状态机 |
 
+## 文档
+
+调研记录、历史发版说明、截图都在 [`docs/`](docs/)，见 [docs/README.md](docs/README.md)。
+
 ## 致谢
 
 `gzucm-probe/` 里的抓包脚本用于逆向接口字段，用的 Playwright + CDP。
