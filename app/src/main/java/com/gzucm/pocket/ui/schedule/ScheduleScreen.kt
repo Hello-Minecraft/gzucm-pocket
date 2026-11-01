@@ -37,6 +37,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChevronLeft
+import androidx.compose.material.icons.rounded.GridView
+import androidx.compose.material.icons.rounded.ViewAgenda
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Wallpaper
 import androidx.compose.material3.Icon
@@ -62,45 +64,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.sp
 import com.gzucm.pocket.core.CourseSession
+import com.gzucm.pocket.core.SlotEndTimes
+import com.gzucm.pocket.core.SlotTimes
 import com.gzucm.pocket.ui.components.CourseBackground
 import com.gzucm.pocket.ui.components.LocalFloatingBarInset
 import com.gzucm.pocket.core.Semester
 import com.gzucm.pocket.ui.theme.courseColor
 import java.time.LocalDate
 
-private val WeekdayLabels = listOf("一", "二", "三", "四", "五", "六", "日")
+/** 周一→周日。日视图的星期条也用这份，别各写一份 */
+internal val WeekdayLabels = listOf("一", "二", "三", "四", "五", "六", "日")
 
-/**
- * 广中医作息。每节 40 分钟，课间 10 分钟。
- *
- * 节次编号是**连续**的 1–14，之前误以为跳号（没有 5、10、11）——
- * 那是「自己的课表里恰好没有这些节次的课」，不是系统没有。
- * 全校课表里 5 节 155 条、10 节 741 条、11 节 221 条（第 8 周实测）。
- *
- * 时间来自教务周课表页的 businessHours，并与课程接口的 qssj 交叉核对：
- * 第 5 节 13:10、第 10 节 17:20 两处吻合；
- * 10/11 节再用「40 分钟课 + 10 分钟课间」推链验证：
- * 16:30(9) → 17:20(10) → 18:10(11) → 19:00(12，已确认)。
- */
-val SlotTimes: Map<Int, String> = mapOf(
-    1 to "08:30", 2 to "09:20", 3 to "10:20", 4 to "11:10", 5 to "13:10",
-    6 to "14:00", 7 to "14:50", 8 to "15:40", 9 to "16:30", 10 to "17:20",
-    11 to "18:10", 12 to "19:00", 13 to "19:50", 14 to "20:40",
-)
-
-/**
- * 下课时间 = 上课时间 + 40 分钟。
- * 从 SlotTimes 推出来而不是手写一份，作息改了不会两边对不上。
- */
-val SlotEndTimes: Map<Int, String> = SlotTimes.mapValues { (_, hhmm) ->
-    val parts = hhmm.split(":")
-    val h = parts.getOrNull(0)?.toIntOrNull()
-    val m = parts.getOrNull(1)?.toIntOrNull()
-    if (h == null || m == null) "" else {
-        val total = h * 60 + m + 40
-        "%02d:%02d".format((total / 60) % 24, total % 60)
-    }
-}
+// 节次时间表已移到 core/Campus.kt —— 研究生课表也要用同一份，不能再写在 UI 层。
+// 这里保留别名，避免改动大量调用点。
 
 /** 全部可能的节次，用于计算跨节高度时补齐中间被跳过的号 */
 private val AllUnits = (1..14).toList()
@@ -139,6 +115,17 @@ fun ScheduleScreen(
      * 保留成常量而非删参数，是为了 placeSessions 的分支逻辑还在（测试用它）。
      */
     val overlapMode = true
+
+    /*
+     * 周视图 / 日视图（致辉 2026-11-01 定）。
+     *
+     * 日视图适合「看今天上什么、教室在哪」，周视图适合「看整周怎么排」，
+     * 两种需求都在，所以做成切换而不是替换。
+     *
+     * 存进 SessionStore 落盘：切过一次的人下次打开还是那个视图，
+     * 不用每次都要点一下。
+     */
+    var dayView by remember { mutableStateOf(store.courseDayView) }
 
     /*
      * 重叠课表的轮换状态。
@@ -191,10 +178,21 @@ fun ScheduleScreen(
         initialPage = (viewingWeek - 1).coerceIn(0, totalWeeks - 1),
     ) { totalWeeks }
 
-    // 外部改周（点周次条）→ 平滑翻过去
+    /*
+     * 外部改周（点周条）→ 翻过去。
+     *
+     * 用 scrollToPage 而不是 animateScrollToPage（致辉 2026-11-01 报「点周条卡卡的」）：
+     * 动画期间 Pager 正在消费手势，用户紧接着滑/点会被吞掉。
+     * 瞬移看起来是「一下就到」，反而更跟手。
+     *
+     * 同时判 settledPage != currentPage：用户手指还按在屏幕上拖动时
+     * 不要去抢，等它落定。
+     */
     LaunchedEffect(viewingWeek) {
         val target = (viewingWeek - 1).coerceIn(0, totalWeeks - 1)
-        if (pagerState.currentPage != target) pagerState.animateScrollToPage(target)
+        if (pagerState.currentPage != target && !pagerState.isScrollInProgress) {
+            pagerState.scrollToPage(target)
+        }
     }
     // 手势翻页落定 → 回写当前周
     LaunchedEffect(pagerState) {
@@ -204,7 +202,20 @@ fun ScheduleScreen(
     }
 
     // 表头/日期跟着跟手位置走，滑动过程中就能看到目标周的日期
-    val shownWeek = (pagerState.currentPage + 1).coerceIn(1, totalWeeks)
+    /*
+     * 两个视图管同一件事，但数据源不同。
+     *
+     * 周视图：shownWeek 取自它自己的 pagerState（跟手滑动时标题要立刻变）。
+     * 日视图：**必须用外部传的 viewingWeek**，不能用周视图的 pagerState ——
+     *   日视图有自己的 Pager，两者页索引不是一回事。
+     *   之前直接用 pager 的 currentPage，日视图滑到第 9 周时
+     *   顶部还写着第 8 周（致辉 2026-11-01 实机发现）。
+     */
+    val shownWeek = if (dayView) {
+        viewingWeek.coerceIn(1, totalWeeks)
+    } else {
+        (pagerState.currentPage + 1).coerceIn(1, totalWeeks)
+    }
 
     /*
      * 按当前可用宽度决定是否走宽屏布局。
@@ -231,14 +242,41 @@ fun ScheduleScreen(
             viewingWeek = shownWeek,
             onWeekChange = onWeekChange,
             onOpenBg = { showBgSheet = true },
+            dayView = dayView,
+            onToggleDayView = {
+                dayView = !dayView
+                store.courseDayView = dayView
+            },
         )
         Spacer(Modifier.height(10.dp))
+        /*
+         * 周条两个视图都留着（致辉 2026-11-01 定）：
+         * 日视图里也要能切周，不然只能翻到边界那天再滑，太绕。
+         */
         WeekStrip(
             totalWeeks = totalWeeks,
             currentWeek = currentWeek,
             viewingWeek = shownWeek,
             onSelect = onWeekChange,
         )
+
+        if (dayView) {
+            /*
+             * 日视图：星期条 + 卡片列表，自己管「这一周里的哪一天」。
+             *
+             * 不再画 WeekdayStrip —— 日视图的星期条自带日期且可点，
+             * 两个叠一起会重复。
+             */
+            DayScheduleView(
+                semester = semester,
+                week = shownWeek,
+                currentWeek = currentWeek,
+                sessions = sessions,
+                onCourseClick = onCourseClick,
+                onWeekChange = onWeekChange,
+                modifier = Modifier.weight(1f),
+            )
+        } else {
         Spacer(Modifier.height(8.dp))
         WeekdayStrip(semester, shownWeek, currentWeek, wide = wide)
 
@@ -276,6 +314,7 @@ fun ScheduleScreen(
                 isLoading = loadedWeeks != null && week !in loadedWeeks,
             )
         }
+        } // else (周视图)
         }
     }
 
@@ -554,6 +593,9 @@ private fun WeekHeader(
     viewingWeek: Int,
     onWeekChange: (Int) -> Unit,
     onOpenBg: () -> Unit = {},
+    /** 当前是不是日视图。顶部按钮靠它决定图标 */
+    dayView: Boolean = false,
+    onToggleDayView: () -> Unit = {},
 ) {
     Row(
         Modifier
@@ -609,23 +651,23 @@ private fun WeekHeader(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        IconButton(onClick = { onWeekChange(viewingWeek - 1) }, enabled = viewingWeek > 1) {
+        /*
+         * 视图切换，**顶替了原来的左右翻页箭头**（致辉 2026-11-01 定）。
+         *
+         * 为什么删箭头：周视图本来就能左右滑动翻周，箭头是重复入口；
+         * 而且一格塞两个箭头，这个位置留给「切日视图」更有用。
+         *
+         * 图标用 GridView / ViewAgenda：
+         *   · GridView   = 四宫格，对应周视图（七列网格）
+         *   · ViewAgenda = 横条堆叠，对应日视图（卡片列表）
+         * 相比「日历 / 列表」这种带隐喻的图标，这两个直接画出了布局形状，
+         * 不认字也看得懂。
+         */
+        IconButton(onClick = onToggleDayView) {
             Icon(
-                Icons.Rounded.ChevronLeft,
-                contentDescription = "上一周",
-                tint = if (viewingWeek > 1) MaterialTheme.colorScheme.onSurface
-                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
-            )
-        }
-        IconButton(
-            onClick = { onWeekChange(viewingWeek + 1) },
-            enabled = viewingWeek < semester.totalWeeks,
-        ) {
-            Icon(
-                Icons.Rounded.ChevronRight,
-                contentDescription = "下一周",
-                tint = if (viewingWeek < semester.totalWeeks) MaterialTheme.colorScheme.onSurface
-                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                if (dayView) Icons.Rounded.GridView else Icons.Rounded.ViewAgenda,
+                contentDescription = if (dayView) "切换到周视图" else "切换到日视图",
+                tint = MaterialTheme.colorScheme.primary,
             )
         }
         // 背景设置入口，就放在课表页，不用去总设置里翻

@@ -1,7 +1,7 @@
 package com.gzucm.pocket
 
-import com.gzucm.pocket.ui.schedule.SlotEndTimes
-import com.gzucm.pocket.ui.schedule.SlotTimes
+import com.gzucm.pocket.core.SlotEndTimes
+import com.gzucm.pocket.core.SlotTimes
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

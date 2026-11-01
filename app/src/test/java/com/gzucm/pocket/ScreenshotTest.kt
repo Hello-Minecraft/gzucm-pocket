@@ -248,6 +248,46 @@ class ScreenshotTest {
         ScheduleScreen(semester, sessions, 8, 8, {}, {})
     }
 
+    /**
+     * 日视图（2026-11-01 新增）。
+     *
+     * 直接摆一个 DayScheduleView，不走 ScheduleScreen ——
+     * 那边默认从存储里读周视图，改 store 会影响其他测试。
+     */
+    @Test
+    fun scheduleDayView() = shot("01b_schedule_day") {
+        androidx.compose.material3.Surface(
+            androidx.compose.ui.Modifier.fillMaxSize(),
+            color = androidx.compose.material3.MaterialTheme.colorScheme.background,
+        ) {
+            com.gzucm.pocket.ui.schedule.DayScheduleView(
+                semester = semester,
+                week = 8,
+                currentWeek = 8,
+                sessions = sessions,
+                onCourseClick = {},
+            )
+        }
+    }
+
+    /** 日视图某天没课时的占位 */
+    @Test
+    fun scheduleDayViewEmpty() = shot("01c_schedule_day_empty") {
+        androidx.compose.material3.Surface(
+            androidx.compose.ui.Modifier.fillMaxSize(),
+            color = androidx.compose.material3.MaterialTheme.colorScheme.background,
+        ) {
+            com.gzucm.pocket.ui.schedule.DayScheduleView(
+                semester = semester,
+                week = 8,
+                currentWeek = 8,
+                sessions = emptyList(),
+                onCourseClick = {},
+                initialDay = 6,
+            )
+        }
+    }
+
     @Test
     fun today() = shot("02_today") {
         TodayScreen(semester, 8, sessions, power, daily, 0L, {}, {}, {}, {}, false, 0, 0, false, null)
@@ -452,6 +492,73 @@ class ScreenshotTest {
         prepare = { rule.onNodeWithText("扫码登录").performClick() },
     ) {
         com.gzucm.pocket.ui.login.LoginScreen(onLoggedIn = { _, _ -> })
+    }
+
+    /** 研究生学段：底栏只应有 3 个 tab，没有电费 */
+    @Test
+    fun scaffoldGraduate() = shot("80_scaffold_graduate") {
+        com.gzucm.pocket.ui.MainScaffold(
+            tab = com.gzucm.pocket.ui.Tab.Today,
+            onSelect = {},
+            campus = com.gzucm.pocket.core.Campus.GRADUATE,
+        ) {
+            TodayScreen(semester, 8, sessions, power, daily, 0L, {}, {}, {}, {}, false, 0, 0, false, null)
+        }
+    }
+
+    /**
+     * 研究生学段的电费页 —— 没登录一卡通时的空态。
+     *
+     * 验证三件事：
+     *   ① 研究生学段底栏确实有「电费」这个 tab（之前被过滤掉了）
+     *   ② 空态标题是「还没登录一卡通」，不是「读不到电费」
+     *   ③ 按钮是「登录一卡通」而不是「同步校园卡」
+     */
+    @Test
+    fun scaffoldGraduatePowerEmpty() = shot("82_graduate_power_empty") {
+        com.gzucm.pocket.ui.MainScaffold(
+            tab = com.gzucm.pocket.ui.Tab.Power,
+            onSelect = {},
+            campus = com.gzucm.pocket.core.Campus.GRADUATE,
+        ) {
+            com.gzucm.pocket.ui.power.PowerScreen(
+                power = null,
+                daily = emptyList(),
+                loading = false,
+                ecardLoggedIn = false,
+            )
+        }
+    }
+
+    /** 1 号那天明细为空时应该有提示，不是一片空白 */
+    @Test
+    fun powerEmptyDailyHint() = shot("83_power_empty_daily") {
+        com.gzucm.pocket.ui.power.PowerScreen(
+            power = com.gzucm.pocket.core.PowerInfo(
+                balance = 144.09,
+                unit = "度",
+                roomLabel = "三元里6栋   211",
+                token = "t",
+                schoolAreaNo = "2",
+                buildingNo = "5754",
+                roomNum = "211",
+            ),
+            daily = emptyList(),
+            loading = false,
+            ecardLoggedIn = true,
+        )
+    }
+
+    /** 登录页选中研究生学段：应显示「登录研究生系统」，且没有扫码按钮 */
+    @Test
+    fun loginGraduate() = shot(
+        "81_login_graduate",
+        prepare = { rule.onNodeWithText("研究生").performClick() },
+    ) {
+        com.gzucm.pocket.ui.login.LoginScreen(
+            onLoggedIn = { _, _ -> },
+            initialCampus = com.gzucm.pocket.core.Campus.UNDERGRAD,
+        )
     }
 
     /** 课表页在骨架里，看底栏会不会压住最后一行课 */

@@ -71,6 +71,15 @@ fun PowerScreen(
     powerAlertOn: Boolean = true,
     onPowerAlertChange: (Boolean) -> Unit = {},
     onOpenRebindGuide: () -> Unit = {},
+    /**
+     * 有没有一卡通会话。
+     *
+     * 研究生学段用的是「单独登录一卡通」这条路：课表走研究生系统，
+     * 电费走 `ecard.gzucm.edu.cn`，两套账号互不相干。
+     * 没有这个标记的话，空态只会说「读不到电费」，
+     * 用户不知道其实是没登录。
+     */
+    ecardLoggedIn: Boolean = true,
 ) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     // 提到这里：之前挂在 LazyColumn 的 item 里，卡片滚出屏幕会被销毁，
@@ -95,21 +104,31 @@ fun PowerScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
+                /*
+                 * 没有数据分两种情况，文案必须区分开 ——
+                 * 否则研究生用户会以为「电费功能坏了」，
+                 * 其实是压根没登过一卡通（那是另一套账号体系）。
+                 */
                 Text(
-                    if (error != null) "电费没读出来" else "暂时读不到电费数据",
+                    if (!ecardLoggedIn) "还没登录一卡通"
+                    else if (error != null) "电费没读出来"
+                    else "暂时读不到电费数据",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Medium,
                 )
-                if (error != null) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        error,
-                        fontSize = 11.5.sp,
-                        lineHeight = 17.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    )
-                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    when {
+                        !ecardLoggedIn ->
+                            "电费在校园一卡通里，和课表不是同一个系统，需要单独登录一次"
+                        error != null -> error
+                        else -> "点下面的按钮重新读一次"
+                    },
+                    fontSize = 11.5.sp,
+                    lineHeight = 17.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
                 Spacer(Modifier.height(20.dp))
 
                 // 主入口：用 WebView 走一遍，cookie 由浏览器自己管，不会搬错
@@ -121,7 +140,7 @@ fun PowerScreen(
                         .padding(horizontal = 20.dp, vertical = 10.dp),
                 ) {
                     Text(
-                        "同步校园卡",
+                        if (!ecardLoggedIn) "登录一卡通" else "同步校园卡",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.primary,
@@ -129,7 +148,11 @@ fun PowerScreen(
                 }
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "会打开学校的一卡通页面，登录一次即可",
+                    if (!ecardLoggedIn) {
+                        "会打开统一身份认证，用学号密码登录一次"
+                    } else {
+                        "会打开学校的一卡通页面，登录一次即可"
+                    },
                     fontSize = 10.5.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                 )
@@ -247,14 +270,19 @@ fun PowerScreen(
                             )
                             Spacer(Modifier.weight(1f))
                             Text(
-                                "共 ${daily.size} 天",
+                                if (daily.isEmpty()) "" else "共 ${daily.size} 天",
                                 fontSize = 10.5.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
-                    items(daily.reversed(), key = { it.date }) { d ->
-                        DailyRow(day = d)
+                    // 和单列分支一致：空的时候给提示，别留一片白
+                    if (daily.isEmpty()) {
+                        item { EmptyDailyHint() }
+                    } else {
+                        items(daily.reversed(), key = { it.date }) { d ->
+                            DailyRow(day = d)
+                        }
                     }
                 }
             }
@@ -287,8 +315,20 @@ fun PowerScreen(
                     modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
                 )
             }
-            items(daily.reversed(), key = { it.date }) { d ->
-                DailyRow(day = d)
+            /*
+             * 明细为空时必须给句话，不能留白。
+             *
+             * 最常见的情况是每月 1 号：上个月的记录不归这个月查，
+             * 这个月又还没过完一天，于是接口返回空。
+             * 用户看到的是一整片空白，会以为数据坏了
+             * （致辉 2026-11-01 就疑惑了半天）。
+             */
+            if (daily.isEmpty()) {
+                item { EmptyDailyHint() }
+            } else {
+                items(daily.reversed(), key = { it.date }) { d ->
+                    DailyRow(day = d)
+                }
             }
         }
     }
@@ -791,6 +831,55 @@ private fun DeltaBars(points: List<PowerDaily>, height: androidx.compose.ui.unit
                 fontSize = 9.sp,
                 lineHeight = 11.sp,
                 color = scheme.onSurfaceVariant.copy(alpha = 0.55f),
+            )
+        }
+    }
+}
+
+/**
+ * 每日明细为空时的占位。
+ *
+ * 按月查明细，每月 1 号必然是空的：
+ *   · 上个月的记录要传上个月的 `lastDate` 才查得到
+ *   · 这个月还没过完一天，没有任何记录
+ *
+ * 所以文案分两种：
+ *   · 1 号 → 明说「每月 1 号查不到」，并提示看昨天（上月最后一天）的
+ *   · 其他日子 → 一般性的「暂时没有记录」，不硬编日期
+ *
+ * 判断日期用 `LocalDate.now()`，和 App 其他地方的日期口径一致。
+ */
+@Composable
+private fun EmptyDailyHint() {
+    val scheme = MaterialTheme.colorScheme
+    val today = java.time.LocalDate.now()
+    val firstOfMonth = today.dayOfMonth == 1
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(scheme.surfaceVariant.copy(alpha = 0.35f))
+            .padding(horizontal = 16.dp, vertical = 18.dp),
+    ) {
+        Column {
+            Text(
+                if (firstOfMonth) "今天是 ${today.monthValue} 月 1 号，暂无电费详情"
+                else "暂无每日明细",
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Medium,
+                color = scheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                if (firstOfMonth) {
+                    "每月 1 号查不到明细 —— 上个月的记录归上个月，" +
+                        "这个月还没过完一天。明天起就会一天一天记起来。"
+                } else {
+                    "可能刚换过宿舍，或者学校那边还没生成记录。晚点再点右上角更新试试。"
+                },
+                fontSize = 11.sp,
+                lineHeight = 16.sp,
+                color = scheme.onSurfaceVariant.copy(alpha = 0.75f),
             )
         }
     }

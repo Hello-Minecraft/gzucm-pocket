@@ -38,6 +38,13 @@ data class CourseSession(
     val teachLink: String = "",
     /** 教学形式（`jxxsmc`），如「线下教学」 */
     val teachForm: String = "",
+    /**
+     * 这条数据来自哪个系统。
+     *
+     * 放在最后 + 给默认值：老缓存里没有这个字段，反序列化不能炸。
+     * 默认 UNDERGRAD 是对的 —— 升级前所有数据都是本科的。
+     */
+    val campus: Campus = Campus.UNDERGRAD,
 )
 
 /**

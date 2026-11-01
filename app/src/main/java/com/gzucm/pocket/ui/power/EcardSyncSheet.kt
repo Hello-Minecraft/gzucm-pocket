@@ -71,38 +71,65 @@ fun EcardSyncSheet(
     onDone: (balance: PowerInfo?, daily: List<PowerDaily>, error: String?) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var status by remember { mutableStateOf("正在打开校园卡…") }
-    var webRef by remember { mutableStateOf<WebView?>(null) }
+    /*
+     * 所有抓取状态都必须 `remember(visible)`，不能只写 `remember {}`。
+     *
+     * 踩过的坑（致辉 2026-11-01 报的「第一次能读到、第二次报错」）：
+     *   · 面板关掉时，AdaptiveSheet 里的 AnimatedVisibility 会销毁 WebView
+     *   · 但本组件的 remember 状态**不会跟着重置** —— 它在这一层，不在里面
+     *   · 于是第二次打开时 done 还是 true，`tryFinish()` 第一句
+     *     `if (done) return` 把所有新数据全丢掉了
+     *
+     * 用 `remember(visible)`：visible 一变（关→开）就重新初始化，
+     * 等于每次打开面板都是干净的一轮。
+     *
+     * 注意不能在 `LaunchedEffect(visible)` 里手动赋值重置 —— 那样先渲染
+     * 一帧旧状态，界面会闪一下旧的余额/错误文案。
+     */
+    var status by remember(visible) { mutableStateOf("正在打开校园卡…") }
+    var webRef by remember(visible) { mutableStateOf<WebView?>(null) }
     // 收齐两个响应后统一解析
-    var balanceRaw by remember { mutableStateOf<String?>(null) }
-    var pageHtml by remember { mutableStateOf("") }
-    var dailyRaw by remember { mutableStateOf<String?>(null) }
-    var dailyJsonRaw by remember { mutableStateOf<String?>(null) }
-    var errorMsg by remember { mutableStateOf<String?>(null) }
-    var done by remember { mutableStateOf(false) }
+    var balanceRaw by remember(visible) { mutableStateOf<String?>(null) }
+    var pageHtml by remember(visible) { mutableStateOf("") }
+    var dailyRaw by remember(visible) { mutableStateOf<String?>(null) }
+    var dailyJsonRaw by remember(visible) { mutableStateOf<String?>(null) }
+    var errorMsg by remember(visible) { mutableStateOf<String?>(null) }
+    var done by remember(visible) { mutableStateOf(false) }
 
     fun tryFinish() {
         if (done) return
-        val b = balanceRaw ?: return
-        // 明细优先用分页 JSON，退回到 HTML
-        val dJson = dailyJsonRaw
-        val dHtml = dailyRaw
-        if (dJson == null && dHtml == null) return
+        val r = EcardSyncResult.tryBuild(
+            balanceRaw = balanceRaw,
+            dailyJsonRaw = dailyJsonRaw,
+            dailyRaw = dailyRaw,
+            pageHtml = pageHtml,
+        ) ?: return  // 还没收齐，继续等
         done = true
+        when (r) {
+            is EcardSyncResult.Ok -> onDone(r.info, r.daily, null)
+            is EcardSyncResult.Bad -> onDone(null, emptyList(), r.message)
+            // RoomOnly 理论上走不到这里：房间单独回报是给 fail 兜底用的
+            is EcardSyncResult.RoomOnly -> onDone(r.info, emptyList(), null)
+        }
+    }
 
-        val info = Ecard.parseBalance(b, pageHtml)
-        if (info == null) {
-            onDone(null, emptyList(), "余额接口返回异常：${b.take(150)}")
-            return
-        }
-        val daily = when {
-            !dJson.isNullOrBlank() -> {
-                Ecard.parseDailyJson(dJson)
-            }
-            !dHtml.isNullOrBlank() -> Ecard.parseDaily(dHtml)
-            else -> emptyList()
-        }
-        onDone(info, daily, null)
+    /**
+     * 收尾：余额没拿到也必须回调。
+     *
+     * 之前的死结：`tryFinish()` 要求 balanceRaw 非空才往下走，
+     * 而取余额失败时 balanceRaw 永远是 null → **onDone 永远不调用** →
+     * 上层收不到任何结果，房间号也停在换绑前的旧值（2026-11-01 致辉遇到的）。
+     *
+     * 现在失败路径也会走这里：
+     *   · 有房间信息就包一个 balance=-1 的 PowerInfo 带出去，
+     *     上层只更新房间、不覆盖余额（见 AppViewModel.applyEcardSync）
+     *   · 顺带把错误文案交给上层显示
+     */
+    fun finishWithError(msg: String) {
+        if (done) return
+        done = true
+        val roomInfo = balanceRaw?.let { Ecard.parseRoomOnly(it, pageHtml) }
+        onDone(roomInfo, emptyList(), msg)
     }
 
     AdaptiveSheet(
@@ -207,6 +234,14 @@ fun EcardSyncSheet(
                                         android.util.Log.w("EcardSync", "fail: $msg")
                                         errorMsg = msg
                                         status = "同步失败"
+                                        /*
+                                         * 必须在这里收尾。
+                                         *
+                                         * 之前只设 errorMsg 不回调，上层永远等不到结果；
+                                         * 更糟的是 tryFinish 要求 balanceRaw 非空，
+                                         * 而失败时它一直是 null —— 整个流程就卡死在这儿。
+                                         */
+                                        finishWithError(msg)
                                     }
 
                                     /** 调试用：把中间状态打到 logcat，方便真机排查 */
@@ -268,6 +303,48 @@ fun EcardSyncSheet(
                 lineHeight = 15.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             )
+        }
+    }
+}
+
+/**
+ * 电费抓取的结果。
+ *
+ * 抽成纯数据 + 纯函数，是为了能单测「收齐 → 出结果」这段判定 ——
+ * 这段出过两个 bug（`done` 残留、失败不回调），都很难在真机上重现。
+ */
+internal sealed interface EcardSyncResult {
+    data class Ok(val info: com.gzucm.pocket.core.PowerInfo, val daily: List<com.gzucm.pocket.core.PowerDaily>) : EcardSyncResult
+    data class RoomOnly(val info: com.gzucm.pocket.core.PowerInfo) : EcardSyncResult
+    data class Bad(val message: String) : EcardSyncResult
+
+    companion object {
+        /**
+         * 攒够数据就产出结果，不够返回 null（调用方继续等）。
+         *
+         * 规则：
+         *   · 余额和明细**都到齐**才算 Ok
+         *   · 余额到了但解析不出 → Bad（别静默吞掉，上层要显示原因）
+         *   · 缺一个 → null
+         */
+        fun tryBuild(
+            balanceRaw: String?,
+            dailyJsonRaw: String?,
+            dailyRaw: String?,
+            pageHtml: String,
+        ): EcardSyncResult? {
+            val b = balanceRaw ?: return null
+            if (dailyJsonRaw == null && dailyRaw == null) return null
+
+            val info = com.gzucm.pocket.data.Ecard.parseBalance(b, pageHtml)
+                ?: return Bad("余额接口返回异常：${b.take(150)}")
+
+            val daily = when {
+                !dailyJsonRaw.isNullOrBlank() -> com.gzucm.pocket.data.Ecard.parseDailyJson(dailyJsonRaw)
+                !dailyRaw.isNullOrBlank() -> com.gzucm.pocket.data.Ecard.parseDaily(dailyRaw)
+                else -> emptyList()
+            }
+            return Ok(info, daily)
         }
     }
 }
@@ -368,7 +445,50 @@ internal const val EXTRACT_JS = """
   var ym = d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2);
   var PAGE_SIZE = 30;
 
-  function emit(balanceNum, source, rawTips) {
+  /**
+   * 只回报房间信息，不带余额。
+   *
+   * 为什么需要：用户在小程序里换绑房间后，房间变了但余额可能读不到
+   * （页面改版、接口变了）。如果只在「余额也拿到了」时才更新，
+   * 卡片会一直显示**换绑前的旧房间号** —— 用户会以为 App 坏了。
+   *
+   * 这里单独回一条，让 Kotlin 侧只改 roomLabel，不碰余额。
+   */
+  function emitRoomOnly() {
+    if (!room) return;
+    var payload = JSON.stringify({
+      ret: true, msg: 'room-only',
+      obj: {
+        roomNum: room, schoolAreaNo: area, buildingNo: bld,
+        roomLabel: roomTxt, token: token, roomOnly: true
+      }
+    });
+    GzBridge.log('EMIT roomOnly label=' + roomTxt + ' room=' + room);
+    GzBridge.balance(payload, html);
+  }
+
+  /**
+   * 从 getBalance 的 JSON 里取房间标签。
+   *
+   * **这是最可靠的来源**（2026-11-01 实测）。接口返回的是当前真正绑定的房间：
+   *   {"schoolArea":"广州中医药大学","building":"三元里6栋","room":"213"}
+   *
+   * 为什么不继续用 `#roomChooseText`：那个 input 的 value 在换绑后
+   * 可能还是旧值（致辉换绑成 211 后它仍写着 213），
+   * 拿它当房间名会一直显示错的。
+   */
+  function roomLabelFromJson(text) {
+    try {
+      var j = JSON.parse(text);
+      if (!j || !j.obj) return '';
+      var o = j.obj;
+      if (!o.building || !o.room) return '';
+      // 「三元里6栋」+「213」→「三元里6栋   213」，和学校页面写法一致
+      return String(o.building).replace(/\s+/g, '') + '   ' + String(o.room);
+    } catch (e) { return ''; }
+  }
+
+  function emit(balanceNum, source, rawTips, rawJson) {
     // 接口给的是「3.23」但也可能是「3.23度」/「剩余电量：3.23」，
     // 先把所有非数字字符剥掉，否则 Kotlin 的 toDoubleOrNull 会失败变成 0。
     var clean = String(balanceNum == null ? '' : balanceNum).replace(/[^\d.]/g, '');
@@ -383,12 +503,20 @@ internal const val EXTRACT_JS = """
       return;
     }
     GzBridge.log('EMIT balance=' + clean + ' source=' + source);
+    /*
+     * 房间标签的优先级：
+     *   ① getBalance 返回的 building + room —— 当前真正绑定的
+     *   ② 页面 #roomChooseText —— 可能是换绑前的旧值
+     *   ③ 什么都没有就不填，让 Kotlin 侧保留原值，别写成空
+     */
+    var label = roomLabelFromJson(rawJson) || roomTxt || '';
+    GzBridge.log('EMIT label=' + (label || '(空)'));
     var payload = JSON.stringify({
       ret: true, msg: 'ok',
       obj: {
         roomNum: room, schoolAreaNo: area, buildingNo: bld,
         powerBalance: clean, du: '度',
-        roomLabel: roomTxt, token: token, rawTips: rawTips || '', source: source
+        roomLabel: label, token: token, rawTips: rawTips || '', source: source
       }
     });
     GzBridge.balance(payload, html);
@@ -449,6 +577,7 @@ internal const val EXTRACT_JS = """
 
   // 等页面自己的 AJAX 跑完（最多 4 秒）
   var waited = 0;
+  var triedClick = false;
   var timer = setInterval(function(){
     waited += 400;
     var got = window.__gz && window.__gz.balance;
@@ -456,37 +585,83 @@ internal const val EXTRACT_JS = """
     if (got || tips || waited >= 4000) {
       clearInterval(timer);
       var v = numFromJson(got);
-      if (v !== null) { emit(v, 'hook', tips); return; }
-      // 钩子没抓到 → 自己补一次（参数照抄页面逻辑）
-      var body = 'implType=' + encodeURIComponent(implType) +
-                 '&schoolAreaNo=' + encodeURIComponent(area) +
-                 '&buildingNo=' + encodeURIComponent(bld) +
-                 '&roomNum=' + encodeURIComponent(room) +
-                 '&from=&token=' + encodeURIComponent(token);
-      GzBridge.log('SELF body=' + body);
-      fetch('/user/powerfee/getBalance', {
-        method: 'POST', credentials: 'same-origin',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'X-Requested-With': 'XMLHttpRequest'
-        },
-        body: body
-      }).then(function(r){ return r.text(); })
-        .then(function(t){
-          GzBridge.log('SELF resp=' + t.substring(0, 300));
-          var n = numFromJson(t);
-          if (n !== null) { emit(n, 'self', tips); return; }
-          var m = (tips.match(/([\d.]+)/) || [])[1];
-          if (m !== undefined) { emit(m, 'dom', tips); return; }
-          GzBridge.fail('余额为空：页面无 #powerTips，接口也未返回余额');
-        })
-        .catch(function(e){
-          GzBridge.log('SELF err=' + e);
-          var m = (tips.match(/([\d.]+)/) || [])[1];
-          if (m !== undefined) { emit(m, 'dom', tips); return; }
-          GzBridge.fail('请求失败：' + e);
-        });
+      if (v !== null) { emit(v, 'hook', tips, got); return; }
+
+      /*
+       * 钩子没抓到。
+       *
+       * 先**让页面自己发请求** —— 点它自己的「查询」按钮，
+       * 或者调它自己的刷新函数。这样参数、token 全是页面算的。
+       *
+       * 为什么不再自己拼参数请求 getBalance：
+       *   那个接口是「查任意房间」用的，自己的房间走的是
+       *   `getSelfBalance` 之类带会话的路径，参数签名不一样，
+       *   照着页面字段拼出来必然返回 {"ret":false,"msg":"查询失败"}。
+       *   之前之所以能成，是因为脚本碰巧在页面刚加载时跑，
+       *   钩子抓到了页面自己发的请求。
+       */
+      if (!triedClick) {
+        triedClick = true;
+        try {
+          // 常见写法：查询按钮 id / class / onclick 里带 query|balance|search
+          var btn = document.querySelector(
+            '#queryBtn, #searchBtn, .query-balance, [onclick*="getBalance"], [onclick*="queryPower"]'
+          );
+          if (btn) { GzBridge.log('CLICK btn=' + (btn.id || btn.className)); btn.click(); }
+          // 有些版本把逻辑挂在全局函数上
+          if (typeof window.getBalance === 'function') {
+            GzBridge.log('CALL window.getBalance()');
+            window.getBalance();
+          } else if (typeof window.queryPower === 'function') {
+            GzBridge.log('CALL window.queryPower()');
+            window.queryPower();
+          }
+        } catch (e) { GzBridge.log('CLICK err=' + e); }
+        // 给页面 1.2 秒反应，再判断一次
+        setTimeout(function(){
+          var got2 = window.__gz && window.__gz.balance;
+          var v2 = numFromJson(got2);
+          var tips2 = powerTipsText();
+          if (v2 !== null) { emit(v2, 'hook-after-click', tips2, got2); return; }
+          var m2 = (tips2.match(/([\d.]+)/) || [])[1];
+          if (m2 !== undefined) { emit(m2, 'dom', tips2, got2 || ''); return; }
+          diagnose(tips2);
+        }, 1200);
+        return;
+      }
+      diagnose(tips);
     }
   }, 400);
+
+  /**
+   * 一条都拿不到时，把「页面上到底有什么」报回去。
+   *
+   * 之前只回一句「余额为空」，用户和我都不知道是没登录、
+   * 换了新版页面、还是余额藏在别的元素里。现在把结构线索带上，
+   * 下次一看就知道该改哪个选择器。
+   */
+  function diagnose(tips) {
+    var clues = [];
+    clues.push('url=' + location.href);
+    clues.push('powerTips=' + (tips || '(无)'));
+    clues.push('area=' + area + ' bld=' + bld + ' room=' + room);
+    clues.push('token=' + (token ? 'yes' : 'no'));
+
+    // 页面上所有含「剩余/电量/余额」的可见文字，最多 3 条
+    var hits = [];
+    var all = document.querySelectorAll('body *');
+    for (var i = 0; i < all.length && hits.length < 3; i++) {
+      var el = all[i];
+      if (el.children.length > 0) continue;
+      var t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (t && t.length < 40 && /剩余|电量|余额/.test(t)) {
+        hits.push((el.id ? '#' + el.id : el.className ? '.' + el.className : el.tagName) + ':' + t);
+      }
+    }
+    clues.push('线索=' + (hits.length ? hits.join(' | ') : '(页面上没找到)'));
+    // 先把房间号带回去（用户可能刚换绑，房间变了但余额读不到）
+    emitRoomOnly();
+    GzBridge.fail('余额没取到。' + clues.join('；'));
+  }
 })();
 """

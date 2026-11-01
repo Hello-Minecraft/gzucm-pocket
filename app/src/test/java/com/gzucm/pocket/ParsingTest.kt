@@ -1,5 +1,7 @@
 package com.gzucm.pocket
 
+import com.gzucm.pocket.core.SlotTimes
+
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -224,7 +226,7 @@ class ParsingTest {
     fun `节次时间表覆盖 1 到 14 全部节次`() {
         // 曾经误以为 5、10、11 节不存在（自己课表里没有而已），
         // 全校课表证明 5/10/11 都有课，时间表必须覆盖
-        val slots = com.gzucm.pocket.ui.schedule.SlotTimes
+        val slots = com.gzucm.pocket.core.SlotTimes
         assertEquals("08:30", slots[1])
         assertEquals("10:20", slots[3])
         assertEquals("13:10", slots[5])

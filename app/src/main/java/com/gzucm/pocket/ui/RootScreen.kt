@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import com.gzucm.pocket.core.Campus
 import com.gzucm.pocket.ui.adaptive.AppNavigationRail
 import com.gzucm.pocket.ui.adaptive.NavRailItem
 import com.gzucm.pocket.ui.adaptive.rememberLayout
@@ -86,6 +87,25 @@ internal enum class Tab(val label: String, val icon: ImageVector) {
 }
 
 /**
+ * 当前学段下可用的 Tab。
+ *
+ * **两个学段都是四个 Tab，电费不隐藏了**（致辉 2026-11-01 定）。
+ *
+ * 之前研究生学段把电费 Tab 去掉了，理由是「一卡通是独立登录，
+ * 研究生登进来拿不到会话」。但那等于**这个功能对研究生直接消失** ——
+ * 研究生一样要交电费，一样想看用了多少度。
+ *
+ * 现在的做法：Tab 保留，电费页自己判断有没有一卡通会话，
+ * 没有就显示「登录一卡通」按钮，点开在 WebView 里单独登一次。
+ * 这条路径和研究生系统无关，不需要登本科教务。
+ *
+ * 参数留着不删：以后要按学段隐藏别的 Tab 时还得用它，
+ * 而且调用方已经传了，删了要改五处。
+ */
+@Suppress("UNUSED_PARAMETER")
+internal fun tabsOf(campus: Campus): List<Tab> = Tab.entries
+
+/**
  * 页面骨架：内容铺满全屏，悬浮底栏叠在它上面。
  *
  * 底栏高度是**实测**的（`onSizeChanged`），因为它除了自身内容还含手势导航条的
@@ -113,6 +133,8 @@ internal fun MainScaffold(
     /** 有新版本时，侧栏设置按钮右上角显示小红点 */
     hasUpdate: Boolean = false,
     syncing: Boolean = false,
+    /** 当前学段。研究生没有电费 Tab，所以要传下去 */
+    campus: Campus = Campus.UNDERGRAD,
     content: @Composable () -> Unit,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -126,10 +148,11 @@ internal fun MainScaffold(
                 onSettingsClick = onSettingsClick,
                 hasUpdate = hasUpdate,
                 syncing = syncing,
+                campus = campus,
                 content = content,
             )
         } else {
-            PhoneScaffold(tab = tab, onSelect = onSelect, content = content)
+            PhoneScaffold(tab = tab, onSelect = onSelect, campus = campus, content = content)
         }
     }
 }
@@ -143,8 +166,11 @@ private fun WideScaffold(
     onSettingsClick: () -> Unit,
     hasUpdate: Boolean,
     syncing: Boolean,
+    campus: Campus,
     content: @Composable () -> Unit,
 ) {
+    // 研究生学段没有电费 Tab（一卡通是另一套登录，拿不到会话）
+    val tabs = tabsOf(campus)
     /*
      * 底部 inset 置 0：平板的导航条在左侧，内容区可以一直铺到屏幕底边。
      * 之前给底部 Tab 留的那一截在这里是纯浪费 —— 课表会因此少显示半节课。
@@ -152,9 +178,9 @@ private fun WideScaffold(
     CompositionLocalProvider(LocalFloatingBarInset provides 0.dp) {
         Row(Modifier.fillMaxSize()) {
             AppNavigationRail(
-                items = Tab.entries.map { NavRailItem(it.label, it.icon) },
-                selected = Tab.entries.indexOf(tab),
-                onSelect = { onSelect(Tab.entries[it]) },
+                items = tabs.map { NavRailItem(it.label, it.icon) },
+                selected = tabs.indexOf(tab),
+                onSelect = { onSelect(tabs[it]) },
                 bottomInset = 0.dp,
                 bottomActions = {
                     /*
@@ -189,8 +215,10 @@ private fun WideScaffold(
 private fun PhoneScaffold(
     tab: Tab,
     onSelect: (Tab) -> Unit,
+    campus: Campus,
     content: @Composable () -> Unit,
 ) {
+    val tabs = tabsOf(campus)
     val hazeState = rememberHazeState()
     val density = androidx.compose.ui.platform.LocalDensity.current
     var barInset by remember { mutableStateOf(FloatingBarTotalInset) }
@@ -209,6 +237,7 @@ private fun PhoneScaffold(
             FloatingBar(
                 tab = tab,
                 onSelect = onSelect,
+                campus = campus,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .onSizeChanged { size ->
@@ -242,7 +271,17 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
     val prefs = remember { com.gzucm.pocket.core.SessionStore(ctx0.applicationContext) }
     // 默认启动页由用户在设置里选
     var tab by remember {
-        mutableStateOf(Tab.entries.getOrElse(prefs.startTab) { Tab.Today })
+        mutableStateOf(
+            /*
+             * 恢复上次停留的 Tab。
+             *
+             * 研究生学段只有 3 个 Tab，而 prefs 里可能存着 3（电费）——
+             * 那是本科时留下的。直接 getOrElse 会拿到 Power，
+             * 但 Power 不在可用列表里，界面会显示一个空白页。
+             * 所以先按学段过滤，取不到就回今日。
+             */
+            tabsOf(prefs.campus).getOrElse(prefs.startTab) { Tab.Today },
+        )
     }
     /*
      * 从后台切回前台时补查更新。
@@ -294,11 +333,25 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
             Phase.NeedLogin -> LoginScreen(
                 onLoggedIn = vm::onLoggedIn,
                 onJwReady = vm::onJwReady,
+                onGraduateLoggedIn = vm::onGraduateLoggedIn,
+                /*
+                 * 进来时默认选中学段。用存储里记住的那个 ——
+                 * 研究生用户重新登录时不用每次手动切。
+                 */
+                /*
+                 * 默认本科 + 只记「主动切过的」。
+                 *
+                 * 之前传的是 vm.campus（当前数据属于哪个学段），
+                 * 结果本科生只要登过一次研究生账号，之后每次都停在研究生。
+                 */
+                initialCampus = vm.rememberedCampus,
+                onCampusPicked = vm::rememberCampusPicked,
             )
 
             else -> MainScaffold(
                 tab = tab,
                 onSelect = { tab = it },
+                campus = vm.campus,
                 /*
                  * 宽屏侧栏底部的两个动作。
                  *
@@ -391,13 +444,24 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                         }
 
                         Tab.Power -> {
-                            LaunchedEffect(Unit) { vm.loadPower() }
+                            /*
+                             * 两个都刷：
+                             *   · refreshEcardSession — 用户可能刚从一卡通登完回来
+                             *   · loadPower — 有缓存就直接显示，没有才去读
+                             */
+                            LaunchedEffect(Unit) {
+                                vm.refreshEcardSession()
+                                vm.loadPower()
+                            }
                             PowerScreen(
                                 power = state.power,
                                 daily = state.powerDaily,
                                 loading = state.powerLoading,
                                 error = state.powerError,
                                 onSync = { showEcardSync = true },
+                                // 一卡通会话独立于课表会话：研究生登录后它是空的，
+                                // 空态要显示「登录一卡通」而不是「读不到数据」
+                                ecardLoggedIn = state.ecardLoggedIn,
                             onOpenRebindGuide = { showRebindGuide = true },
                             powerAlertOn = vm.powerAlertOn,
                             onPowerAlertChange = { on ->
@@ -457,6 +521,15 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
         visible = showEcardSync,
         onDone = { info, daily, err ->
                 showEcardSync = false
+                /*
+                 * 无论成功还是失败都刷一次会话状态。
+                 *
+                 * 用户可能登录成功了但数据没读到（分页没跑完之类），
+                 * 这时 info 是 null，但一卡通 Cookie 已经拿到 ——
+                 * 不刷新的话电费页还会显示「还没登录一卡通」，
+                 * 用户会以为白登了一次。
+                 */
+                vm.refreshEcardSession()
                 if (info != null) {
                     vm.applyEcardSync(info, daily)
                 } else {
@@ -630,9 +703,11 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
 private fun FloatingBar(
     tab: Tab,
     onSelect: (Tab) -> Unit,
+    campus: Campus,
     modifier: Modifier = Modifier,
     hazeState: HazeState,
 ) {
+    val tabs = tabsOf(campus)
     val scheme = MaterialTheme.colorScheme
     val style = glassStyle()
 
@@ -655,7 +730,7 @@ private fun FloatingBar(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Tab.entries.forEach { t ->
+            tabs.forEach { t ->
                 val active = tab == t
                 Column(
                     Modifier

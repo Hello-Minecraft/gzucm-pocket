@@ -20,7 +20,11 @@ import com.gzucm.pocket.core.PowerInfo
 import com.gzucm.pocket.core.Semester
 import com.gzucm.pocket.data.Ecard
 import com.gzucm.pocket.data.Jw
+import com.gzucm.pocket.data.Yjs
+import com.gzucm.pocket.core.Campus
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
@@ -55,6 +59,17 @@ data class UiState(
     val powerLoading: Boolean = false,
     /** 电费读取失败的具体原因，为空表示没出错 */
     val powerError: String? = null,
+    /**
+     * 有没有一卡通会话。
+     *
+     * 必须放在 state 里而不是只读 `Net.cookies`：Cookie 是普通对象，
+     * Compose 不会观察它，用户登录完一卡通回来看电费页，
+     * 界面不会重绘，按钮还停在「登录一卡通」上。
+     *
+     * 跟着 state 走就一定能重组 —— 每次进电费页时由
+     * [AppViewModel] 刷新一次。
+     */
+    val ecardLoggedIn: Boolean = false,
     val message: String? = null,
     val lastSync: Long = 0L,
     /** 逐周抓取进度：已完成 / 总周数。用于首屏显示「第 N/20 周」 */
@@ -78,6 +93,52 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      */
     var powerDirty by mutableStateOf(false)
         private set
+
+    /**
+     * 当前学段。登录页要用它决定默认选哪个 tab，
+     * 页面标题也靠它区分「本科生 / 研究生」。
+     */
+    val campus: Campus
+        get() = store.campus
+
+    /**
+     * 登录页该默认选中哪个学段。
+     *
+     * **没主动选过就是本科**（致辉 2026-11-02 定）：
+     * 这个 App 大部分使用者是本科生，默认停在研究生等于坑大多数人。
+     *
+     * 注意不能直接用 [campus]：那个是「当前数据是谁的」，
+     * 可能因为帮别人看过一次研究生账号就停在 GRADUATE，
+     * 之后本科生每次打开登录页都要手动切回来。
+     */
+    val rememberedCampus: Campus
+        get() = com.gzucm.pocket.ui.login.LoginFlow.loginDefaultCampus(store.pickedCampus)
+
+    /** 用户在登录页主动点了学段按钮 —— 记住他的选择 */
+    fun rememberCampusPicked(c: Campus) {
+        store.pickedCampus = c
+    }
+
+    /**
+     * 刷新「有没有一卡通会话」并写进 state。
+     *
+     * 一卡通会话和课表会话是**完全独立**的两套：
+     *   · 本科：登录教务时 CAS 会顺带跳一次一卡通，所以通常有
+     *   · 研究生：只登了研究生系统，一卡通是空的
+     *
+     * 电费页用它决定空态怎么说 —— 「没登录」和「读了但失败」
+     * 对用户来说是完全不同的下一步动作。
+     *
+     * 为什么要有这个方法：Cookie 存的是普通对象，Compose 观察不到它。
+     * 用户在一卡通里登完回来，如果只读 Cookie 不写 state，
+     * 界面不会重绘，按钮还停在「登录一卡通」上。
+     */
+    fun refreshEcardSession() {
+        val has = Net.cookies.has("ecard.gzucm.edu.cn")
+        if (state.ecardLoggedIn != has) {
+            state = state.copy(ecardLoggedIn = has)
+        }
+    }
 
     fun markPowerDirty() {
         powerDirty = true
@@ -347,31 +408,261 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (ecardCookies.isNotEmpty()) powerDirty = true
     }
 
-    fun logout() {
-        Net.cookies.clear()
-        store.cachedSessions = null
-        store.cachedSemester = null
-        store.cachedPower = null
-        state = UiState(phase = Phase.NeedLogin)
+    /**
+     * 研究生系统登录成功。
+     *
+     * 和本科的 [onLoggedIn] 有三处不同：
+     *   ① 没有一卡通（电费不做）
+     *   ② 不设 powerDirty（那套只对一卡通有意义）
+     *   ③ 要清掉本科残留的课表缓存 —— 两个学段的课表完全是两套数据，
+     *      不清的话研究生用户会先看到一堆本科课程
+     */
+    fun onGraduateLoggedIn(yjsCookies: Map<String, String>) {
+        if (yjsCookies.isNotEmpty()) {
+            Net.cookies.seed("yjsglxt.gzucm.edu.cn", yjsCookies)
+        }
+        // 切学段必须清缓存，否则会先闪一下另一边的课表
+        clearScheduleCacheForCampusSwitch(Campus.GRADUATE)
+        state = state.copy(
+            phase = Phase.Ready,
+            message = null,
+            sessions = emptyList(),
+            semester = null,
+            grades = emptyList(),
+            levels = emptyList(),
+            fitness = emptyList(),
+        )
+        loginExpired = false
+        checkUpdateSilently()
+        if (!state.syncing) syncQuietly()
     }
 
-    /** 从设置页点「重新登录」：清会话但保留缓存课程表，回到登录页 */
+    /**
+     * 切学段：清掉课表 / 成绩缓存，保留界面设置（主题、背景图这些与学段无关）。
+     *
+     * **必须清**：本科的 CourseSession 和研究生的是两套字段，
+     * 混在一起显示会出现「课名对、教室错」这种查不出来的问题。
+     */
+    private fun clearScheduleCacheForCampusSwitch(target: Campus) {
+        if (store.campus == target) return
+        store.campus = target
+        store.cachedSessions = null
+        store.cachedSemester = null
+        store.semesterCode = null
+        store.cachedGrades = null
+        store.cachedLevels = null
+        store.cachedFitness = null
+        // 研究生学期码和本科的格式完全不同，单独清
+        if (target == Campus.UNDERGRAD) store.graduateTermCode = null
+    }
+
+    /**
+     * 退出登录。
+     *
+     * ⚠️ **必须同时清 WebView 的 Cookie**（致辉 2026-11-01 报的 bug）。
+     *
+     * 之前只做 `Net.cookies.clear()` —— 那只清了 App 自己内存和 prefs 里的
+     * 一份拷贝，**WebView 里真实的 Cookie 一个都没动**。
+     *
+     * 后果：退出后点登录，WebView 打开 `/new/ssoLogin`，浏览器自己带着
+     * 上一次的 CAS 会话（`CASTGC`），CAS 直接给回原账号的 ticket，
+     * 于是「退出登录」变成「重新登录同一个账号」——
+     * 根本没法切换账号。用户只会觉得这个按钮坏了。
+     *
+     * 三处都要清，缺一处都还有残留：
+     *   ① WebView 的 CookieManager（真正的会话所在）
+     *   ② WebView 的本地存储 / 表单缓存（有的页面把登录态存 localStorage）
+     *   ③ App 自己维护的 Cookie 副本 + 各种缓存
+     */
+    fun logout() {
+        /*
+         * 先等 Cookie 真正删掉，再切到登录页。
+         *
+         * `removeAllCookies` 是**异步**的。如果这边同步把 phase 改成
+         * NeedLogin，Compose 下一次重组就会创建登录页的 WebView，
+         * 而那时删除可能还没执行完 —— WebView 带着旧 Cookie 打开 ssoLogin，
+         * CAS 直接发回原账号的 ticket，白清一场。
+         *
+         * 所以用 suspendCancellableCoroutine 等回调，删干净了再切。
+         */
+        viewModelScope.launch {
+            val done = suspendCancellableCoroutine<Unit> { cont ->
+                android.webkit.CookieManager.getInstance().removeAllCookies {
+                    cont.resume(Unit)
+                }
+            }
+            // 等到了就往下走（异常也继续，不能因为清理失败把用户困在已登录状态）
+            runCatching { done }
+
+            android.webkit.CookieManager.getInstance().flush()
+            runCatching { android.webkit.WebStorage.getInstance().deleteAllData() }
+
+            Net.cookies.clear()
+            store.cachedSessions = null
+            store.cachedSemester = null
+            store.cachedPower = null
+            store.cachedPowerDaily = null
+            store.cachedGrades = null
+            store.cachedLevels = null
+            store.cachedFitness = null
+            state = UiState(phase = Phase.NeedLogin)
+        }
+    }
+
+    /**
+     * 从设置页点「重新登录」：清会话但保留缓存课程表，回到登录页。
+     *
+     * 同样要清 WebView 的 Cookie，否则重登会直接回到原账号。
+     * 这里不清课表缓存 —— 用户可能只是想换个账号看，旧数据留着能先垫着。
+     */
     fun reopenLogin() {
-        state = state.copy(phase = Phase.NeedLogin)
+        viewModelScope.launch {
+            suspendCancellableCoroutine<Unit> { cont ->
+                android.webkit.CookieManager.getInstance().removeAllCookies {
+                    cont.resume(Unit)
+                }
+            }
+            runCatching { android.webkit.CookieManager.getInstance().flush() }
+            Net.cookies.clear()
+            state = state.copy(phase = Phase.NeedLogin)
+        }
     }
 
     // ── 同步 ────────────────────────────────────────────────────────────
 
     fun sync() {
+        if (state.syncing) return
+        // 研究生学段走另一套接口，没有电费
+        if (store.campus == Campus.GRADUATE) {
+            viewModelScope.launch { doSyncGraduate(manual = true) }
+            return
+        }
         // 手动同步 = 课表 + 电费一起刷；电费要等用户进电费页才能取（会话在 WebView 里），
         // 所以这里只打标记，不做无用的后台请求
         powerDirty = true
-        if (state.syncing) return
         viewModelScope.launch { doSync(manual = true) }
     }
 
     private fun syncQuietly() {
+        if (store.campus == Campus.GRADUATE) {
+            viewModelScope.launch { doSyncGraduate() }
+            return
+        }
         viewModelScope.launch { doSync() }
+    }
+
+    // ── 研究生同步 ────────────────────────────────────────────────
+    /*
+     * 研究生系统和本科完全两套：
+     *   · 课表一次请求拿全学期（本科要按周抓 19 次）
+     *   · 学期码是整数 48（本科是 202601）
+     *   · 没有电费（一卡通是另一套登录，暂不做）
+     *   · 成绩分「学位课 / 非学位课」
+     *
+     * 所以单独一个函数，不去改 doSync 里那一大堆本科逻辑 ——
+     * 那边有按周抓取、进度条、断点续抓，研究生这边一步就完事，
+     * 硬塞进同一个函数只会让两边都难读。
+     */
+    private suspend fun doSyncGraduate(manual: Boolean = false) {
+        /*
+         * 研究生课表现在是**逐周抓**（致辉 2026-11-01 定）。
+         *
+         * 为什么：全学期一次拿回来时，同一格里混着 20 周的记录，
+         * 而学校的数据有残缺 —— 有的课在某一节次上漏写了周次行，
+         * 解析时拼块就会断。逐周查由接口自己筛，缺行问题自然消失。
+         *
+         * 代价：20 次请求约 600ms。所以进度条要跟着走，
+         * 否则用户看着转圈不知道在干什么。
+         */
+        val weeks = Yjs.DEFAULT_WEEKS
+        state = state.copy(
+            syncing = true,
+            message = null,
+            progressDone = 0,
+            progressTotal = weeks,
+        )
+
+        val result = try {
+            // ① 学期先拿到（只有一次请求），顺序的
+            val term = withContext(Dispatchers.IO) {
+                Yjs.fetchCurrentTerm() ?: error("拿不到研究生学期列表")
+            }
+            // ② 逐周抓，进度实时更新
+            val all = ArrayList<CourseSession>(256)
+            for (w in 1..weeks) {
+                val one = withContext(Dispatchers.IO) { Yjs.fetchWeek(term.code, w) }
+                all.addAll(one)
+                state = state.copy(progressDone = w)
+            }
+            // 跨周去重
+            val seen = HashSet<String>(all.size)
+            val sessions = all.filter { s ->
+                seen.add(
+                    "${s.name}|${s.week}|${s.weekday}|${s.startUnit}|${s.endUnit}|" +
+                        "${s.room}|${s.teachers}",
+                )
+            }
+            if (sessions.isEmpty()) error("课表是空的")
+            // ③ 从课表日期反推学期起点
+            val semester = Yjs.buildSemester(term, sessions)
+            Result.success(Triple(term, semester, sessions))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+
+        result.onSuccess { (term, semester, sessions) ->
+            store.campus = Campus.GRADUATE
+            /*
+             * ⚠️ **绝对不要写 store.semesterCode**（致辉 2026-11-01 报的 bug）。
+             *
+             * semesterCode 是**本科专用**字段：doSync 里拿它去请求
+             * `/new/xlxx/data?xnxqdm=$code`，期望形如 "202601"。
+             *
+             * 之前这里写了一句 `store.semesterCode = term.code`，
+             * 把研究生的 "48" 塞了进去。之后切回本科时：
+             *   val code = store.semesterCode ?: Jw.guessSemesterCode()
+             *   → "48"（不是 null，兜底永远不触发）
+             *   → Jw.fetchSemester("48") 必然拿不到校历
+             *   → 报「无法获取教学周历」，本科课表整个空的
+             *
+             * 研究生的学期码有自己的字段 graduateTermCode，别混用。
+             */
+            store.graduateTermCode = term.code
+            store.cachedSemester = Net.json.encodeToString(Semester.serializer(), semester)
+            store.cachedSessions = Net.json.encodeToString(
+                kotlinx.serialization.builtins.ListSerializer(CourseSession.serializer()),
+                sessions,
+            )
+
+            val week = semester.weekOf(LocalDate.now()).coerceIn(1, semester.totalWeeks)
+            currentWeek = week
+            viewingWeek = week
+            state = state.copy(
+                phase = Phase.Ready,
+                semester = semester,
+                sessions = sessions,
+                syncing = false,
+                loadedWeeks = (1..semester.totalWeeks).toSet(),
+                progressDone = 1,
+                progressTotal = 1,
+                lastSync = System.currentTimeMillis(),
+                syncResultSeq = state.syncResultSeq + 1,
+                syncResultText = if (manual) "已同步 ${sessions.size} 节课" else null,
+                message = null,
+            )
+        }.onFailure { e ->
+            state = state.copy(syncing = false, progressDone = 0, progressTotal = 0)
+            val msg = when {
+                e is NetError.Unauthorized -> {
+                    state = state.copy(phase = Phase.NeedLogin)
+                    "研究生系统登录已过期"
+                }
+                else -> com.gzucm.pocket.core.UserMessage.of(e)
+            }
+            if (manual) {
+                state = state.copy(syncResultSeq = state.syncResultSeq + 1, syncResultText = msg)
+            }
+        }
     }
 
     /**
@@ -386,7 +677,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // 但弱网时每次可能 1 秒以上，先给当前周能把白屏从几十秒压到几秒。
         val first = withContext(Dispatchers.IO) {
             runCatching {
-                val code = store.semesterCode ?: Jw.guessSemesterCode()
+                /*
+                 * 校验缓存里的学期码格式，不合格就当没有。
+                 *
+                 * 本科学期码固定是「4 位年份 + 01/02」（如 202601）。
+                 * 研究生的（如 "48"）如果因为 bug 混进来，
+                 * 直接拿去请求校历必然失败，而且失败后还会拿它去算
+                 * 「上一个学期」，越算越离谱 —— 最后报「无法获取教学周历」。
+                 *
+                 * 这一步是给已经中毒的用户兜底：升级后即使存储里还是坏值，
+                 * 也会被这里拦下来，改用按日期猜的正确值。
+                 */
+                val code = Jw.resolveSemesterCode(store.semesterCode)
                 val semester = Jw.fetchSemester(code)
                     ?: Jw.fetchSemester(Jw.previousSemesterCode(code))
                     ?: error("无法获取教学周历")
@@ -636,11 +938,43 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** WebView 通道拿到的数据，直接落库 */
     fun applyEcardSync(info: PowerInfo, daily: List<PowerDaily>) {
+        /*
+         * 余额是「未知」（-1）时，只更新房间，不动余额。
+         *
+         * 场景（致辉 2026-11-01 遇到的）：他在小程序里把房间从 2栋409
+         * 换绑成 6栋211，但 App 里余额读不到 → 之前整条数据被丢弃 →
+         * 卡片一直显示**换绑前的旧房间号**，看着像 App 坏了。
+         *
+         * 现在房间和余额解耦：读到房间就先更新房间，余额保持原值。
+         */
+        if (info.balance < 0) {
+            val old = state.power
+            state = state.copy(
+                power = info.copy(balance = old?.balance ?: 0.0),
+                powerLoading = false,
+                ecardLoggedIn = true,
+            )
+            old?.let { o ->
+                store.cachedPower = Net.json.encodeToString(
+                    PowerInfo.serializer(),
+                    info.copy(balance = o.balance),
+                )
+            }
+            return
+        }
+
         // 明细偶尔会取到空（页面还在初始化 / 分页没跑完）。
         // 空的时候保留原有明细，别把缓存里的历史数据清掉。
         val finalDaily = if (daily.isEmpty()) state.powerDaily else daily
         powerDirty = false
-        state = state.copy(power = info, powerDaily = finalDaily, powerLoading = false, powerError = null)
+        state = state.copy(
+            power = info,
+            powerDaily = finalDaily,
+            powerLoading = false,
+            powerError = null,
+            // 能拿到数据就说明会话有效
+            ecardLoggedIn = true,
+        )
         store.cachedPower = Net.json.encodeToString(PowerInfo.serializer(), info)
         if (finalDaily.isNotEmpty()) {
             store.cachedPowerDaily = Net.json.encodeToString(

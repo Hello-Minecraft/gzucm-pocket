@@ -44,6 +44,31 @@ class SessionStore(context: Context) {
         get() = sp.getString(KEY_SEMESTER, null)
         set(v) = sp.edit().putString(KEY_SEMESTER, v).apply()
 
+    /**
+     * 当前学段（本科 / 研究生）。
+     *
+     * 决定用哪套接口：课表、成绩、学期码格式全都不一样。
+     * 默认 UNDERGRAD —— 老用户和首次安装的用户都是本科。
+     */
+    var campus: Campus
+        get() = Campus.parse(sp.getString(KEY_CAMPUS, null))
+        set(v) = sp.edit().putString(KEY_CAMPUS, v.name).apply()
+
+    /**
+     * 研究生学期码（如 "48"）。
+     *
+     * 格式和本科的 "202601" 完全不同，单独存一个键，
+     * 切换学段时不用互相清空。
+     */
+    var graduateTermCode: String?
+        get() = sp.getString(KEY_GRAD_TERM, null)
+        set(v) = sp.edit().putString(KEY_GRAD_TERM, v).apply()
+
+    /** 研究生学分统计（json，缓存用） */
+    var graduateCreditStat: String?
+        get() = sp.getString(KEY_GRAD_CREDIT, null)
+        set(v) = sp.edit().putString(KEY_GRAD_CREDIT, v).apply()
+
     var lastSyncAt: Long
         get() = sp.getLong(KEY_SYNC_AT, 0L)
         set(v) = sp.edit().putLong(KEY_SYNC_AT, v).apply()
@@ -73,8 +98,23 @@ class SessionStore(context: Context) {
         get() = sp.getInt(KEY_SESSIONS_VERSION, 1)
         set(v) = sp.edit().putInt(KEY_SESSIONS_VERSION, v).apply()
 
-    /** 当前代码期望的数据版本。改周次/日期算法时同步 +1。 */
-    val sessionsDataVersionExpected: Int get() = 2
+    /**
+     * 当前代码期望的数据版本。
+     *
+     * 版本历史：
+     *   1 = 初始
+     *   2 = 修正「教务周从周日起、App 从周一起」导致的周日课错位
+     *   3 = CourseSession 新增 campus 字段；且支持研究生数据源
+     *   4 = 研究生课表合并连续节次（之前一门 4 节的课会存成 4 条）
+     *   5 = 研究生一格多门课的错误数据能正确切分
+     *       （之前把同一格里第二门课的周次算到第一门头上，
+     *        英语整门课会消失、制图课连上十几周）
+     *   6 = 研究生课表改为逐周抓取；教师/教室不再参与合并分组
+     *
+     * 每次改解析算法都要 +1，否则升级后读到的还是旧算法写进去的缓存，
+     * 用户会以为没修。
+     */
+    val sessionsDataVersionExpected: Int get() = 6
 
     /**
      * 缓存是否因算法升级而失效。
@@ -153,6 +193,33 @@ class SessionStore(context: Context) {
     var courseGridLines: Boolean
         get() = sp.getBoolean(KEY_GRID_LINES, false)
         set(v) = sp.edit().putBoolean(KEY_GRID_LINES, v).apply()
+
+    /**
+     * 课表用日视图还是周视图。
+     *
+     * 默认周视图（false）—— 老用户的习惯，而且打开就能看到整周排布。
+     * 切过一次就记住，下次进来还是那个视图。
+     */
+    var courseDayView: Boolean
+        get() = sp.getBoolean(KEY_DAY_VIEW, false)
+        set(v) = sp.edit().putBoolean(KEY_DAY_VIEW, v).apply()
+
+    /**
+     * 用户在**登录页主动选过**的学段。没选过是 null。
+     *
+     * 和 `campus`（当前正在用哪个学段）是两件事：
+     *   · `campus` 随登录/同步结果变，反映「现在的数据是谁的」
+     *   · 这个只在用户手动点过学段按钮时才写，反映「他习惯用哪个」
+     *
+     * 存 null 而不是 UNDERGRAD，是为了区分「没选过」和「主动选了本科」——
+     * 虽然目前两者行为一致（都默认本科），但将来若要给首次用户加引导，
+     * 这个区别用得上。
+     */
+    var pickedCampus: Campus?
+        get() = sp.getString(KEY_PICKED_CAMPUS, null)?.let { name ->
+            runCatching { Campus.valueOf(name) }.getOrNull()
+        }
+        set(v) = sp.edit().putString(KEY_PICKED_CAMPUS, v?.name).apply()
 
     /** 缓存的当月每日明细（JSON）。余额缓存了明细没缓存，导致重启后折线图和明细是空的 */
     var cachedPowerDaily: String?
@@ -252,6 +319,9 @@ class SessionStore(context: Context) {
         const val KEY_CACHE_SEM = "cache_semester"
         const val KEY_CACHE_SESSIONS = "cache_sessions"
         const val KEY_SESSIONS_VERSION = "sessions_data_version"
+        const val KEY_CAMPUS = "campus"
+        const val KEY_GRAD_TERM = "graduate_term_code"
+        const val KEY_GRAD_CREDIT = "graduate_credit_stat"
         const val KEY_CACHE_POWER = "cache_power"
         const val KEY_POWER_DAYS = "power_days"
         const val KEY_POWER_AT = "power_at"
@@ -259,6 +329,8 @@ class SessionStore(context: Context) {
         const val KEY_BG_PATH = "course_bg_path"
         const val KEY_BG_ALPHA = "course_bg_alpha"
         const val KEY_GRID_LINES = "course_grid_lines"
+        const val KEY_DAY_VIEW = "course_day_view"
+        const val KEY_PICKED_CAMPUS = "picked_campus"
         const val KEY_START_TAB = "start_tab"
         const val KEY_THEME_SEED = "theme_seed"
         const val KEY_OVERLAP_MODE = "overlap_mode"

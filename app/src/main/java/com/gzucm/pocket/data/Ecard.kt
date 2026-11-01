@@ -186,7 +186,23 @@ object Ecard {
         if (raw.none { it.isDigit() }) return null
         val unit = obj.str("du").ifBlank { "度" }
         val room = obj.str("roomNum")
+        /*
+         * 房间标签优先级（2026-11-01 实测后定）：
+         *   ① 接口返回的 building + room —— 当前真正绑定的房间，
+         *      例：{"building":"三元里6栋","room":"213"}
+         *   ② JS 传上来的 roomLabel（已经按同样规则拼过，兜一层）
+         *   ③ 从页面 HTML 里找 roomChooseText
+         *   ④ 内部房间号
+         *
+         * 为什么把 ① 提到最前：`#roomChooseText` 这个 input 在换绑后
+         * 可能还是旧值（致辉换绑成 211 后它仍写着 213），
+         * 拿它当房间名会一直显示错的，而接口返回的一定是当前绑定。
+         */
+        val fromApi = obj.str("building").let { b ->
+            if (b.isBlank()) "" else b.replace(Regex("""\s+"""), "") + "   " + obj.str("room")
+        }
         val label = when {
+            fromApi.isNotBlank() -> fromApi
             obj.str("roomLabel").isNotBlank() -> obj.str("roomLabel")
             pageHtml.isNotBlank() -> roomLabel(pageHtml, room)
             room.isNotBlank() -> room
@@ -198,6 +214,46 @@ object Ecard {
             roomLabel = label,
             token = obj.str("token"),
             schoolAreaNo = obj.str("schoolAreaNo"),
+            buildingNo = obj.str("buildingNo"),
+            roomNum = room,
+        )
+    }
+
+    /**
+     * 只解析房间信息，余额留 `-1` 表示「未知」。
+     *
+     * 为什么单独出一个：用户在小程序里换绑房间后，房间变了但余额可能
+     * 读不到（页面改版之类）。如果必须在「余额也拿到」时才更新，
+     * 卡片会一直显示换绑前的旧房间号 —— 用户会以为 App 坏了。
+     *
+     * @return 房间字段全空时返回 null（说明页面还没登录/没渲染）
+     */
+    fun parseRoomOnly(text: String, pageHtml: String): PowerInfo? {
+        val root = runCatching { Net.json.parseToJsonElement(text).jsonObject }.getOrNull()
+            ?: return null
+        val obj = root["obj"]?.jsonObject ?: return null
+        val room = obj.str("roomNum")
+        val area = obj.str("schoolAreaNo")
+        if (room.isBlank() && area.isBlank()) return null
+
+        // 和 parseBalance 保持同一套优先级：接口的 building + room 最可信
+        val fromApi = obj.str("building").let { b ->
+            if (b.isBlank()) "" else b.replace(Regex("""\s+"""), "") + "   " + obj.str("room")
+        }
+        val label = when {
+            fromApi.isNotBlank() -> fromApi
+            obj.str("roomLabel").isNotBlank() -> obj.str("roomLabel")
+            pageHtml.isNotBlank() -> roomLabel(pageHtml, room)
+            room.isNotBlank() -> "房间 $room"
+            else -> "宿舍"
+        }
+        return PowerInfo(
+            // -1 = 未知。上层看到负数就只更新房间，不覆盖余额。
+            balance = -1.0,
+            unit = "度",
+            roomLabel = label,
+            token = obj.str("token"),
+            schoolAreaNo = area,
             buildingNo = obj.str("buildingNo"),
             roomNum = room,
         )

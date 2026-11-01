@@ -38,6 +38,35 @@ object Jw {
     fun guessSemesterCode(today: LocalDate = LocalDate.now()): String =
         if (today.monthValue >= 8) "${today.year}01" else "${today.year - 1}02"
 
+    /**
+     * 本科的学期码格式对不对：必须是「4 位年份 + 01/02」。
+     *
+     * 用途：防止研究生的学期码（如 "48"）混进 `store.semesterCode`。
+     * 一旦混进去，`fetchSemester` 必然失败，而且 `previousSemesterCode`
+     * 会拿 "48" 当年份去算，得出更离谱的值。
+     */
+    fun isValidSemesterCode(code: String): Boolean {
+        if (code.length != 6) return false
+        val year = code.take(4).toIntOrNull() ?: return false
+        if (year !in 1990..2100) return false
+        return code.endsWith("01") || code.endsWith("02")
+    }
+
+    /**
+     * 决定这次该用哪个学期码：缓存值合法就用缓存的，否则按日期猜。
+     *
+     * 抽成独立函数是为了能单测 —— 这段逻辑放在 `doSync` 里时
+     * 测试根本覆盖不到（注入 bug 后测试依然全绿）。
+     *
+     * @param cached 存储里的 semesterCode，可能是 null 或脏值
+     */
+    fun resolveSemesterCode(
+        cached: String?,
+        today: LocalDate = LocalDate.now(),
+    ): String =
+        if (cached != null && isValidSemesterCode(cached)) cached
+        else guessSemesterCode(today)
+
     /** 上一个学期代码（秋季→上一年春季，春季→上一年秋季） */
     fun previousSemesterCode(code: String): String {
         val year = code.take(4).toIntOrNull() ?: return code

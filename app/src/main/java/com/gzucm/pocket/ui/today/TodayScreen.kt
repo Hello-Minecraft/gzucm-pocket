@@ -767,6 +767,17 @@ private fun parseMinutes(hhmm: String): Int {
     return h * 60 + m
 }
 
+/**
+ * 宿舍电量卡。
+ *
+ * **没有数据就整块不渲染**，不画一个「--」的空卡。
+ *
+ * 原因有两个：
+ *   · 研究生学段根本拿不到电费（一卡通是独立登录，暂不支持），
+ *     留个空卡会让人以为「点一下就有了」，其实是永远没有
+ *   · 本科首次同步电费失败时同样不该占位 —— 电费页有入口，
+ *     这里空着反而更干净
+ */
 @Composable
 private fun PowerCard(
     power: PowerInfo?,
@@ -774,6 +785,7 @@ private fun PowerCard(
     checkedAt: Long,
     onClick: () -> Unit,
 ) {
+    if (power == null) return
     val scheme = MaterialTheme.colorScheme
     val accent = if (power == null) scheme.onSurfaceVariant else scheme.primary
     Box(

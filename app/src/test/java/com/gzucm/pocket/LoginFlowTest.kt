@@ -1,7 +1,9 @@
 package com.gzucm.pocket
 
 import com.gzucm.pocket.ui.login.LoginFlow
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -103,5 +105,80 @@ class LoginFlowTest {
             }
         }
         assertTrue("整条序列必须能走到完成，否则就是卡死", finished)
+    }
+
+    // ── 研究生系统 ──────────────────────────────────────────────────────
+
+    @Test
+    fun `本科入口是教务的 ssoLogin`() {
+        assertEquals("https://jw.gzucm.edu.cn/new/ssoLogin", LoginFlow.entryUrl(graduate = false))
+    }
+
+    @Test
+    fun `研究生入口是 gmis5 学生端，不是统一认证`() {
+        val url = LoginFlow.entryUrl(graduate = true)
+        assertEquals("https://yjsglxt.gzucm.edu.cn/gmis5/student/default/index", url)
+        // 这条是关键：切到研究生后绝不能还停在 authserver
+        assertTrue("研究生入口不该出现 authserver", !url.contains("authserver"))
+    }
+
+    @Test
+    fun `两个学段的入口地址必须不同`() {
+        // 曾经切学段只调了 reload()，地址没变，于是研究生看到的是统一认证页
+        assertNotEquals(LoginFlow.entryUrl(false), LoginFlow.entryUrl(true))
+    }
+
+    @Test
+    fun `研究生登录成功后落到 gmis5 student 路径`() {
+        assertTrue(
+            LoginFlow.isGraduateLoggedIn(
+                "https://yjsglxt.gzucm.edu.cn/gmis5/student/default/index",
+                pageFinished = true,
+            ),
+        )
+        assertTrue(
+            LoginFlow.isGraduateLoggedIn(
+                "https://yjsglxt.gzucm.edu.cn/gmis5/student/pygl/xskbcx",
+                pageFinished = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `研究生还停在登录页时不算成功`() {
+        assertTrue(
+            "登录页不该算登录成功",
+            !LoginFlow.isGraduateLoggedIn(
+                "https://yjsglxt.gzucm.edu.cn/gmis5/Home/Login",
+                pageFinished = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `研究生页面没加载完不算成功`() {
+        assertTrue(
+            !LoginFlow.isGraduateLoggedIn(
+                "https://yjsglxt.gzucm.edu.cn/gmis5/student/default/index",
+                pageFinished = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `研究生被跳到统一认证时不算成功`() {
+        assertTrue(
+            !LoginFlow.isGraduateLoggedIn(
+                "https://authserver.gzucm.edu.cn/authserver/login?service=x",
+                pageFinished = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `本科生入口地址不会被误判成研究生已登录`() {
+        assertTrue(
+            !LoginFlow.isGraduateLoggedIn(LoginFlow.entryUrl(false), pageFinished = true),
+        )
     }
 }
