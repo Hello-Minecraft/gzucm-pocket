@@ -88,3 +88,76 @@ fun spanOf(session: CourseSession): Int {
     if (a < 0 || b < 0 || b < a) return 1
     return b - a + 1
 }
+
+// ── 时间判定 ────────────────────────────────────────────────────────
+
+/**
+ * 把 "HH:mm" 转成当天第几分钟。格式不对返回 [Int.MAX_VALUE]。
+ *
+ * 手写而不 `substring().toInt()`：接口偶尔给空串或异常格式，
+ * 抛异常会把整个渲染打断。返回 MAX_VALUE 的效果是「比任何时刻都晚」，
+ * 天然适合「这节课过去了吗」这种判断。
+ */
+fun timeToMinutes(hhmm: String): Int {
+    val colon = hhmm.indexOf(':')
+    if (colon <= 0) return Int.MAX_VALUE
+    var h = 0
+    for (i in 0 until colon) {
+        val c = hhmm[i]
+        if (c < '0' || c > '9') return Int.MAX_VALUE
+        h = h * 10 + (c - '0')
+    }
+    var m = 0
+    for (i in colon + 1 until hhmm.length) {
+        val c = hhmm[i]
+        if (c < '0' || c > '9') break
+        m = m * 10 + (c - '0')
+    }
+    return h * 60 + m
+}
+
+/**
+ * 这节课此刻处于什么状态。
+ *
+ * 抽到 core 是因为**今日页和日视图都要判断**。
+ * 两边各写一份必然走偏：一处写 `now in start..end`（含结束那一刻），
+ * 另一处写 `now < end`（不含），用户就会看到两个页面说法不一致。
+ */
+enum class SessionPhase {
+    /** 还没开始 */
+    UPCOMING,
+
+    /** 正在上。**含开始那一刻，不含结束那一刻** */
+    ONGOING,
+
+    /** 已下课 */
+    PAST,
+}
+
+/**
+ * 判断一节课此刻处于什么状态。
+ *
+ * @param nowMinutes 当天第几分钟（`LocalTime.now()` 换算）。
+ *   由调用方传入而不是内部取时间 —— 这样才能写单测。
+ */
+fun phaseOf(session: CourseSession, nowMinutes: Int): SessionPhase {
+    val start = startMinutesOf(session)
+    val end = endMinutesOf(session)
+    return when {
+        nowMinutes < start -> SessionPhase.UPCOMING
+        nowMinutes < end -> SessionPhase.ONGOING
+        else -> SessionPhase.PAST
+    }
+}
+
+/** 起始分钟。优先用数据自带的，没有就按节次表推 */
+fun startMinutesOf(session: CourseSession): Int {
+    val raw = session.startTime.ifBlank { SlotTimes[session.startUnit].orEmpty() }
+    return timeToMinutes(raw)
+}
+
+/** 结束分钟。优先用数据自带的，没有就按节次表推 */
+fun endMinutesOf(session: CourseSession): Int {
+    val raw = session.endTime.ifBlank { SlotEndTimes[session.endUnit].orEmpty() }
+    return timeToMinutes(raw)
+}

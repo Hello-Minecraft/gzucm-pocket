@@ -1,6 +1,7 @@
 package com.gzucm.pocket.ui.schedule
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,16 +35,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.gzucm.pocket.core.CourseSession
 import com.gzucm.pocket.core.Semester
 import com.gzucm.pocket.core.SlotEndTimes
 import com.gzucm.pocket.core.SlotTimes
+import com.gzucm.pocket.core.phaseOf
+import com.gzucm.pocket.core.SessionPhase
 import com.gzucm.pocket.ui.components.LocalFloatingBarInset
 import com.gzucm.pocket.ui.theme.courseColor
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import java.time.LocalTime
 import java.time.LocalDate
 
 /**
@@ -237,7 +242,22 @@ internal fun DayScheduleView(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(list, key = { "${it.name}|${it.startUnit}|${it.endUnit}" }) { s ->
-                        DayCourseCard(session = s, onClick = { onCourseClick(s) })
+                        DayCourseCard(
+                            session = s,
+                            /*
+                             * 只有「正在看的这天就是今天」时才算现在时刻。
+                             *
+                             * 别的时候传 -1：phaseOf 会判成 UPCOMING，
+                             * 于是别的日期不会出现「正在上」—— 否则用户
+                             * 翻到上周三，那天的课也会被标成正在上。
+                             */
+                            nowMinutes = if (w == currentWeek && todayWeekday == weekday) {
+                                LocalTime.now().let { it.hour * 60 + it.minute }
+                            } else {
+                                -1
+                            },
+                            onClick = { onCourseClick(s) },
+                        )
                     }
                 }
             }
@@ -292,59 +312,124 @@ private fun DayTab(
 /**
  * 一张课卡。高度由内容决定（不按节数算），这是日视图相对周视图的核心优势 ——
  * 课名长了能换行，教师多了能写完，不会像格子那样被截断。
+ *
+ * ## 布局演进（致辉 2026-11-02 定）
+ *
+ * 参考了一张课表 App 的截图：时间放在**右侧竖排**，上课时间大、下课时间小。
+ * 这样左侧留给课名，一眼扫下去全是课名，不用被时间挤得只剩半行。
+ *
+ * **和参考图的区别**：参考图强调**下课时间**（橙色大字在下面），
+ * 这里强调**上课时间**（大字在上面用主色）。理由：
+ * 学生看课表最关心的是「几点开始」，迟到是从开头丢的；
+ * 下课时间只是「大概什么时候能走」，次要。
+ *
+ * ## 三种状态
+ *
+ * | 状态 | 视觉 |
+ * |---|---|
+ * | 正在上 | 卡片底色带主色、左侧色条加粗发光、右上角「正在上」标签、时间用主色 |
+ * | 还没开始 | 正常显示 |
+ * | 已下课 | 整体降透明度，一眼能跳过 |
  */
 @Composable
-private fun DayCourseCard(session: CourseSession, onClick: () -> Unit) {
+private fun DayCourseCard(
+    session: CourseSession,
+    /** 当天第几分钟。传 -1 表示「不是今天」，不做状态判断 */
+    nowMinutes: Int,
+    onClick: () -> Unit,
+) {
     val scheme = MaterialTheme.colorScheme
     val color = courseColor(session.name)
+    val phase = if (nowMinutes >= 0) phaseOf(session, nowMinutes) else SessionPhase.UPCOMING
+    val ongoing = phase == SessionPhase.ONGOING
+    val past = phase == SessionPhase.PAST
+
+    /*
+     * 已下课的整卡降透明度（0.55），但「正在上」不受影响。
+     *
+     * 不降到更低：用户可能想回看上午上过什么，降太狠就看不见了。
+     */
+    val dim = if (past) 0.55f else 1f
 
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(scheme.surfaceVariant.copy(alpha = 0.35f))
+            .background(
+                if (ongoing) scheme.primary.copy(alpha = 0.10f)
+                else scheme.surfaceVariant.copy(alpha = 0.35f * dim),
+            )
+            .then(
+                // 正在上时加一圈细边框，比只靠底色更明确
+                if (ongoing) {
+                    Modifier.border(
+                        width = 1.dp,
+                        color = scheme.primary.copy(alpha = 0.45f),
+                        shape = RoundedCornerShape(12.dp),
+                    )
+                } else {
+                    Modifier
+                },
+            )
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        // 左侧色条：和课程块同一个颜色，扫一眼就能认出是同一门课
+        // 左侧色条：和课程块同一个颜色。正在上时加粗，作为第二重信号
         Box(
             Modifier
-                .width(3.dp)
-                .height(38.dp)
+                .width(if (ongoing) 4.dp else 3.dp)
+                .height(if (ongoing) 44.dp else 38.dp)
                 .clip(RoundedCornerShape(2.dp))
-                .background(color),
+                .background(color.copy(alpha = dim)),
         )
         Spacer(Modifier.width(12.dp))
 
+        // ── 中间：课名 / 教师 / 教室 ──────────────────────
         Column(Modifier.weight(1f)) {
-            // 节次 + 时间
-            val units = if (session.startUnit == session.endUnit) {
-                "第 ${session.startUnit} 节"
-            } else {
-                "第 ${session.startUnit}-${session.endUnit} 节"
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    session.name,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    lineHeight = 20.sp,
+                    color = scheme.onSurface.copy(alpha = dim),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (ongoing) {
+                    Spacer(Modifier.width(6.dp))
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(scheme.primary.copy(alpha = 0.2f))
+                            .padding(horizontal = 6.dp, vertical = 1.dp),
+                    ) {
+                        Text(
+                            "正在上",
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = scheme.primary,
+                        )
+                    }
+                }
             }
-            val start = SlotTimes[session.startUnit].orEmpty()
-            val end = SlotEndTimes[session.endUnit].orEmpty()
+
+            // 节次单独一行小字，时间和节次分开显示（时间在右侧）
             Text(
-                if (start.isNotBlank() && end.isNotBlank()) "$units · $start-$end" else units,
+                if (session.startUnit == session.endUnit) "第 ${session.startUnit} 节"
+                else "第 ${session.startUnit}-${session.endUnit} 节",
                 fontSize = 10.5.sp,
-                color = scheme.onSurfaceVariant.copy(alpha = 0.85f),
+                color = scheme.onSurfaceVariant.copy(alpha = 0.75f * dim),
+                modifier = Modifier.padding(top = 2.dp),
             )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                session.name,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-                lineHeight = 20.sp,
-            )
-            // 教师和教室各占一行，不挤在一起 —— 日视图空间够
+
             if (session.teachers.isNotBlank()) {
                 Spacer(Modifier.height(3.dp))
                 Text(
                     session.teachers,
                     fontSize = 12.sp,
-                    color = scheme.onSurfaceVariant,
+                    color = scheme.onSurfaceVariant.copy(alpha = dim),
                 )
             }
             if (session.room.isNotBlank()) {
@@ -352,10 +437,69 @@ private fun DayCourseCard(session: CourseSession, onClick: () -> Unit) {
                 Text(
                     session.room,
                     fontSize = 12.sp,
-                    color = scheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    color = scheme.onSurfaceVariant.copy(alpha = 0.8f * dim),
                 )
             }
         }
+
+        Spacer(Modifier.width(10.dp))
+
+        // ── 右侧：上下课时间竖排 ──────────────────────────
+        TimeColumn(session = session, ongoing = ongoing, dim = dim, color = color)
+    }
+}
+
+/**
+ * 右侧的竖排时间：上课时间在上（大字号、强调色），下课时间在下（小字号、次要色）。
+ *
+ * **强调上课时间和参考图不一样**，原因写在 [DayCourseCard] 的注释里：
+ * 学生最关心「几点开始」，迟到是从开头丢的。
+ */
+@Composable
+private fun TimeColumn(
+    session: CourseSession,
+    ongoing: Boolean,
+    dim: Float,
+    color: androidx.compose.ui.graphics.Color,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val start = session.startTime.ifBlank { SlotTimes[session.startUnit].orEmpty() }
+    val end = session.endTime.ifBlank { SlotEndTimes[session.endUnit].orEmpty() }
+    if (start.isBlank() && end.isBlank()) return
+
+    Column(horizontalAlignment = Alignment.End) {
+        /*
+         * 上课时间：强调色 + 等宽数字，竖排时数位才对得齐。
+         *
+         * 字号只比下课时间大一档（12 → 14sp）。最早写的是 20sp，
+         * 视觉上比课名还抢眼，整张卡被右侧两个数字撑得头重脚轻（致辉 2026-11-02 反馈）。
+         * 层次感靠「颜色 + 字重」拿，不靠字号硬拉。
+         */
+        Text(
+            start.ifBlank { "—" },
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            lineHeight = 17.sp,
+            color = when {
+                ongoing -> scheme.primary
+                // 平时用课程色：同一天的课颜色不同，扫一眼能分块
+                else -> color.copy(alpha = dim)
+            },
+            style = androidx.compose.ui.text.TextStyle(
+                fontFeatureSettings = "tnum",
+            ),
+        )
+        Spacer(Modifier.height(1.dp))
+        // 下课时间：小一号、次要色，只作参考
+        Text(
+            end.ifBlank { "—" },
+            fontSize = 12.sp,
+            lineHeight = 14.sp,
+            color = scheme.onSurfaceVariant.copy(alpha = 0.7f * dim),
+            style = androidx.compose.ui.text.TextStyle(
+                fontFeatureSettings = "tnum",
+            ),
+        )
     }
 }
 

@@ -54,13 +54,37 @@ fun AboutScreen(
     val todayStr = remember { java.time.LocalDate.now().toString() }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
+    /*
+     * 进来先把上次查到的结果摆上，别让用户再点一次。
+     *
+     * 起因（致辉 2026-11-02 报的）：
+     * 设置页检测到新版本 → 进关于页 → 一片空白，还得手动点「检查更新」。
+     * 用户会觉得「刚才明明提示有更新，进来怎么没了」。
+     *
+     * 现在初始值直接取存储里的缓存（静默检查已经存好了），
+     * 「检查更新」退化成「刷新」——想确认有没有更新的才点。
+     *
+     * 用 remember 的初始化 lambda 而不是 LaunchedEffect：
+     * LaunchedEffect 会先渲染一帧空态再填上，视觉上闪一下。
+     */
+    val cached = remember { store.let { s -> com.gzucm.pocket.core.Updater.loadCachedInfo(s) } }
+
     var checking by remember { mutableStateOf(false) }
     var downloading by remember { mutableStateOf(false) }
-    var updateMsg by remember { mutableStateOf<String?>(null) }
+    var updateMsg by remember {
+        mutableStateOf(
+            cached?.let {
+                "发现新版本 v${it.latestVersion}" +
+                    if (it.sizeMb > 0) "（${"%.1f".format(it.sizeMb)} MB）" else ""
+            },
+        )
+    }
     var updateOk by remember { mutableStateOf(true) }
-    var newVersion by remember { mutableStateOf<String?>(null) }
-    var releasePage by remember { mutableStateOf("") }
-    var apkUrl by remember { mutableStateOf<String?>(null) }
+    var newVersion by remember { mutableStateOf(cached?.latestVersion) }
+    var releasePage by remember { mutableStateOf(cached?.pageUrl.orEmpty()) }
+    var apkUrl by remember { mutableStateOf(cached?.apkUrl) }
+    /** 更新说明。缓存里有就直接显示，省得再查一次 */
+    var notes by remember { mutableStateOf(cached?.notes.orEmpty()) }
 
     fun openUrl(url: String) {
         if (url.isBlank()) return
@@ -81,18 +105,22 @@ fun AboutScreen(
             when (val r = com.gzucm.pocket.core.Updater.check()) {
                 is com.gzucm.pocket.core.Updater.Result.Newer -> {
                     updateOk = true
-                    store.latestVersion = r.info.latestVersion
+                    // 和静默检查共用同一套写入，保证两个入口存的格式一致
+                    com.gzucm.pocket.core.Updater.saveCachedInfo(store, r.info)
                     store.lastUpdateCheckDate = todayStr
                     newVersion = r.info.latestVersion
                     releasePage = r.info.pageUrl
                     apkUrl = r.info.apkUrl
+                    notes = r.info.notes
                     updateMsg = "发现新版本 v${r.info.latestVersion}" +
                         if (r.info.sizeMb > 0) "（${"%.1f".format(r.info.sizeMb)} MB）" else ""
                 }
                 com.gzucm.pocket.core.Updater.Result.UpToDate -> {
                     updateOk = true
-                    store.latestVersion = null
+                    com.gzucm.pocket.core.Updater.saveCachedInfo(store, null)
                     store.lastUpdateCheckDate = todayStr
+                    newVersion = null
+                    notes = ""
                     updateMsg = "已是最新版本 v$ver"
                 }
                 is com.gzucm.pocket.core.Updater.Result.Failed -> {
@@ -211,6 +239,8 @@ fun AboutScreen(
                     when {
                         checking -> "正在检查…"
                         downloading -> "正在下载…"
+                        // 已有缓存结果时是「刷新」，否则才是首次「检查」
+                        newVersion != null -> "重新检查"
                         else -> "检查更新"
                     },
                     fontSize = 12.5.sp,
@@ -259,12 +289,29 @@ fun AboutScreen(
                             .padding(horizontal = 12.dp, vertical = 7.dp),
                     )
                     Spacer(Modifier.width(10.dp))
+                    /*
+                     * 「自己装」走浏览器直接下 APK，不是 Release 页。
+                     *
+                     * 为什么改（致辉 2026-11-02 报的）：
+                     * 原来点这里打开的是 GitHub 的 Release 页面，
+                     * 没用过 GitHub 的同学进去看到一堆英文、找不到 Assets 折叠区，
+                     * 根本不知道点哪里下载。
+                     *
+                     * 现在优先给 APK 直链 —— 浏览器一进就开始下载。
+                     * 只有拿不到直链时才退回 Release 页。
+                     */
                     Text(
-                        "在浏览器打开",
+                        if (apkUrl.isNullOrBlank()) "在浏览器打开" else "浏览器下载",
                         fontSize = 11.5.sp,
                         color = scheme.onSurfaceVariant,
                         modifier = Modifier
-                            .clickable { openUrl(releasePage) }
+                            .clickable {
+                                /*
+                                 * 优先 APK 直链。点了浏览器就进下载，
+                                 * 不用在 GitHub 页面上找 Assets。
+                                 */
+                                openUrl(apkUrl?.takeIf { it.isNotBlank() } ?: releasePage)
+                            }
                             .padding(vertical = 6.dp),
                     )
                 }

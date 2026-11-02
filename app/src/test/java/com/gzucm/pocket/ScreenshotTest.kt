@@ -270,6 +270,62 @@ class ScreenshotTest {
         }
     }
 
+    /**
+     * 日视图带「正在上」状态。
+     *
+     * 造一门「从今天 0 点到现在都还没结束」的课，这样无论测试跑在几点，
+     * phaseOf 都会判成 ONGOING —— 截图里一定能看到正在上的样式。
+     * 不用写死具体时间，否则半夜跑测试就挂了。
+     */
+    @Test
+    fun scheduleDayViewOngoing() = shot("01d_schedule_day_ongoing") {
+        val today = java.time.LocalDate.now()
+        val weekday = today.dayOfWeek.value
+        val nowMin = java.time.LocalTime.now().let { it.hour * 60 + it.minute }
+
+        // 从 00:00 到现在+30 分钟 —— 现在必然在区间内
+        val endMin = nowMin + 30
+        val ongoing = com.gzucm.pocket.core.CourseSession(
+            name = "中医内科学",
+            code = "B123",
+            teachers = "张三",
+            week = 8,
+            weekday = weekday,
+            startUnit = 1,
+            endUnit = 4,
+            startTime = "00:00",
+            endTime = "%02d:%02d".format((endMin / 60) % 24, endMin % 60),
+            room = "教学楼A101",
+            category = "",
+            campus = com.gzucm.pocket.core.Campus.UNDERGRAD,
+        )
+        // 再造一门已经下课的，验证降透明度
+        val past = ongoing.copy(
+            name = "已结束的课",
+            startTime = "00:00",
+            endTime = "00:01",
+        )
+        val upcoming = ongoing.copy(
+            name = "晚上的课",
+            startTime = "23:59",
+            endTime = "23:59",
+        )
+
+        androidx.compose.material3.Surface(
+            androidx.compose.ui.Modifier.fillMaxSize(),
+            color = androidx.compose.material3.MaterialTheme.colorScheme.background,
+        ) {
+            com.gzucm.pocket.ui.schedule.DayScheduleView(
+                semester = semester,
+                week = 8,
+                currentWeek = 8,
+                sessions = listOf(past, ongoing, upcoming),
+                onCourseClick = {},
+                initialDay = weekday,
+            )
+        }
+    }
+
     /** 日视图某天没课时的占位 */
     @Test
     fun scheduleDayViewEmpty() = shot("01c_schedule_day_empty") {

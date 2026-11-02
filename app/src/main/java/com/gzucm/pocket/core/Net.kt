@@ -251,6 +251,22 @@ class SessionStore(context: Context) {
         get() = sp.getString(KEY_LATEST_VERSION, null)
         set(v) = sp.edit().putString(KEY_LATEST_VERSION, v).apply()
 
+    /*
+     * 新版本的完整信息，供「关于软件」页直接展示。
+     *
+     * 为什么要把整条存下来（致辉 2026-11-02 报的）：
+     * 后台静默检查只写了版本号，关于页进去时手上没有包大小、
+     * 下载地址、更新说明，于是只能显示「检查更新」按钮让用户再点一次。
+     * 用户明明刚在设置页看到「检测到新版本」，进去却什么都没有，
+     * 还得手动点一下才出结果。
+     *
+     * 现在静默检查就把整条信息落盘，关于页进来直接渲染。
+     * 用 JSON 存而不是拆成 5 个字段：以后更新信息要加字段不用改存储结构。
+     */
+    var cachedUpdateInfo: String?
+        get() = sp.getString(KEY_UPDATE_INFO, null)
+        set(v) = sp.edit().putString(KEY_UPDATE_INFO, v).apply()
+
     /** 缓存的成绩（课程 / 等级 / 体测）。之前没缓存，退出重进一旦网络抖就白屏 */
     var cachedGrades: String?
         get() = sp.getString(KEY_CACHE_GRADES, null)
@@ -340,6 +356,7 @@ class SessionStore(context: Context) {
         const val KEY_CLASS_LEAD_BREAK = "class_lead_break"
         const val KEY_UPDATE_CHECK_DATE = "update_check_date"
         const val KEY_LATEST_VERSION = "latest_version"
+        const val KEY_UPDATE_INFO = "update_info"
         const val KEY_CACHE_GRADES = "cache_grades"
         const val KEY_GRADES_VERSION = "grades_data_version"
         const val KEY_CACHE_LEVELS = "cache_levels"

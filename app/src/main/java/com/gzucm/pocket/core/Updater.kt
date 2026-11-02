@@ -16,15 +16,18 @@ import java.util.concurrent.TimeUnit
  */
 object Updater {
 
-    private const val API =
-        "https://api.github.com/repos/Hello-Minecraft/gzucm-pocket/releases/latest"
+    /** 仓库全名。API 地址和兜底直链都从这里拼，改名只改一处 */
+    private const val REPO = "Hello-Minecraft/gzucm-pocket"
 
+    private const val API = "https://api.github.com/repos/$REPO/releases/latest"
+
+    @kotlinx.serialization.Serializable
     data class UpdateInfo(
         val latestVersion: String,
-        val notes: String,
-        val pageUrl: String,
-        val apkUrl: String?,
-        val sizeMb: Double,
+        val notes: String = "",
+        val pageUrl: String = "",
+        val apkUrl: String? = null,
+        val sizeMb: Double = 0.0,
     )
 
     /** 单独的 client：不吃学校那边的 cookie，超时也短一些 */
@@ -40,6 +43,87 @@ object Updater {
         object UpToDate : Result()
         data class Failed(val reason: String) : Result()
     }
+
+    /**
+     * 把查到的更新信息落盘。
+     *
+     * 静默检查和关于页手动检查都走这里，保证两处存的格式一致。
+     *
+     * 只有「确实有更新」时才存 —— 已是最新版本时要把旧记录清掉，
+     * 否则用户升级完 App 之后还看到上一个版本的提示。
+     */
+    fun saveCachedInfo(store: SessionStore, info: UpdateInfo?) {
+        if (info == null) {
+            store.cachedUpdateInfo = null
+            store.latestVersion = null
+            return
+        }
+        store.latestVersion = info.latestVersion
+        store.cachedUpdateInfo = runCatching {
+            Net.json.encodeToString(UpdateInfo.serializer(), info)
+        }.getOrNull()
+    }
+
+    /**
+     * 读回上次查到的更新信息。没有、格式不对、或已经不再新了都返回 null。
+     *
+     * ## 为什么要再比一次版本号
+     *
+     * 用户可能在这期间自己装了新版（去 GitHub 下载、或者系统更新）。
+     * 那时缓存里的「新版本」已经过期，还显示「发现 v1.3.1」会误导。
+     *
+     * 判定逻辑抽到 [parseCachedInfo] 里，那个是纯函数，能单测。
+     */
+    fun loadCachedInfo(store: SessionStore): UpdateInfo? {
+        val info = parseCachedInfo(
+            raw = store.cachedUpdateInfo,
+            localVersion = runCatching { com.gzucm.pocket.BuildConfig.VERSION_NAME }
+                .getOrDefault("0"),
+        )
+        if (info == null && store.cachedUpdateInfo != null) {
+            // 缓存过期或损坏，顺手清掉，别一直留着脏数据
+            saveCachedInfo(store, null)
+        }
+        return info
+    }
+
+    /**
+     * 纯函数版：解析缓存的更新信息，并判断它还成不成立。
+     *
+     * 分开是为了能写单测 —— 上面那个版本依赖 SessionStore 和 BuildConfig。
+     *
+     * @return 仍然有效的更新信息；raw 为空、解析失败、或本地已经追上时返回 null
+     */
+    fun parseCachedInfo(raw: String?, localVersion: String): UpdateInfo? {
+        if (raw.isNullOrBlank()) return null
+        val info = runCatching {
+            Net.json.decodeFromString(UpdateInfo.serializer(), raw)
+        }.getOrNull() ?: return null
+        return info.takeIf { isNewer(it.latestVersion, localVersion) }
+    }
+
+    /**
+     * 浏览器要打开的地址：优先 APK 直链，没有才退回 Release 页。
+     *
+     * 抽成纯函数是因为这个选择决定了用户点下去是「开始下载」
+     * 还是「看到一个不知道怎么操作的网页」——值得单独锁住。
+     */
+    fun browserUrl(info: UpdateInfo): String =
+        info.apkUrl?.takeIf { it.isNotBlank() } ?: info.pageUrl
+
+    /**
+     * Release 没挂 APK 附件时的兜底直链。
+     *
+     * 抽成纯函数只为一件事：**附件名里带不带 `v`** 这种细节必须被测试锁住。
+     * 2026-11-02 就是因为这里 `removePrefix("v")` 拼出 `gzucm-pocket-1.3.1.apk`，
+     * 而真实附件叫 `gzucm-pocket-v1.3.1.apk`，GitHub 回 404 ——
+     * 用户点「浏览器下载」看到一个报错页，比原来打开 Release 页还糟。
+     *
+     * 约定：**tag 原样拼进文件名**（tag 是 `v1.3.1`，附件就是 `gzucm-pocket-v1.3.1.apk`）。
+     * 发版时要保证附件名符合这个规律，否则这里会对不上。
+     */
+    fun fallbackApkUrl(tag: String): String =
+        "https://github.com/$REPO/releases/latest/download/gzucm-pocket-$tag.apk"
 
     /**
      * 比较版本号：只比数字段，1.2.10 > 1.2.9（按字符串比会错）。
@@ -98,6 +182,23 @@ object Updater {
                             break
                         }
                     }
+                }
+
+                /*
+                 * 兜底：Release 里没挂 APK 附件时，拼一个「latest/download」直链。
+                 *
+                 * GitHub 会把 `releases/latest/download/<文件名>` 重定向到
+                 * 最新一版的对应附件 —— 不用知道版本号，也不用先问 API。
+                 * 这条路径只在附件名猜对时有效，所以只当兜底，不替代上面。
+                 *
+                 * **文件名里的 `v` 不能删**（2026-11-02 踩过）：
+                 * tag 是 `v1.3.1`，附件名是 `gzucm-pocket-v1.3.1.apk`，
+                 * 之前写成 `removePrefix("v")` → 拼出 `gzucm-pocket-1.3.1.apk`
+                 * → GitHub 直接 404。真机上表现为「点浏览器下载打开一个报错页」。
+                 * 顺带把大小写和 `.apk` 后缀一起对齐，附件名改动只改这一处。
+                 */
+                if (apkUrl.isNullOrBlank()) {
+                    apkUrl = fallbackApkUrl(tag)
                 }
 
                 val local = runCatching { com.gzucm.pocket.BuildConfig.VERSION_NAME }

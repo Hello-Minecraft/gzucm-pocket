@@ -195,12 +195,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val r = com.gzucm.pocket.core.Updater.check()
                 when (r) {
                     is com.gzucm.pocket.core.Updater.Result.Newer -> {
-                        store.latestVersion = r.info.latestVersion
+                        /*
+                         * 存**整条**信息，不只版本号。
+                         *
+                         * 关于页进去要直接显示「发现 v1.3.1（12.2 MB）」+ 下载按钮，
+                         * 它需要包大小和下载地址。只存版本号的话，
+                         * 用户从设置页看到「检测到新版本」进去却什么都没有，
+                         * 还得手动点一次「检查更新」（致辉 2026-11-02 报的）。
+                         */
+                        com.gzucm.pocket.core.Updater.saveCachedInfo(store, r.info)
                         store.lastUpdateCheckDate = today
                         hasUpdate = true
                     }
                     com.gzucm.pocket.core.Updater.Result.UpToDate -> {
-                        store.latestVersion = null
+                        com.gzucm.pocket.core.Updater.saveCachedInfo(store, null)
                         store.lastUpdateCheckDate = today
                         hasUpdate = false
                     }
@@ -225,10 +233,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 关于页手动查过之后同步一下红点状态 */
     fun refreshUpdateBadge() {
-        hasUpdate = store.latestVersion?.let {
-            com.gzucm.pocket.core.Updater.isNewer(it, com.gzucm.pocket.BuildConfig.VERSION_NAME)
-        } ?: false
+        hasUpdate = com.gzucm.pocket.core.Updater.loadCachedInfo(store) != null
     }
+
+    /** 关于页进入时用的缓存信息（没有就返回 null） */
+    fun cachedUpdate(): com.gzucm.pocket.core.Updater.UpdateInfo? =
+        com.gzucm.pocket.core.Updater.loadCachedInfo(store)
 
     /** 上课提醒两档提前量，必须是 State 才会即时刷新 */
     var classLeadFree by mutableStateOf(Graph.store.classLeadFree)
@@ -515,18 +525,49 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * 同样要清 WebView 的 Cookie，否则重登会直接回到原账号。
      * 这里不清课表缓存 —— 用户可能只是想换个账号看，旧数据留着能先垫着。
      */
+    /**
+     * 「重新登录」：**保留 cookie**，只回到登录页重新走一次认证。
+     *
+     * ## ⚠️ 这里和 [logout] 是两件事，不能共用清理逻辑
+     *
+     * 致辉 2026-11-02 报的回归：
+     * 修「退出登录切不了账号」那个 bug 时，我把清 cookie 的代码
+     * 也顺手加到了 `reopenLogin` 里 —— 于是「重新登录」变成了
+     * 「把登录信息删掉，手动重输账号密码」。
+     *
+     * 两个按钮的语义完全不同：
+     *
+     * | | 清 WebView cookie | 清 App cookie | 清课表缓存 | 用户要做什么 |
+     * |---|---|---|---|---|
+     * | **重新登录** | ❌ 不清 | ❌ 不清 | ❌ 保留 | 什么都不用输，WebView 带着原会话进去，CAS 直接放行 |
+     * | **退出登录** | ✅ 清 | ✅ 清 | ✅ 清 | 输入新账号 |
+     *
+     * 「重新登录」的使用场景是：会话过期了、或者同步出错了，
+     * 想让用户重新走一遍认证 —— 而 WebView 里的 CAS 会话通常还活着，
+     * 进去一点就回来了，根本不用输密码。**清掉就白费了这个便利。**
+     *
+     * 所以这里只切 phase，不动任何会话和缓存。
+     * 课表缓存也留着：重登期间界面还能显示旧数据，不是白屏。
+     */
     fun reopenLogin() {
-        viewModelScope.launch {
-            suspendCancellableCoroutine<Unit> { cont ->
-                android.webkit.CookieManager.getInstance().removeAllCookies {
-                    cont.resume(Unit)
-                }
-            }
-            runCatching { android.webkit.CookieManager.getInstance().flush() }
-            Net.cookies.clear()
-            state = state.copy(phase = Phase.NeedLogin)
-        }
+        state = state.copy(phase = Phase.NeedLogin)
     }
+
+    /**
+     * 设置页那个「重新登录」按钮的唯一入口。
+     *
+     * ## 为什么还要包一层
+     *
+     * [reopenLogin] 本身是对的（只切 phase），但**调用方**在 RootScreen 里
+     * 写成了 `vm.logout(); vm.reopenLogin()` —— 先清干净、再回登录页，
+     * 等于把「重新登录」做成了「退出登录」。致辉 2026-11-02 又报了一次。
+     *
+     * 光靠注释挡不住下一次。所以把语义收到 ViewModel 里：
+     * 调用方只有这一个方法可调，方法内部不碰任何会话和缓存，
+     * 想让「重新登录」清 cookie 就得改这里 —— 那时上面的注释和
+     * `LoginReopenTest` 会同时拦一下。
+     */
+    fun relogin() = reopenLogin()
 
     // ── 同步 ────────────────────────────────────────────────────────────
 

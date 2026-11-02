@@ -656,8 +656,22 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 onClose = { showSettings = false },
                 onRelogin = {
                     focusRelogin = false
-                    vm.logout()
-                    vm.reopenLogin()
+                    /*
+                     * **只切 phase，绝对不能调 logout()**（2026-11-02 修的回归）。
+                     *
+                     * 「重新登录」和「退出登录」是两个语义：
+                     *   · 重新登录 = 会话可能过期了，让用户再走一遍认证。
+                     *     WebView 里的 CAS 会话（CASTGC）通常还活着，
+                     *     打开 ssoLogin 会直接带 ticket 跳回来，**不用输密码**。
+                     *   · 退出登录 = 换账号，必须把 cookie 清干净。
+                     *
+                     * 之前这里写的是 `vm.logout(); vm.reopenLogin()` ——
+                     * logout 会清掉 WebView Cookie，于是「重新登录」
+                     * 变成了「把登录信息删掉、手动重输账号密码」。
+                     * AppViewModel.reopenLogin 的注释里写了不能共用清理逻辑，
+                     * 但调用方还是漏了这一步。
+                     */
+                    vm.relogin()
                     showSettings = false
                 },
                 lastSyncText = lastSync,
