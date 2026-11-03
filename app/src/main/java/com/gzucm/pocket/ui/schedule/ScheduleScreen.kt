@@ -51,6 +51,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -68,6 +70,7 @@ import com.gzucm.pocket.core.SlotEndTimes
 import com.gzucm.pocket.core.SlotTimes
 import com.gzucm.pocket.ui.components.CourseBackground
 import com.gzucm.pocket.ui.components.LocalFloatingBarInset
+import com.gzucm.pocket.ui.components.frostedBackdrop
 import com.gzucm.pocket.core.Semester
 import com.gzucm.pocket.ui.theme.courseColor
 import java.time.LocalDate
@@ -144,7 +147,21 @@ fun ScheduleScreen(
             val saved = runCatching {
                 val dir = java.io.File(ctx.filesDir, "bg").apply { mkdirs() }
                 dir.listFiles()?.forEach { it.delete() }
-                val out = java.io.File(dir, "course_bg.jpg")
+                /*
+                 * 文件名必须每次都不一样（2026-11-03 修「换一张不生效」）。
+                 *
+                 * 原来固定叫 course_bg.jpg，第二次选图时：
+                 *   · 路径字符串和上次完全相同
+                 *   · bgPath 是 mutableStateOf，赋相同值**不触发重组**
+                 *   · 就算重组，CourseBackground / 磨砂位图都用 `remember(path, length)` 缓存
+                 * 三层都不认为内容变了，于是画面停在旧图。
+                 *
+                 * 用户看到的现象就是「点换一张没反应，必须先恢复默认再选」——
+                 * 因为恢复默认把 bgPath 清成了 null，那次赋值才是一次真变化。
+                 *
+                 * 用时间戳做文件名，路径必然不同，上面三层自然全部刷新。
+                 */
+                val out = java.io.File(dir, "course_bg_${System.currentTimeMillis()}.jpg")
                 ctx.contentResolver.openInputStream(uri)!!.use { ins ->
                     out.outputStream().use { os -> ins.copyTo(os) }
                 }
@@ -227,10 +244,43 @@ fun ScheduleScreen(
     BoxWithConstraints(Modifier.fillMaxSize()) {
     val wide = maxWidth >= 840.dp
 
-    Box(Modifier.fillMaxSize()) {
-        // 自定义背景在最底层，课程块浮在上面
-        CourseBackground(bgPath, bgAlpha)
+    /*
+     * 格子底色浓淡。声明在最外层是因为两处都要用：
+     * 网格里（经 CompositionLocal 下发）和下面的外观面板（滑块）。
+     * 拖动滑块要立刻看到变化，所以是本地 state 而不是每次去读 store。
+     */
+    var cellOpacity by remember { mutableStateOf(store.courseCellOpacity) }
 
+    // 两个开关：格子磨砂 / 整屏模糊。面板和网格都要读，所以声明在最外层
+    var cellFrost by remember { mutableStateOf(store.courseCellFrost) }
+    var bgBlur by remember { mutableStateOf(store.courseBgBlur) }
+
+    Box(Modifier.fillMaxSize()) {
+        /*
+         * 磨砂底：先把壁纸糊一张小图，格子在绘制时按自己的坐标从这张图上取样。
+         *
+         * 这里记壁纸的实际位置（boundsInRoot），格子用同一个坐标系反推，
+         * 才能保证「磨砂块」和它下面的壁纸严丝合缝 —— 差一像素就看得出来。
+         */
+        var bgBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+        val blurredBg = com.gzucm.pocket.ui.components.rememberBlurredWallpaper(bgPath)
+
+        // 自定义背景在最底层，课程块浮在上面
+        CourseBackground(
+            path = bgPath,
+            alpha = bgAlpha,
+            modifier = Modifier.onGloballyPositioned { bgBounds = it.boundsInRoot() },
+            blurred = blurredBg,
+            useBlurred = bgBlur,
+        )
+
+        androidx.compose.runtime.CompositionLocalProvider(
+            com.gzucm.pocket.ui.components.LocalWallpaperBounds provides bgBounds,
+            com.gzucm.pocket.ui.components.LocalBlurredWallpaper provides blurredBg,
+            com.gzucm.pocket.ui.components.LocalCellOpacity provides cellOpacity,
+            // 整屏已经糊了的话，逐格磨砂既看不出又白花性能，直接关掉
+            com.gzucm.pocket.ui.components.LocalCellFrostEnabled provides (cellFrost && !bgBlur),
+        ) {
         Column(
             Modifier
                 .fillMaxSize()
@@ -316,6 +366,7 @@ fun ScheduleScreen(
         }
         } // else (周视图)
         }
+        } // CompositionLocalProvider（磨砂壁纸坐标 + 糊好的位图）
     }
 
     /*
@@ -346,6 +397,21 @@ fun ScheduleScreen(
             onAlphaChange = {
                 bgAlpha = it
                 store.courseBgAlpha = it
+            },
+            cellOpacity = cellOpacity,
+            onCellOpacityChange = {
+                cellOpacity = it
+                store.courseCellOpacity = it
+            },
+            cellFrost = cellFrost,
+            onCellFrostChange = {
+                cellFrost = it
+                store.courseCellFrost = it
+            },
+            bgBlur = bgBlur,
+            onBgBlurChange = {
+                bgBlur = it
+                store.courseBgBlur = it
             },
             onClear = {
                 runCatching {
@@ -1271,6 +1337,26 @@ internal fun placeSessions(
     return out
 }
 
+/**
+ * 盖在磨砂底上的那层课程色，用多大浓度。
+ *
+ * 用户调的是「普通格子」的基准值（10%~100%）；叠压时沿用旧的相对比例，
+ * 免得一改绝对值就把三层叠压的主次关系改没了。
+ *
+ * 注意这**不是**磨砂层的透明度 —— 磨砂层永远是满的，否则背后清晰的壁纸
+ * 会透上来把模糊冲淡。详见 [com.gzucm.pocket.ui.components.frostedBackdrop]。
+ */
+@androidx.compose.runtime.Composable
+private fun cellTintAlpha(overlapped: Boolean, hasUpper: Boolean): Float {
+    val base = com.gzucm.pocket.ui.components.LocalCellOpacity.current
+    val factor = when {
+        overlapped && hasUpper -> 0.875f
+        overlapped -> 1.625f
+        else -> 1f
+    }
+    return (base * factor).coerceIn(0.05f, 1f)
+}
+
 @Composable
 private fun BoxScope.CourseBlock(
     session: CourseSession,
@@ -1356,33 +1442,22 @@ private fun BoxScope.CourseBlock(
             .padding(vertical = 1.5.dp)
             .clip(RoundedCornerShape(corner))
             /*
-             * 叠压时格子**半透明**，能透出下面那块。
+             * 磨砂底：**画满不透明**，格子背后就只有糊掉的那份壁纸。
              *
-             * 取舍：完全不透明 → 下面的课看不见，不知道叠了什么；
-             *       太透明 → 两块的字糊在一起，都读不了。
-             * 折中：底色 0.55、文字仍用不透明的高对比色。
-             * 这样「下层那块」能隐约透出来（轮廓+色块），
-             * 但最上面那门的字依然清晰 —— 字是看不清下层的唯一屏障。
+             * 这里不能乘用户设的不透明度 —— 一乘就会变成
+             * 「40% 糊图 + 60% 从底下透上来的清晰壁纸」，
+             * 眼睛看到的还是清晰那份，等于白做。
              */
-            .background(
-                if (overlapped) {
-                    /*
-                     * 底色必须**浅**，因为文字用的也是课程色。
-                     *
-                     * 踩过的坑：为了让「透出下层」更明显，把底色提到 0.78，
-                     * 结果橙色字压在橙色底上，几乎同色 —— 实机放大 4 倍看，
-                     * 毛概那格的字要使劲眯眼才认得出。这是彻底做错了。
-                     *
-                     * 现在的分工：
-                     *   · 底色浅（0.20）→ 字（同色系、实心）自然浮起来
-                     *   · 「有几层」靠**边框**表达，不靠底色浓度
-                     *   · 下层能透过上层看到，靠的是底色半透明本身
-                     */
-                    color.copy(alpha = if (hasUpper) 0.14f else 0.26f)
-                } else {
-                    color.copy(alpha = 0.16f)
-                }
+            .frostedBackdrop(
+                bitmap = com.gzucm.pocket.ui.components.LocalBlurredWallpaper.current,
             )
+            /*
+             * 课程色：这层才是用户调的那个「不透明度」。
+             *
+             * 只压纯色、不掺壁纸，所以调高只是颜色变实，
+             * 不会把背后那份糊掉的壁纸冲淡。
+             */
+            .background(color.copy(alpha = cellTintAlpha(overlapped, hasUpper)))
             /*
              * 边框是「分几层」的主要信号 —— 底色浅了之后只能靠它。
              *

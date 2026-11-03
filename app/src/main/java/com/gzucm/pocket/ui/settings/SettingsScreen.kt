@@ -472,6 +472,32 @@ private fun ThemeCard() {
             .background(scheme.surface)
             .padding(14.dp),
     ) {
+        /*
+         * ── 深色模式 ────────────────────────────────────────────
+         *
+         * 和主题色放同一张卡：都是「外观」类设置，用户找深浅色时
+         * 一般会先想到主题色那一块，拆成两张卡反而要多扫一遍。
+         */
+        val darkMode = com.gzucm.pocket.ui.theme.ThemeState.darkMode
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("深色模式", fontSize = 13.sp, color = scheme.onSurfaceVariant)
+            Spacer(Modifier.weight(1f))
+            Text(darkMode.label, fontSize = 11.sp, color = scheme.primary)
+        }
+        Spacer(Modifier.height(9.dp))
+        DarkModeRow(darkMode) { picked ->
+            com.gzucm.pocket.ui.theme.ThemeState.setDarkMode(picked) { store.darkMode = it }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(0.7.dp)
+                .background(scheme.onSurfaceVariant.copy(alpha = 0.14f)),
+        )
+        Spacer(Modifier.height(14.dp))
+
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("主题色", fontSize = 13.sp, color = scheme.onSurfaceVariant)
             Spacer(Modifier.weight(1f))
@@ -526,6 +552,54 @@ private fun ThemeCard() {
     )
 }
 
+/**
+ * 深色模式三选一：跟随系统 / 深色 / 浅色。
+ *
+ * 用等分胶囊而不是三行单选：这是「三选一」的开关，不是三个独立配置项 ——
+ * 一排看全、点一下就切，比列表快。视觉跟登录页选学段一致。
+ *
+ * 底色用 onSurfaceVariant 的低透明，而不是 surfaceVariant：
+ * 后者在深色主题下几乎和卡片同色，整条会「消失」。
+ */
+@Composable
+private fun DarkModeRow(
+    current: com.gzucm.pocket.ui.theme.ThemeState.DarkMode,
+    onPick: (com.gzucm.pocket.ui.theme.ThemeState.DarkMode) -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(scheme.onSurfaceVariant.copy(alpha = 0.09f))
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        com.gzucm.pocket.ui.theme.ThemeState.DarkMode.entries.forEach { mode ->
+            val on = mode == current
+            Box(
+                Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        if (on) scheme.primary.copy(alpha = 0.16f)
+                        else androidx.compose.ui.graphics.Color.Transparent
+                    )
+                    .clickable { onPick(mode) }
+                    .padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    mode.label,
+                    fontSize = 12.5.sp,
+                    fontWeight = if (on) FontWeight.Medium else FontWeight.Normal,
+                    color = if (on) scheme.primary else scheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
 private fun labelOf(seed: Long): String =
     if (seed == com.gzucm.pocket.ui.theme.ThemeColor.DEFAULT_SEED) "默认"
     else com.gzucm.pocket.ui.theme.ThemeColor.presets.firstOrNull { it.seed == seed }?.label ?: ""
@@ -533,7 +607,15 @@ private fun labelOf(seed: Long): String =
 /** 色卡上显示的颜色：跟随深浅主题调整，否则深色下莫兰迪色看着发黑 */
 @Composable
 private fun swatch(seed: Long): androidx.compose.ui.graphics.Color {
-    val dark = androidx.compose.foundation.isSystemInDarkTheme()
+    /*
+     * 必须走 ThemeState，不能用 isSystemInDarkTheme()。
+     *
+     * 用户手动选了「浅色」而系统是深色时，色卡若按系统算，
+     * 会取到深色版色值 —— 铺在浅色卡片上明显发黑，像是色卡坏了。
+     */
+    val dark = com.gzucm.pocket.ui.theme.ThemeState.isDark(
+        androidx.compose.foundation.isSystemInDarkTheme()
+    )
     return com.gzucm.pocket.ui.theme.ThemeColor.swatchColor(seed, dark)
 }
 

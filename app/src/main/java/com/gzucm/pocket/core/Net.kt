@@ -319,6 +319,50 @@ class SessionStore(context: Context) {
         set(v) = sp.edit().putLong(KEY_THEME_SEED, v).apply()
 
     /**
+     * 深浅色模式。0 = 跟随系统（默认），1 = 强制深色，2 = 强制浅色。
+     *
+     * 存 Int 而不是字符串：和 [startTab] 一类枚举型偏好保持一致，
+     * 读出来直接当数组下标用。取值含义集中在 `ThemeState.DarkMode` 里，
+     * 这里只管存。
+     *
+     * 默认 0 —— 老用户升级上来观感和以前完全一样，不会突然变白或变黑。
+     */
+    var darkMode: Int
+        get() = sp.getInt(KEY_DARK_MODE, 0)
+        set(v) = sp.edit().putInt(KEY_DARK_MODE, v).apply()
+
+    /**
+     * 课表格子底色不透明度（0.10~1.00），默认 0.40。
+     *
+     * 以前是写死的 0.16，配上自定义壁纸时太透 —— 壁纸的花纹会从字底下穿过去。
+     * 现在配磨砂用。上限放到 100% 是致辉要的：壁纸太暗时，
+     * 中间档位看不出"玻璃"，得能一路推到接近实心。
+     */
+    var courseCellOpacity: Float
+        get() = sp.getFloat(KEY_CELL_OPACITY, 0.40f).coerceIn(0.10f, 1.00f)
+        set(v) = sp.edit().putFloat(KEY_CELL_OPACITY, v.coerceIn(0.10f, 1.00f)).apply()
+
+    /**
+     * 课程格子背景是否做磨砂。
+     *
+     * 默认开 —— 这是磨砂效果的主体。关掉后格子只剩课程色，壁纸透出来是清晰的。
+     */
+    var courseCellFrost: Boolean
+        get() = sp.getBoolean(KEY_CELL_FROST, true)
+        set(v) = sp.edit().putBoolean(KEY_CELL_FROST, v).apply()
+
+    /**
+     * 整张背景是否糊掉。
+     *
+     * 默认关。开着的时候**格子磨砂不生效** —— 背景本来就糊了，
+     * 再给每格采样一次既看不出来又白花性能，所以直接短路掉。
+     * 两个开关的互斥在 UI 层做（开全屏模糊时把格子那个置灰）。
+     */
+    var courseBgBlur: Boolean
+        get() = sp.getBoolean(KEY_BG_BLUR, false)
+        set(v) = sp.edit().putBoolean(KEY_BG_BLUR, v).apply()
+
+    /**
      * 时间冲突的课怎么排。
      *
      * true  = 错位叠压（默认）：两块保持接近整列宽、错开叠着，文字都读得出来
@@ -349,6 +393,10 @@ class SessionStore(context: Context) {
         const val KEY_PICKED_CAMPUS = "picked_campus"
         const val KEY_START_TAB = "start_tab"
         const val KEY_THEME_SEED = "theme_seed"
+        const val KEY_DARK_MODE = "dark_mode"
+        const val KEY_CELL_OPACITY = "course_cell_opacity"
+        const val KEY_CELL_FROST = "course_cell_frost"
+        const val KEY_BG_BLUR = "course_bg_blur"
         const val KEY_OVERLAP_MODE = "overlap_mode"
         const val KEY_CLASS_REMIND = "class_remind"
         const val KEY_POWER_ALERT_ON = "power_alert_on"

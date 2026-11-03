@@ -37,17 +37,25 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // 主题色：先把上次选的读出来，再交给 GzucmTheme。
+        // 主题色与深浅色：先把上次选的读出来，再交给 GzucmTheme。
         // ThemeState 是 Compose State，设置页改它就会整棵树重建配色。
         runCatching {
-            com.gzucm.pocket.ui.theme.ThemeState.init(
-                com.gzucm.pocket.core.SessionStore(applicationContext).themeSeed
-            )
+            val store = com.gzucm.pocket.core.SessionStore(applicationContext)
+            com.gzucm.pocket.ui.theme.ThemeState.init(store.themeSeed, store.darkMode)
         }
 
         setContent {
             GzucmTheme(
                 seed = com.gzucm.pocket.ui.theme.ThemeState.seed,
+                /*
+                 * 深浅色走 ThemeState 的解析，不直接用 isSystemInDarkTheme()。
+                 *
+                 * 用户可以在设置里强制深色/浅色；只有选「跟随系统」时
+                 * 才让系统的值进来。这里不传的话，手动设置毫无作用。
+                 */
+                darkTheme = com.gzucm.pocket.ui.theme.ThemeState.isDark(
+                    androidx.compose.foundation.isSystemInDarkTheme()
+                ),
             ) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     RootScreen()

@@ -249,6 +249,134 @@ class ScreenshotTest {
     }
 
     /**
+     * 造一张「高对比色块」的假壁纸并写进临时文件。
+     *
+     * 磨砂效果只有在壁纸本身颜色丰富、边界明确时才看得出来；
+     * 用纯色壁纸拍出来跟没开一样，等于白测。
+     */
+    private fun makeTestWallpaper(): File {
+        val ctx = androidx.test.core.app.ApplicationProvider
+            .getApplicationContext<android.app.Application>()
+        val f = File(ctx.cacheDir, "test_wallpaper.png")
+        val bmp = android.graphics.Bitmap.createBitmap(1080, 1920, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bmp)
+        canvas.drawColor(android.graphics.Color.rgb(18, 34, 48))
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        val colors = intArrayOf(
+            0xFFE8A33D.toInt(), 0xFF3D8BE8.toInt(),
+            0xFFB04AD4.toInt(), 0xFF37C08A.toInt(),
+        )
+        colors.forEachIndexed { i, col ->
+            paint.color = col
+            canvas.drawCircle(180f + i * 300f, 320f + i * 430f, 240f, paint)
+            canvas.drawRect(
+                i * 250f, 1150f + i * 120f, i * 250f + 420f, 1500f + i * 120f, paint,
+            )
+        }
+        f.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        return f
+    }
+
+    /** 临时把 store 换成测试壁纸，跑完恢复 —— 别的截图测试读同一份 prefs */
+    private fun withTestWallpaper(
+        dark: Boolean,
+        name: String,
+        cellFrost: Boolean = true,
+        bgBlur: Boolean = false,
+        block: @androidx.compose.runtime.Composable () -> Unit,
+    ) {
+        val ctx = androidx.test.core.app.ApplicationProvider
+            .getApplicationContext<android.app.Application>()
+        val store = com.gzucm.pocket.core.SessionStore(ctx)
+        val oldPath = store.courseBgPath
+        val oldAlpha = store.courseBgAlpha
+        val oldOpacity = store.courseCellOpacity
+        val oldFrost = store.courseCellFrost
+        val oldBlur = store.courseBgBlur
+
+        val f = makeTestWallpaper()
+        store.courseBgPath = f.absolutePath
+        store.courseBgAlpha = 0.9f
+        store.courseCellOpacity = 0.40f
+        store.courseCellFrost = cellFrost
+        store.courseBgBlur = bgBlur
+        try {
+            shot(name, dark = dark, block = block)
+        } finally {
+            store.courseBgPath = oldPath
+            store.courseBgAlpha = oldAlpha
+            store.courseCellOpacity = oldOpacity
+            store.courseCellFrost = oldFrost
+            store.courseBgBlur = oldBlur
+            f.delete()
+        }
+    }
+
+    /**
+     * 课表 + 自定义壁纸 + 磨砂格子（2026-11-03）。
+     */
+    @Test
+    fun scheduleFrosted() = withTestWallpaper(dark = true, name = "01e_schedule_frosted") {
+        ScheduleScreen(semester, sessions, 8, 8, {}, {})
+    }
+
+    /**
+     * 浅色主题下的磨砂。
+     *
+     * 雾面用的是主题 surface —— 深色下是"黑玻璃"，浅色下是"白玻璃"，
+     * 观感差很远，必须两版都看。而且一次测试只能 setContent 一次，
+     * 所以只能拆成两个方法。
+     */
+    @Test
+    fun scheduleFrostedLight() = withTestWallpaper(dark = false, name = "01f_schedule_frosted_light") {
+        ScheduleScreen(semester, sessions, 8, 8, {}, {})
+    }
+
+    /** 全屏背景模糊：整张壁纸糊掉，格子只留课程色（磨砂被短路） */
+    @Test
+    fun scheduleBgBlur() = withTestWallpaper(
+        dark = true, name = "01h_schedule_bg_blur", bgBlur = true,
+    ) {
+        ScheduleScreen(semester, sessions, 8, 8, {}, {})
+    }
+
+    /** 关掉格子磨砂：背景清晰，格子只有课程色 */
+    @Test
+    fun scheduleNoCellFrost() = withTestWallpaper(
+        dark = true, name = "01i_schedule_no_cell_frost", cellFrost = false,
+    ) {
+        ScheduleScreen(semester, sessions, 8, 8, {}, {})
+    }
+
+    /** 日视图 + 壁纸：卡片是圆角矩形，磨砂要跟着圆角裁，别溢出到卡外 */    @Test
+    fun scheduleDayFrosted() {
+        val ctx = androidx.test.core.app.ApplicationProvider
+            .getApplicationContext<android.app.Application>()
+        val store = com.gzucm.pocket.core.SessionStore(ctx)
+        val oldPath = store.courseBgPath
+        val oldAlpha = store.courseBgAlpha
+        val oldOpacity = store.courseCellOpacity
+        val oldDayView = store.courseDayView
+
+        val f = makeTestWallpaper()
+        store.courseBgPath = f.absolutePath
+        store.courseBgAlpha = 0.9f
+        store.courseCellOpacity = 0.40f
+        store.courseDayView = true
+        try {
+            shot("01g_schedule_day_frosted") {
+                ScheduleScreen(semester, sessions, 8, 8, {}, {})
+            }
+        } finally {
+            store.courseBgPath = oldPath
+            store.courseBgAlpha = oldAlpha
+            store.courseCellOpacity = oldOpacity
+            store.courseDayView = oldDayView
+            f.delete()
+        }
+    }
+
+    /**
      * 日视图（2026-11-01 新增）。
      *
      * 直接摆一个 DayScheduleView，不走 ScheduleScreen ——

@@ -2,6 +2,7 @@ package com.gzucm.pocket.ui.schedule
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,6 +46,7 @@ import com.gzucm.pocket.core.SlotTimes
 import com.gzucm.pocket.core.phaseOf
 import com.gzucm.pocket.core.SessionPhase
 import com.gzucm.pocket.ui.components.LocalFloatingBarInset
+import com.gzucm.pocket.ui.components.frostedBackdrop
 import com.gzucm.pocket.ui.theme.courseColor
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -355,20 +357,49 @@ private fun DayCourseCard(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
+            /*
+             * 磨砂底画满（理由同周视图：乘透明度会让背后清晰的壁纸透上来），
+             * 用户调的那个浓度只作用在下一层的课程/中性色上。
+             */
+            .frostedBackdrop(
+                bitmap = com.gzucm.pocket.ui.components.LocalBlurredWallpaper.current,
+            )
             .background(
                 if (ongoing) scheme.primary.copy(alpha = 0.10f)
-                else scheme.surfaceVariant.copy(alpha = 0.35f * dim),
+                else scheme.surfaceVariant.copy(
+                    alpha = (com.gzucm.pocket.ui.components.LocalCellOpacity.current * 0.85f * dim)
+                        .coerceIn(0.05f, 1f),
+                ),
             )
             .then(
-                // 正在上时加一圈细边框，比只靠底色更明确
                 if (ongoing) {
+                    // 正在上：主色细边框，和角落标签、加粗色条一起做「当前」的信号
                     Modifier.border(
                         width = 1.dp,
                         color = scheme.primary.copy(alpha = 0.45f),
                         shape = RoundedCornerShape(12.dp),
                     )
                 } else {
-                    Modifier
+                    /*
+                     * 普通卡片：一圈很细的灰白描边（2026-11-03 致辉要的）。
+                     *
+                     * 为什么需要：卡片底色是磨砂 + 半透明课程色，叠在壁纸上时
+                     * 边缘完全靠明度差撑着 —— 壁纸那块颜色接近时，卡片就「化」进背景了。
+                     * 描边给一条硬边界，等于替眼睛把轮廓画出来，可读性立刻上来。
+                     *
+                     * 只描 0.8dp：再粗就成卡片框了，会跟「正在上」的主色边框抢注意力。
+                     * 深浅色分别用白/黑，保证任何主题下都是「灰白」而不是隐形。
+                     */
+                    val line = if (scheme.surface.luminance() < 0.5f) {
+                        androidx.compose.ui.graphics.Color.White.copy(alpha = 0.22f)
+                    } else {
+                        androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.10f)
+                    }
+                    Modifier.border(
+                        width = 0.8.dp,
+                        color = line,
+                        shape = RoundedCornerShape(12.dp),
+                    )
                 },
             )
             .clickable(onClick = onClick)
