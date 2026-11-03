@@ -1,3 +1,0 @@
-<view class="track">
-  <view class="fill" style="width: {{pct}}%;"></view>
-</view>
