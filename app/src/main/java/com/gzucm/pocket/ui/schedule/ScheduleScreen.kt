@@ -9,6 +9,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -140,13 +141,16 @@ fun ScheduleScreen(
     var rotations by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
 
     // 系统图片选择器，不需要存储权限
+    val pickScope = androidx.compose.runtime.rememberCoroutineScope()
     val picker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
     ) { uri ->
-        if (uri != null) {
-            val saved = runCatching {
+        if (uri == null) return@rememberLauncherForActivityResult
+        // 拷贝原图放 IO 线程：相机原图动辄 5~10 MB，原来在主线程拷，选完图会卡一下
+        pickScope.launch {
+            val saved = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+              runCatching {
                 val dir = java.io.File(ctx.filesDir, "bg").apply { mkdirs() }
-                dir.listFiles()?.forEach { it.delete() }
                 /*
                  * 文件名必须每次都不一样（2026-11-03 修「换一张不生效」）。
                  *
@@ -162,11 +166,20 @@ fun ScheduleScreen(
                  * 用时间戳做文件名，路径必然不同，上面三层自然全部刷新。
                  */
                 val out = java.io.File(dir, "course_bg_${System.currentTimeMillis()}.jpg")
-                ctx.contentResolver.openInputStream(uri)!!.use { ins ->
+                val input = ctx.contentResolver.openInputStream(uri)
+                    ?: error("打不开选中的图片")
+                input.use { ins ->
                     out.outputStream().use { os -> ins.copyTo(os) }
                 }
+                /*
+                 * 拷贝成功之后才删旧图。原来是先清空目录再拷，拷失败的话
+                 * 新图没有、旧图也没了，背景变成一片空白。
+                 */
+                dir.listFiles()?.forEach { if (it.absolutePath != out.absolutePath) it.delete() }
                 out.absolutePath
-            }.getOrNull()
+              }.onFailure { android.util.Log.w("Schedule", "保存背景图失败", it) }
+                .getOrNull()
+            }
             if (saved != null) {
                 bgPath = saved
                 store.courseBgPath = saved

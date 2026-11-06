@@ -78,6 +78,12 @@ fun SettingsScreen(
     leadFree: Int = 20,
     leadBreak: Int = 10,
     onLeadChange: (free: Int?, breakMin: Int?) -> Unit = { _, _ -> },
+    /** 增强提醒方案（setAlarmClock） */
+    reminderEnhanced: Boolean = false,
+    onReminderEnhancedChange: (Boolean) -> Unit = {},
+    /** 精确闹钟是否已授权（Android 12+；低版本恒为 true） */
+    exactAlarmGranted: Boolean = true,
+    onRequestExactAlarm: () -> Unit = {},
     /** 从「登录已过期」点进来时置 true：自动滚到「重新登录」并抖动提示 */
     focusRelogin: Boolean = false,
     /** 有可用更新：「关于软件」那行右侧会显示提示 */
@@ -245,6 +251,61 @@ fun SettingsScreen(
                     range = 5..30,
                     onChange = { onLeadChange(null, it) },
                 )
+
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(scheme.onSurfaceVariant.copy(alpha = 0.06f)),
+                )
+                /*
+                 * 增强提醒（setAlarmClock）。
+                 *
+                 * 做成可选项而不是默认：它会在状态栏常驻闹钟图标、锁屏显示「下一个闹钟」。
+                 * 换来的是系统闹钟同级的优先级 —— ColorOS / HyperOS 的省电合并基本推迟不了。
+                 * 「上午的课下午才响」的同学打开它。
+                 */
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .toggleable(
+                            value = reminderEnhanced,
+                            role = androidx.compose.ui.semantics.Role.Switch,
+                            onValueChange = onReminderEnhancedChange,
+                        )
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("增强提醒方案", fontSize = 13.5.sp)
+                        Text(
+                            "提醒总是迟到时打开。按系统闹钟的级别排，省电策略推迟不了；" +
+                                "代价是状态栏会出现闹钟图标",
+                            fontSize = 10.5.sp,
+                            lineHeight = 15.sp,
+                            color = scheme.onSurfaceVariant.copy(alpha = 0.8f),
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    androidx.compose.material3.Switch(
+                        checked = reminderEnhanced,
+                        onCheckedChange = null,
+                    )
+                }
+
+                // 没有精确闹钟授权时，两种方案都只能退回「非精确」—— 必须明说
+                if (!exactAlarmGranted) {
+                    Text(
+                        "「闹钟和提醒」权限未开启，提醒可能晚很久 · 点这里开启",
+                        fontSize = 10.5.sp,
+                        lineHeight = 15.sp,
+                        color = scheme.error,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = onRequestExactAlarm)
+                            .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                    )
+                }
             }
         }
 

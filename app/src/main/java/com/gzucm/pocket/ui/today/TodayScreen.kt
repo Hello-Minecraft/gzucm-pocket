@@ -31,6 +31,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
@@ -84,13 +85,16 @@ fun TodayScreen(
      */
     onOpenLogin: () -> Unit = onOpenSettings,
 ) {
-    val today = LocalDate.now()
-    // 每分钟走一次，用来判断「今天的课是不是已经上完了」
+    // today 也挂在同一个 tick 上：停在首页跨过 0 点后要切到新的一天，
+    // 下面 remember(…, today) 那几处才会重算
+    var today by remember { mutableStateOf(LocalDate.now()) }
+    // 每 30 秒走一次，用来判断「今天的课是不是已经上完了」
     var nowMin by remember { mutableIntStateOf(LocalTime.now().let { it.hour * 60 + it.minute }) }
     LaunchedEffect(Unit) {
         while (true) {
             kotlinx.coroutines.delay(30_000)
             nowMin = LocalTime.now().let { it.hour * 60 + it.minute }
+            today = LocalDate.now()
         }
     }
     // 这四处原本每次重组都重算（含 O(n) 遍历与多次 split），

@@ -19,7 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -172,8 +172,9 @@ fun PowerScreen(
      * 都要用同一个值 —— 留在 item 里就得算两遍，而且分栏后左列单独滚动，
      * item 复用时机不一样，值可能不一致。
      */
-    val updatedText = remember(power) {
-        val ts = com.gzucm.pocket.core.SessionStore(ctx.applicationContext).powerCheckedAt
+    // checkedAt 也作 key：余额没变时 PowerInfo equals 为真，只按 power 会一直显示旧时间
+    val ts = com.gzucm.pocket.core.SessionStore(ctx.applicationContext).powerCheckedAt
+    val updatedText = remember(power, ts) {
         if (ts <= 0) "" else {
             val fmt = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.CHINA)
             "更新于 " + fmt.format(java.util.Date(ts))
@@ -280,7 +281,7 @@ fun PowerScreen(
                     if (daily.isEmpty()) {
                         item { EmptyDailyHint() }
                     } else {
-                        items(daily.reversed(), key = { it.date }) { d ->
+                        itemsIndexed(daily.reversed(), key = { i, d -> "$i|${d.date}" }) { _, d ->
                             DailyRow(day = d)
                         }
                     }
@@ -326,7 +327,7 @@ fun PowerScreen(
             if (daily.isEmpty()) {
                 item { EmptyDailyHint() }
             } else {
-                items(daily.reversed(), key = { it.date }) { d ->
+                itemsIndexed(daily.reversed(), key = { i, d -> "$i|${d.date}" }) { _, d ->
                     DailyRow(day = d)
                 }
             }

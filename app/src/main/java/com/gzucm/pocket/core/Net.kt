@@ -20,9 +20,16 @@ class SessionStore(context: Context) {
 
     private val sp = context.getSharedPreferences("gzucm_pocket", Context.MODE_PRIVATE)
 
-    fun saveCookies(host: String, cookies: Map<String, String>) {
-        val all: MutableMap<String, Map<String, String>> = loadCookies().toMutableMap()
-        if (cookies.isEmpty()) all.remove(host) else all[host] = cookies
+    /**
+     * 写一个 host 的 cookie。
+     *
+     * 这是「读全部 → 改一个 host → 写回全部」，两个 host 同时写会互相覆盖
+     * （课表 5 路并发 + 一卡通同时在跑时就会发生），所以整段加类级锁。
+     * SessionStore 在多处被 new 出来，锁必须挂在 companion 上，不能挂在实例上。
+     */
+    fun saveCookies(host: String, cookies: Map<String, String>) = synchronized(COOKIE_LOCK) {
+        val all: MutableMap<String, Map<String, String>> = loadCookiesUnlocked().toMutableMap()
+        if (cookies.isEmpty()) all.remove(host) else all[host] = cookies.toMap()
         val encoded = Json.encodeToString(
             MapSerializer(String.serializer(), MapSerializer(String.serializer(), String.serializer())),
             all,
@@ -30,7 +37,9 @@ class SessionStore(context: Context) {
         sp.edit().putString(KEY_COOKIES, encoded).apply()
     }
 
-    fun loadCookies(): Map<String, Map<String, String>> = runCatching {
+    fun loadCookies(): Map<String, Map<String, String>> = synchronized(COOKIE_LOCK) { loadCookiesUnlocked() }
+
+    private fun loadCookiesUnlocked(): Map<String, Map<String, String>> = runCatching {
         val raw = sp.getString(KEY_COOKIES, null) ?: return emptyMap()
         Json.decodeFromString(
             MapSerializer(String.serializer(), MapSerializer(String.serializer(), String.serializer())),
@@ -38,7 +47,7 @@ class SessionStore(context: Context) {
         )
     }.getOrDefault(emptyMap())
 
-    fun clearCookies() = sp.edit().remove(KEY_COOKIES).apply()
+    fun clearCookies() = synchronized(COOKIE_LOCK) { sp.edit().remove(KEY_COOKIES).apply() }
 
     var semesterCode: String?
         get() = sp.getString(KEY_SEMESTER, null)
@@ -303,6 +312,16 @@ class SessionStore(context: Context) {
         get() = sp.getBoolean(KEY_CLASS_REMIND, true)
         set(v) = sp.edit().putBoolean(KEY_CLASS_REMIND, v).apply()
 
+    /**
+     * 增强提醒（用 setAlarmClock 排）。默认关。
+     *
+     * 默认关是因为它会在状态栏常驻一个闹钟图标、锁屏显示「下一个闹钟」，
+     * 不是所有人都能接受 —— 让被省电策略坑过的人自己打开。
+     */
+    var classReminderEnhanced: Boolean
+        get() = sp.getBoolean(KEY_CLASS_REMIND_ENHANCED, false)
+        set(v) = sp.edit().putBoolean(KEY_CLASS_REMIND_ENHANCED, v).apply()
+
     /** 默认启动页：0=今日 1=课表 2=成绩 3=电费（与 Tab 顺序一致） */
     var startTab: Int
         get() = sp.getInt(KEY_START_TAB, 0)
@@ -399,6 +418,10 @@ class SessionStore(context: Context) {
         const val KEY_BG_BLUR = "course_bg_blur"
         const val KEY_OVERLAP_MODE = "overlap_mode"
         const val KEY_CLASS_REMIND = "class_remind"
+        const val KEY_CLASS_REMIND_ENHANCED = "class_remind_enhanced"
+
+        /** cookie 落盘的读改写锁（见 [saveCookies]） */
+        private val COOKIE_LOCK = Any()
         const val KEY_POWER_ALERT_ON = "power_alert_on"
         const val KEY_CLASS_LEAD_FREE = "class_lead_free"
         const val KEY_CLASS_LEAD_BREAK = "class_lead_break"
@@ -431,23 +454,77 @@ class SessionStore(context: Context) {
  */
 class PersistentCookieJar(private val store: SessionStore) : CookieJar {
 
-    /** host -> (name|path -> value) */
+    /**
+     * host -> (name|path -> value)
+     *
+     * ⚠️ 所有读写都要持 [lock]。OkHttp 会在多个线程上**同时**调
+     * saveFromResponse / loadForRequest（课表是 Semaphore(5) 五路并发），
+     * 普通 HashMap 并发改 + 遍历会抛 ConcurrentModificationException，
+     * 被上层 runCatching 吞掉后表现为「某一周的课静默丢了」。
+     */
     private val mem: MutableMap<String, MutableMap<String, String>> =
         store.loadCookies().mapValues { it.value.toMutableMap() }.toMutableMap()
 
+    private val lock = Any()
+
     private fun key(name: String, path: String) = "$name|$path"
+
+    /**
+     * 落盘合并。
+     *
+     * 原来每收到一个带 Set-Cookie 的响应就把该 host 全部 cookie 序列化成 JSON
+     * 写一次 SharedPreferences —— 课表同步 20 多个请求，每个都写一遍整表。
+     * 现在内存立即生效，磁盘只记「哪些 host 脏了」，由单线程在 300ms 后合并写一次。
+     * 进程被杀最多丢最后 300ms 的 cookie，下次请求服务端会再下发。
+     */
+    private val dirty = HashSet<String>()
+    private val flusher = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "cookie-flush").apply { isDaemon = true }
+    }
+    private var flushScheduled = false
+
+    private fun markDirty(host: String) {
+        // 调用方已持有 lock
+        dirty += host
+        if (flushScheduled) return
+        flushScheduled = true
+        flusher.schedule({ flushNow() }, 300, java.util.concurrent.TimeUnit.MILLISECONDS)
+    }
+
+    /** 立即把脏 host 写盘。登出、测试里需要确定性时直接调 */
+    fun flushNow() {
+        val snapshot: Map<String, Map<String, String>> = synchronized(lock) {
+            flushScheduled = false
+            val out = dirty.associateWith { mem[it]?.toMap().orEmpty() }
+            dirty.clear()
+            out
+        }
+        for ((host, cookies) in snapshot) store.saveCookies(host, cookies)
+    }
 
     override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
         if (cookies.isEmpty()) return
-        val bucket = mem.getOrPut(url.host) { mutableMapOf() }
-        cookies.forEach { bucket[key(it.name, it.path)] = it.value }
-        store.saveCookies(url.host, bucket)
+        synchronized(lock) {
+            val bucket = mem.getOrPut(url.host) { mutableMapOf() }
+            val now = System.currentTimeMillis()
+            cookies.forEach {
+                val k = key(it.name, it.path)
+                /*
+                 * 尊重删除语义：服务端用 Max-Age=0 或过去的 Expires 删 cookie 时，
+                 * OkHttp 给的 expiresAt 已经在过去。原来不管三七二十一都存下来，
+                 * 结果「被删掉的旧会话」一直被带着发出去。
+                 */
+                if (it.persistent && it.expiresAt <= now) bucket.remove(k) else bucket[k] = it.value
+            }
+            // 磁盘合并写（见 markDirty）；落盘时取的是快照，不会把可变引用交出去
+            markDirty(url.host)
+        }
     }
 
     override fun loadForRequest(url: HttpUrl): List<Cookie> {
-        val bucket = mem[url.host] ?: return emptyList()
+        val entries = synchronized(lock) { mem[url.host]?.toList() } ?: return emptyList()
         val reqPath = url.encodedPath.ifEmpty { "/" }
-        return bucket.mapNotNull { (k, v) ->
+        return entries.mapNotNull { (k, v) ->
             val sep = k.lastIndexOf('|')
             if (sep <= 0) return@mapNotNull null
             val name = k.substring(0, sep)
@@ -456,39 +533,53 @@ class PersistentCookieJar(private val store: SessionStore) : CookieJar {
             val matches = reqPath == path ||
                 (reqPath.startsWith(path) && (path.endsWith("/") || reqPath[path.length] == '/'))
             if (!matches) return@mapNotNull null
-            Cookie.Builder().domain(url.host).path(path).name(name).value(v).build()
+            path to Cookie.Builder().domain(url.host).path(path).name(name).value(v).build()
         }
+            // RFC 6265 §5.4：更长的 path 排前面。同名不同 path 时服务端通常取第一个，
+            // 不排序就是按插入顺序发，可能把旧的 "/" 那条排在 "/user" 前面
+            .sortedByDescending { it.first.length }
+            .map { it.second }
     }
 
     /** 从 WebView 灌入。WebView 的 getCookie 丢掉了 path，这里按业务常识归位。 */
     fun seed(host: String, cookies: Map<String, String>) {
         if (cookies.isEmpty()) return
-        val bucket = mem.getOrPut(host) { mutableMapOf() }
-        for ((name, value) in cookies) {
-            val path = if (name == "JSESSIONID" && host.contains("ecard")) {
-                // 一卡通拿得到的 JSESSIONID 一定是 /user 那条（业务会话）
-                "/user"
-            } else {
-                "/"
+        val snapshot = synchronized(lock) {
+            val bucket = mem.getOrPut(host) { mutableMapOf() }
+            for ((name, value) in cookies) {
+                val path = if (name == "JSESSIONID" && host.contains("ecard")) {
+                    // 一卡通拿得到的 JSESSIONID 一定是 /user 那条（业务会话）
+                    "/user"
+                } else {
+                    "/"
+                }
+                bucket[key(name, path)] = value
             }
-            bucket[key(name, path)] = value
+            bucket.toMap()
         }
-        store.saveCookies(host, bucket)
+        store.saveCookies(host, snapshot)
     }
 
     /** 调试/兜底用：直接塞一条指定 path 的 cookie */
     fun put(host: String, name: String, value: String, path: String = "/") {
-        val bucket = mem.getOrPut(host) { mutableMapOf() }
-        bucket[key(name, path)] = value
-        store.saveCookies(host, bucket)
+        val snapshot = synchronized(lock) {
+            val bucket = mem.getOrPut(host) { mutableMapOf() }
+            bucket[key(name, path)] = value
+            bucket.toMap()
+        }
+        store.saveCookies(host, snapshot)
     }
 
-    fun snapshot(host: String): Map<String, String> = mem[host].orEmpty()
+    fun snapshot(host: String): Map<String, String> = synchronized(lock) { mem[host]?.toMap().orEmpty() }
 
-    fun has(host: String): Boolean = !mem[host].isNullOrEmpty()
+    fun has(host: String): Boolean = synchronized(lock) { !mem[host].isNullOrEmpty() }
 
     fun clear() {
-        mem.clear()
+        synchronized(lock) {
+            mem.clear()
+            // 待写盘的也要丢掉，否则 300ms 后又把刚清掉的 cookie 写回磁盘
+            dirty.clear()
+        }
         store.clearCookies()
     }
 }

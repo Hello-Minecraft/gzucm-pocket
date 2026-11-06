@@ -293,6 +293,17 @@ fun EcardSyncSheet(
                         }
                     },
                     update = { webRef = it },
+                    // 面板收起时销毁 WebView，不然每打开一次同步面板就泄漏一个（含 Activity Context）
+                    onRelease = { w ->
+                        if (webRef === w) webRef = null
+                        runCatching {
+                            w.stopLoading()
+                            w.webViewClient = android.webkit.WebViewClient()
+                            w.webChromeClient = null
+                            (w.parent as? android.view.ViewGroup)?.removeView(w)
+                            w.destroy()
+                        }
+                    },
                 )
             }
 

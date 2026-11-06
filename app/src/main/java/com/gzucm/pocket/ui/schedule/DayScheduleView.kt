@@ -26,6 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -85,7 +86,19 @@ internal fun DayScheduleView(
     initialDay: Int = 1,
     modifier: Modifier = Modifier,
 ) {
-    val today = LocalDate.now()
+    /*
+     * 「现在」每 30 秒走一次，整个日视图只有这一份（不放进 Pager 每页各建一个）。
+     * 停在页面上到点要能自动切到下一节「正在上」，跨 0 点「今天」也要跟着变。
+     */
+    var today by remember { mutableStateOf(LocalDate.now()) }
+    var nowMinutes by remember { mutableIntStateOf(LocalTime.now().let { it.hour * 60 + it.minute }) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(30_000)
+            nowMinutes = LocalTime.now().let { it.hour * 60 + it.minute }
+            today = LocalDate.now()
+        }
+    }
     val todayWeekday = today.dayOfWeek.value
 
     /*
@@ -254,7 +267,7 @@ internal fun DayScheduleView(
                              * 翻到上周三，那天的课也会被标成正在上。
                              */
                             nowMinutes = if (w == currentWeek && todayWeekday == weekday) {
-                                LocalTime.now().let { it.hour * 60 + it.minute }
+                                nowMinutes
                             } else {
                                 -1
                             },

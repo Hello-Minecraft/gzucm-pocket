@@ -210,6 +210,22 @@ class EcardParseTest {
         assertEquals(11.63, Ecard.parseBalance(withPrefix, "")!!.balance, 0.001)
     }
 
+    /** 欠费时余额是负数，负号不能被吞掉（否则欠费显示成有电） */
+    @Test
+    fun `欠费负数余额保留负号`() {
+        val html = """
+            <div id="powerTips">剩余电量：-2.50度</div>
+            <input type="text" name="roomNum" value="5770">
+            <script>var token = 'abc123';</script>
+        """.trimIndent()
+        assertEquals(-2.5, Ecard.parseBalanceFromHtml(html)!!.balance, 0.001)
+
+        val json = """
+            {"ret":true,"obj":{"roomNum":"5770","formatPowerBalanceStr":"-3.23度","du":"度"}}
+        """.trimIndent()
+        assertEquals(-3.23, Ecard.parseBalance(json, "")!!.balance, 0.001)
+    }
+
     /**
      * 余额为空时必须返回 null，**绝不能返回 0**。
      * 曾经这里返回 0，未登录时把「155 度」覆盖成「0 度」。

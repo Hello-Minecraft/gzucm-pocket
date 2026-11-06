@@ -265,6 +265,8 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 ctx0, android.Manifest.permission.POST_NOTIFICATIONS,
             ) == android.content.pm.PackageManager.PERMISSION_GRANTED
     var notifyOk by remember { mutableStateOf(notifyGranted()) }
+    // 精确闹钟授权（Android 12+）。没授权时提醒会退回非精确，可能被推迟很久
+    var exactOk by remember { mutableStateOf(vm.canExactAlarm()) }
     val askNotify = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { granted -> notifyOk = granted }
@@ -294,6 +296,13 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
         androidx.lifecycle.Lifecycle.Event.ON_RESUME
     ) {
         vm.checkUpdateIfStale()
+        // 用户可能刚去系统设置里开了通知 / 精确闹钟，回来要立刻反映，
+        // 不然设置页「未授权」的红字一直挂着
+        notifyOk = notifyGranted()
+        val exactNow = vm.canExactAlarm()
+        // 刚拿到精确闹钟授权：原来排的是「非精确」，要换成精确的重排一遍
+        if (exactNow && !exactOk) vm.onExactAlarmGranted()
+        exactOk = exactNow
     }
 
     var detail by remember { mutableStateOf<CourseSession?>(null) }
@@ -533,8 +542,10 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 if (info != null) {
                     vm.applyEcardSync(info, daily)
                 } else {
-                    // 记下尝试时间：失败后 10 分钟内不再自动弹，免得反复打断
+                    // 记下尝试时间：失败后 10 分钟内不再自动弹，免得反复打断。
+                    // 同时清掉 powerDirty，否则它会短路冷却判定（见 onPowerSyncFailed）
                     prefs.lastPowerAttemptAt = System.currentTimeMillis()
+                    vm.onPowerSyncFailed()
                     if (err != null) vm.showPowerError(err)
                 }
             },
@@ -557,7 +568,12 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
      * 光看字符串会以为还是上次那条，Toast 就不弹第二次了。
      */
     val ctxToast = androidx.compose.ui.platform.LocalContext.current
-    var lastToastSeq by remember { mutableIntStateOf(0) }
+    /*
+     * rememberSaveable 而不是 remember：分屏、改字体、改语言会让 Activity 重建，
+     * 而 syncResultSeq 在 ViewModel 里跨重建保留 —— 用 remember 的话重建后
+     * lastToastSeq 回到 0，上一次的同步提示会再弹一遍。
+     */
+    var lastToastSeq by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
     LaunchedEffect(state.syncResultSeq) {
         if (state.syncResultSeq > lastToastSeq) {
             lastToastSeq = state.syncResultSeq
@@ -700,6 +716,22 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 notifyGranted = notifyOk,
                 onRequestNotify = {
                     askNotify.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                },
+                reminderEnhanced = vm.classReminderEnhanced,
+                onReminderEnhancedChange = { vm.toggleReminderEnhanced(it) },
+                exactAlarmGranted = exactOk,
+                onRequestExactAlarm = {
+                    // Android 12+ 才有这个设置页；回来时 ON_RESUME 会刷新 exactOk 并自动重排
+                    if (android.os.Build.VERSION.SDK_INT >= 31) {
+                        runCatching {
+                            ctx0.startActivity(
+                                android.content.Intent(
+                                    android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                                    android.net.Uri.parse("package:${ctx0.packageName}"),
+                                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        }
+                    }
                 },
             )
         }

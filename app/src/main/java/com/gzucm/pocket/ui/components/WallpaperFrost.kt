@@ -3,22 +3,21 @@ package com.gzucm.pocket.ui.components
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
@@ -85,13 +84,27 @@ fun rememberBlurredWallpaper(
     maxDim: Int = 200,
     radius: Int = 3,
 ): ImageBitmap? {
-    if (path.isNullOrBlank()) return null
-    val file = remember(path) { File(path) }
-    if (!file.exists()) return null
-
-    return remember(path, file.length(), maxDim, radius) {
-        runCatching { blurFile(path, maxDim, radius)?.asImageBitmap() }.getOrNull()
+    /*
+     * 解码 + 模糊放后台线程（2026-11-06）。
+     *
+     * 原来是 `remember { blurFile(...) }`，在**组合阶段、主线程**同步执行：
+     * 进课表页、换壁纸那一帧要等解码完，能卡一下。
+     * 现在先返回 null（格子退回纯课程色，不影响布局），算好了再出现磨砂。
+     *
+     * key 里带文件长度：换图时文件名本来就会变（见 ScheduleScreen 选图），
+     * 长度只是双保险。
+     */
+    val len = if (path.isNullOrBlank()) -1L else File(path).length()
+    val result by produceState<ImageBitmap?>(null, path, len, maxDim, radius) {
+        value = if (path.isNullOrBlank() || len <= 0L) {
+            null
+        } else {
+            withContext(Dispatchers.IO) {
+                runCatching { blurFile(path, maxDim, radius)?.asImageBitmap() }.getOrNull()
+            }
+        }
     }
+    return result
 }
 
 private fun blurFile(path: String, maxDim: Int, radius: Int): Bitmap? {
@@ -236,20 +249,94 @@ fun Modifier.frostedBackdrop(
     // 开关关掉就什么都不画，调用方照常叠课程色
     if (!LocalCellFrostEnabled.current) return this
     val wall = LocalWallpaperBounds.current ?: return this
-    var self by remember { mutableStateOf<Rect?>(null) }
 
-    return this
-        .onGloballyPositioned { self = it.boundsInRoot() }
-        .drawWithContent {
-            val r = self
-            if (r != null) {
-                drawFrostedRegion(bitmap, wall, r, alpha)
-                if (veil > 0f) {
-                    drawRect(color = veilColor, alpha = veil.coerceIn(0f, 1f))
-                }
+    /*
+     * ## 为什么不再用 onGloballyPositioned + mutableStateOf（2026-11-06 修「磨砂跟不上」）
+     *
+     * 原来：布局后回调把位置写进 state → 绘制时读 state。时序是
+     *
+     *   第 N 帧：布局（格子已滚到新位置）→ 绘制（读到的还是第 N-1 帧的位置）→ 回调写入新值
+     *   第 N+1 帧：因为 state 变了才重画，这时才对齐
+     *
+     * 所以磨砂块**永远比格子晚一帧**，滑得越快错位越大；而且滚动时每个格子每帧都写一次
+     * state，几十个格子一起触发重组，中端机上就是卡顿。
+     *
+     * 现在改成 Modifier.Node（见 [FrostedBackdropNode]）：放置时记坐标、位置变了只失效
+     * **这一格的绘制**，绘制时当场取 boundsInRoot。不经过 state，不触发重组。
+     */
+    return this then FrostedBackdropElement(bitmap, wall, alpha, veil, veilColor)
+}
+
+/**
+ * 磨砂的 Modifier.Node 实现。
+ *
+ * 为什么不能只「在绘制时取坐标」：verticalScroll / HorizontalPager 滚动时，
+ * 子节点是在**放置层**挪位置（带 layer 的 place），RenderNode 直接平移，
+ * **不保证重新执行 draw**。不重画的话贴的还是上一帧抠下来的那块，照样错位。
+ *
+ * 所以要在「位置真的变了」的时候主动 [invalidateDraw]：
+ *   · [onPlaced] / [onRemeasured] 拿到新坐标（每次放置都会回调，包括滚动）
+ *   · 和上次画的位置比，变了才失效 —— 静止时零开销
+ *   · invalidateDraw 只重跑这一格的绘制，**不触发重组**，比原来写 mutableStateOf 便宜得多
+ */
+private data class FrostedBackdropElement(
+    val bitmap: ImageBitmap,
+    val wall: Rect,
+    val alpha: Float,
+    val veil: Float,
+    val veilColor: androidx.compose.ui.graphics.Color,
+) : androidx.compose.ui.node.ModifierNodeElement<FrostedBackdropNode>() {
+
+    override fun create() = FrostedBackdropNode(bitmap, wall, alpha, veil, veilColor)
+
+    override fun update(node: FrostedBackdropNode) {
+        node.bitmap = bitmap
+        node.wall = wall
+        node.alpha = alpha
+        node.veil = veil
+        node.veilColor = veilColor
+        node.lastDrawn = null
+        node.invalidateDraw()
+    }
+
+    override fun androidx.compose.ui.platform.InspectorInfo.inspectableProperties() {
+        name = "frostedBackdrop"
+    }
+}
+
+private class FrostedBackdropNode(
+    var bitmap: ImageBitmap,
+    var wall: Rect,
+    var alpha: Float,
+    var veil: Float,
+    var veilColor: androidx.compose.ui.graphics.Color,
+) : androidx.compose.ui.Modifier.Node(),
+    androidx.compose.ui.node.DrawModifierNode,
+    androidx.compose.ui.node.LayoutAwareModifierNode {
+
+    private var coords: androidx.compose.ui.layout.LayoutCoordinates? = null
+
+    /** 上次实际用来抠图的位置；和当前位置不同才需要重画 */
+    var lastDrawn: Rect? = null
+
+    override fun onPlaced(coordinates: androidx.compose.ui.layout.LayoutCoordinates) {
+        coords = coordinates
+        val now = runCatching { coordinates.boundsInRoot() }.getOrNull() ?: return
+        if (now != lastDrawn) invalidateDraw()
+    }
+
+    override fun androidx.compose.ui.graphics.drawscope.ContentDrawScope.draw() {
+        val c = coords
+        if (c != null && c.isAttached) {
+            val r = c.boundsInRoot()
+            lastDrawn = r
+            drawFrostedRegion(bitmap, wall, r, alpha)
+            if (veil > 0f) {
+                drawRect(color = veilColor, alpha = veil.coerceIn(0f, 1f))
             }
-            drawContent()
         }
+        drawContent()
+    }
 }
 
 private fun DrawScope.drawFrostedRegion(

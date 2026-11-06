@@ -95,6 +95,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         private set
 
     /**
+     * 电费同步失败后调用：把「待刷新」标记清掉，让 10 分钟冷却生效。
+     *
+     * 原来失败分支只记了尝试时间，powerDirty 还是 true；进电费页的判定是
+     * `powerDirty || needsAutoSync(...)`，冷却被短路 —— 结果每次切到电费页都重新弹窗。
+     * 用户手动点「同步」会重新打标记，不影响主动刷新。
+     */
+    fun onPowerSyncFailed() {
+        powerDirty = false
+    }
+
+    /**
      * 当前学段。登录页要用它决定默认选哪个 tab，
      * 页面标题也靠它区分「本科生 / 研究生」。
      */
@@ -256,15 +267,49 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             store.classLeadBreak = classLeadBreak
         }
         // 改了提前量要立刻重排，不然今天已排的还是旧时间
-        val sem = state.semester
-        val ses = state.sessions
-        if (sem != null && ses.isNotEmpty()) {
+        reschedule()
+    }
+
+    /**
+     * 增强提醒（setAlarmClock）。默认关，需要用户自己打开。
+     *
+     * 打开后状态栏会有闹钟图标，换来的是 ColorOS / HyperOS 省电策略基本推迟不了它。
+     */
+    var classReminderEnhanced by mutableStateOf(Graph.store.classReminderEnhanced)
+        private set
+
+    // 不叫 setClassReminderEnhanced：会和上面属性自动生成的 setter 撞 JVM 签名
+    fun toggleReminderEnhanced(on: Boolean) {
+        classReminderEnhanced = on
+        store.classReminderEnhanced = on
+        reschedule()
+    }
+
+    /** 当前能否排精确闹钟（Android 12+ 需用户授权）。设置页用它决定要不要提示去开 */
+    fun canExactAlarm(): Boolean = ClassReminder.canExact(getApplication())
+
+    /** 用户刚在系统设置里开了「闹钟和提醒」：把非精确的那批换成精确的 */
+    fun onExactAlarmGranted() = reschedule()
+
+    /**
+     * 按当前状态重排提醒。所有入口统一走这里，保证提前量 / 增强开关一定带上。
+     *
+     * 排闹钟要反序列化不了什么，但会碰 SharedPreferences 和 AlarmManager 的 binder 调用，
+     * 几十条也就几毫秒；放 IO 只是为了不在点开关的那一帧里做系统调用。
+     */
+    private fun reschedule(
+        sem: Semester? = state.semester,
+        ses: List<CourseSession> = state.sessions,
+    ) {
+        if (sem == null || ses.isEmpty()) return
+        val enabled = store.classReminderEnabled
+        val free = classLeadFree
+        val brk = classLeadBreak
+        val enhanced = classReminderEnhanced
+        viewModelScope.launch(Dispatchers.IO) {
             runCatching {
-                ClassReminder.scheduleAll(
-                    getApplication(), sem, ses, store.classReminderEnabled,
-                    classLeadFree, classLeadBreak,
-                )
-            }
+                ClassReminder.scheduleAll(getApplication(), sem, ses, enabled, free, brk, enhanced)
+            }.onFailure { android.util.Log.w("ClassReminder", "重排失败", it) }
         }
     }
 
@@ -286,18 +331,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun setClassReminder(enabled: Boolean) {
         classReminderOn = enabled
         store.classReminderEnabled = enabled
-        val sem = state.semester
-        val ses = state.sessions
-        if (sem != null && ses.isNotEmpty()) {
-            runCatching {
-                ClassReminder.scheduleAll(
-                    getApplication(), sem, ses, enabled, classLeadFree, classLeadBreak,
-                )
+        if (!enabled) {
+            // 关掉时即使课表没加载也要取消干净（包括每日续命任务）
+            viewModelScope.launch(Dispatchers.IO) {
+                runCatching {
+                    ClassReminder.cancelScheduled(getApplication())
+                    com.gzucm.pocket.core.ReminderRefreshWorker.cancel(getApplication())
+                }
             }
+            return
         }
+        reschedule()
     }
 
     private val store = Graph.store
+
+    /**
+     * 正在跑的那份同步。**必须声明在 init 之前**：init 里 bootstrap() 就会调
+     * syncQuietly()，Kotlin 按声明顺序初始化属性，放在后面的话那一刻它还没被赋初值，
+     * 之后执行到声明处又会被重置成 null —— 刚起的 Job 引用就丢了，防重入形同虚设。
+     */
+    private var syncJob: kotlinx.coroutines.Job? = null
 
     /** 当前周（1 起）。用户可手动校正，默认为按校历推算。 */
     var currentWeek by mutableStateOf(1)
@@ -348,6 +402,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 // +1：fetchWeeksExcept 会多抓一周（最后一周的周日落在教务下一周）
                 progressTotal = cachedSemester.totalWeeks + 1,
             )
+            /*
+             * 一打开就按缓存重排提醒，**不等联网同步**。
+             *
+             * App 被系统强停后（ColorOS 后台清理常见），闹钟全没了；用户打开 App
+             * 时如果网络不好或会话过期，同步那一步就走不到 reschedule —— 提醒继续断着。
+             * 先拿缓存排上，同步成功后会再排一次。
+             */
+            reschedule(cachedSemester, cachedSessions)
         }
         viewModelScope.launch {
             /*
@@ -572,25 +634,28 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // ── 同步 ────────────────────────────────────────────────────────────
 
     fun sync() {
-        if (state.syncing) return
-        // 研究生学段走另一套接口，没有电费
-        if (store.campus == Campus.GRADUATE) {
-            viewModelScope.launch { doSyncGraduate(manual = true) }
-            return
-        }
+        if (state.syncing || syncJob?.isActive == true) return
         // 手动同步 = 课表 + 电费一起刷；电费要等用户进电费页才能取（会话在 WebView 里），
-        // 所以这里只打标记，不做无用的后台请求
-        powerDirty = true
-        viewModelScope.launch { doSync(manual = true) }
+        // 所以这里只打标记，不做无用的后台请求。研究生没有电费，不打标记
+        if (store.campus != Campus.GRADUATE) powerDirty = true
+        launchSync(manual = true)
     }
 
-    private fun syncQuietly() {
-        if (store.campus == Campus.GRADUATE) {
-            viewModelScope.launch { doSyncGraduate() }
-            return
+    /**
+     * 同时只跑一份同步（[syncJob] 声明在 init 之前，见那边的说明）。
+     *
+     * 原来 bootstrap、onJwReady、手动刷新、切回前台都能各自起一份 doSync，
+     * 两份并发时都在写 state 和缓存，后完成的覆盖先完成的；进度条也会来回跳。
+     * 已经在跑就直接返回 —— 手动刷新时正在跑的那份结束后结果一样是新的。
+     */
+    private fun launchSync(manual: Boolean) {
+        if (syncJob?.isActive == true) return
+        syncJob = viewModelScope.launch {
+            if (store.campus == Campus.GRADUATE) doSyncGraduate(manual) else doSync(manual)
         }
-        viewModelScope.launch { doSync() }
     }
+
+    private fun syncQuietly() = launchSync(manual = false)
 
     // ── 研究生同步 ────────────────────────────────────────────────
     /*
@@ -630,11 +695,29 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
             // ② 逐周抓，进度实时更新
             val all = ArrayList<CourseSession>(256)
+            var failedWeeks = 0
+            var authError: Throwable? = null
             for (w in 1..weeks) {
-                val one = withContext(Dispatchers.IO) { Yjs.fetchWeek(term.code, w) }
-                all.addAll(one)
+                /*
+                 * 逐周容错（和本科 Jw.fetchWeeksExcept 对齐）。
+                 *
+                 * 原来任何一周解析失败（某周数据格式异常）就整次同步报错，
+                 * 其它 19 周白抓。现在只有登录失效才中止 —— 那种情况后面每周都会失败，
+                 * 没必要再打 19 次请求。
+                 */
+                val one = withContext(Dispatchers.IO) {
+                    runCatching { Yjs.fetchWeek(term.code, w) }
+                }
+                one.onSuccess { all.addAll(it) }
+                    .onFailure { e ->
+                        failedWeeks++
+                        android.util.Log.w("Sync", "研究生第 $w 周抓取失败", e)
+                        if (e is NetError.Unauthorized) authError = e
+                    }
+                authError?.let { throw it }
                 state = state.copy(progressDone = w)
             }
+            if (failedWeeks > 0) android.util.Log.w("Sync", "研究生课表 $failedWeeks 周失败，已跳过")
             // 跨周去重
             val seen = HashSet<String>(all.size)
             val sessions = all.filter { s ->
@@ -674,6 +757,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 kotlinx.serialization.builtins.ListSerializer(CourseSession.serializer()),
                 sessions,
             )
+            // 原来研究生同步完从不排提醒 —— 研究生开着「上课提醒」也收不到
+            reschedule(semester, sessions)
 
             val week = semester.weekOf(LocalDate.now()).coerceIn(1, semester.totalWeeks)
             currentWeek = week
@@ -778,12 +863,31 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
         // ── 第二阶段：补齐其余周，边到边更新进度 ────────────────────
         val week = first.getOrThrow().second
-        val restSessions = withContext(Dispatchers.IO) {
-            runCatching {
-                Jw.fetchWeeksExcept(semester, week) { done ->
-                    state = state.copy(progressDone = done + 1)
-                }
-            }.getOrDefault(emptyList())
+        /*
+         * 进度回调来自 5 个并发的 IO 线程。原来在回调里直接 `state = state.copy(...)`：
+         *   · 多线程同时对整个 UiState 做读改写，后写的会把先写的、以及主线程同期写的
+         *     其它字段（电费、成绩、message）整体回滚
+         *   · 在非主线程写 Compose state，快照系统虽不崩，但会和主线程的写入冲突
+         * 改成只往一个原子计数器里写，主线程按节拍读出来更新进度条。
+         */
+        val progress = java.util.concurrent.atomic.AtomicInteger(0)
+        val ticker = viewModelScope.launch {
+            while (true) {
+                val d = progress.get()
+                if (d + 1 > state.progressDone) state = state.copy(progressDone = d + 1)
+                kotlinx.coroutines.delay(120)
+            }
+        }
+        val restSessions = try {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    Jw.fetchWeeksExcept(semester, week) { done ->
+                        progress.accumulateAndGet(done) { a, b -> maxOf(a, b) }
+                    }
+                }.getOrDefault(emptyList())
+            }
+        } finally {
+            ticker.cancel()
         }
 
         val sessions = withContext(Dispatchers.Default) {
@@ -801,13 +905,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             store.lastSyncAt = System.currentTimeMillis()
             store.loginExpiredNotifiedDate = null
             loginExpired = false
-            // 课表变了就重排提醒（只排未来 3 天，代价很小）
-            runCatching {
-                ClassReminder.scheduleAll(
-                    getApplication(), semester, sessions, store.classReminderEnabled,
-                    classLeadFree, classLeadBreak,
-                )
-            }
+            // 课表变了就重排提醒（未来 7 天，代价很小）
+            reschedule(semester, sessions)
             state = state.copy(
                 phase = Phase.Ready,
                 semester = semester,
@@ -851,14 +950,36 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             gradesLoading = true, message = null,
             gradesDone = 0, gradesTotal = 3, gradesStage = "课程成绩",
         )
+        /*
+         * 研究生走自己的接口（2026-11-06 修）。
+         *
+         * 原来这里不分学段，研究生也去调本科的 Jw.fetch*。两套系统 cookie 不通用，
+         * 本科接口必然 Unauthorized → 下面把 loginExpired 置 true → 成绩页显示
+         * 「登录状态掉了」。而 Yjs.fetchGrades 早就写好了，只是没人调用。
+         * 研究生没有等级考试 / 体测这两项，只拉一次。
+         */
+        val graduate = store.campus == Campus.GRADUATE
+        if (graduate) state = state.copy(gradesTotal = 1)
+
         viewModelScope.launch {
-            val r = withContext(Dispatchers.IO) {
-                runCatching {
-                    val grades = Jw.fetchCourseGrades()
+            /*
+             * 进度在主线程更新。原来是在 IO 线程里直接 `state = state.copy(...)`：
+             * copy 基于读到的旧快照，主线程这期间写的 power / message 等字段会被整体回滚。
+             */
+            val r = runCatching {
+                if (graduate) {
+                    val grades = withContext(Dispatchers.IO) { Yjs.fetchGrades() }
+                    Triple(grades, emptyList<LevelGrade>(), emptyList<FitnessGrade>())
+                } else {
+                    val grades = withContext(Dispatchers.IO) { Jw.fetchCourseGrades() }
                     state = state.copy(gradesDone = 1, gradesStage = "等级成绩")
-                    val levels = runCatching { Jw.fetchLevelGrades() }.getOrDefault(emptyList())
+                    val levels = withContext(Dispatchers.IO) {
+                        runCatching { Jw.fetchLevelGrades() }.getOrDefault(emptyList())
+                    }
                     state = state.copy(gradesDone = 2, gradesStage = "体测成绩")
-                    val fitness = runCatching { Jw.fetchFitness() }.getOrDefault(emptyList())
+                    val fitness = withContext(Dispatchers.IO) {
+                        runCatching { Jw.fetchFitness() }.getOrDefault(emptyList())
+                    }
                     Triple(grades, levels, fitness)
                 }
             }
@@ -879,7 +1000,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 state = state.copy(
                     grades = g, levels = l, fitness = f,
                     gradesLoading = false,
-                    gradesDone = 3, gradesStage = null,
+                    gradesDone = state.gradesTotal, gradesStage = null,
                 )
             }.onFailure { e ->
                 // 进成绩页也会单独打三个请求；这里失败同样说明会话可能掉了，

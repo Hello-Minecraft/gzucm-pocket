@@ -122,4 +122,111 @@ class ClassReminderTest {
         assertTrue(at < start)
         assertEquals(20L * 60_000L, start - at)
     }
+
+    // ── 调度（2026-11-06：3 天 → 7 天、稳定 requestCode）─────────────────
+
+    /** 2026-10-26 是周一，作为第 1 周 */
+    private val sem = com.gzucm.pocket.core.Semester.of(
+        code = "202601", name = "测试学期",
+        firstMonday = LocalDate.of(2026, 10, 26), totalWeeks = 20,
+    )
+
+    private fun millisAt(d: LocalDate, hhmm: String) = ClassReminder.at(d, hhmm)!!
+
+    @Test
+    fun `requestCode 在一学期内两两不同`() {
+        // 原编码 weekday*1000+startUnit*10+day：周一第1节11号 与 周一第2节1号 都是 1021
+        val seen = HashMap<Int, Pair<LocalDate, Int>>()
+        var d = LocalDate.of(2026, 9, 1)
+        repeat(400) {
+            for (unit in 1..14) {
+                val c = ClassReminder.requestCode(d, unit)
+                val prev = seen.put(c, d to unit)
+                assertEquals("撞车：$prev 与 ${d to unit}", null, prev)
+            }
+            d = d.plusDays(1)
+        }
+    }
+
+    @Test
+    fun `requestCode 恒为非负`() {
+        // PendingIntent 的 requestCode 和通知 ID 都会用到它，负数会让通知 ID 计算出错
+        var d = LocalDate.of(2020, 1, 1)
+        repeat(365 * 30) {
+            assertTrue(ClassReminder.requestCode(d, 14) >= 0)
+            d = d.plusDays(1)
+        }
+    }
+
+    @Test
+    fun `计划覆盖未来 7 天 不止 3 天`() {
+        // 第 1 周每天第 1 节 08:00 都有课
+        val sessions = (1..7).map { wd ->
+            s("课$wd", "08:00", "09:40", weekday = wd).copy(week = 1)
+        }
+        val today = LocalDate.of(2026, 10, 26) // 周一
+        val now = millisAt(today, "06:00")
+        val plans = ClassReminder.plan(sem, sessions, today, now)
+        assertEquals(7, plans.size)
+        // 第 7 天（周日）那条也在
+        assertTrue(plans.any { it.session.weekday == 7 })
+    }
+
+    @Test
+    fun `已经过了的提醒不排`() {
+        val sessions = listOf(
+            s("早八", "08:00", "09:40", weekday = 1).copy(week = 1),
+            s("下午", "14:00", "15:40", weekday = 1, startUnit = 5, endUnit = 6).copy(week = 1),
+        )
+        val today = LocalDate.of(2026, 10, 26)
+        // 现在 10 点：早八的 07:40 提醒已过，只排下午那条
+        val plans = ClassReminder.plan(sem, sessions, today, millisAt(today, "10:00"))
+        assertEquals(listOf("下午"), plans.map { it.session.name })
+    }
+
+    @Test
+    fun `跨周时按每天自己的周次取课`() {
+        // 第 1 周周日有课、第 2 周周一有课；今天是第 1 周周日
+        val sessions = listOf(
+            s("周日课", "08:00", "09:40", weekday = 7).copy(week = 1),
+            s("下周一", "08:00", "09:40", weekday = 1).copy(week = 2),
+            // 干扰项：第 1 周周一的课不该出现在「下周一」那天
+            s("上周一", "08:00", "09:40", weekday = 1).copy(week = 1),
+        )
+        val sunday = LocalDate.of(2026, 11, 1)
+        val plans = ClassReminder.plan(sem, sessions, sunday, millisAt(sunday, "06:00"))
+        assertEquals(listOf("周日课", "下周一"), plans.map { it.session.name })
+    }
+
+    @Test
+    fun `同一天同一节两门课只排一条 不产生重复 code`() {
+        val sessions = listOf(
+            s("甲", "08:00", "09:40", weekday = 1).copy(week = 1),
+            s("乙", "08:00", "09:40", weekday = 1).copy(week = 1),
+        )
+        val today = LocalDate.of(2026, 10, 26)
+        val plans = ClassReminder.plan(sem, sessions, today, millisAt(today, "06:00"))
+        assertEquals(1, plans.size)
+        assertEquals(plans.size, plans.map { it.code }.toSet().size)
+    }
+
+    @Test
+    fun `学期外的日期不排`() {
+        val sessions = listOf(s("课", "08:00", "09:40", weekday = 1).copy(week = 1))
+        val before = LocalDate.of(2026, 10, 1) // 学期开始前
+        assertTrue(ClassReminder.plan(sem, sessions, before, millisAt(before, "06:00")).isEmpty())
+    }
+
+    @Test
+    fun `计划里的提前量与提醒时刻一致`() {
+        // 防止 remindAt 与 leadFor 再次分叉：通知写的「N 分钟后」必须等于实际提前量
+        val a = s("早八", "08:00", "09:40", weekday = 1, startUnit = 1, endUnit = 2).copy(week = 1)
+        val b = s("三四节", "10:00", "11:40", weekday = 1, startUnit = 3, endUnit = 4).copy(week = 1)
+        val today = LocalDate.of(2026, 10, 26)
+        val plans = ClassReminder.plan(sem, listOf(a, b), today, millisAt(today, "06:00"))
+        for (p in plans) {
+            val start = millisAt(today, p.session.startTime)
+            assertEquals(p.lead * 60_000L, start - p.whenAt)
+        }
+    }
 }

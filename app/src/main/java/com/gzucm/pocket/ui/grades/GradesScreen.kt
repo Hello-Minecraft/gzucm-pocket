@@ -19,7 +19,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -316,10 +316,10 @@ private fun CourseTab(
                     item(key = "h_$term") {
                         TermHeader(term, list)
                     }
-                    items(
+                    itemsIndexed(
                         items = sortedByTerm[term].orEmpty(),
-                        key = { g -> "$term|${g.name}|${g.credit}" },
-                    ) { g ->
+                        key = { i, g -> "$term|$i|${g.name}|${g.credit}" },
+                    ) { _, g ->
                         GradeRow(g)
                     }
                     item(key = "s_$term") { Spacer(Modifier.height(14.dp)) }
@@ -370,11 +370,12 @@ private fun CourseTab(
                 item(key = "h_$term") {
                     TermHeader(term, list)
                 }
-                items(
+                itemsIndexed(
                     items = sortedByTerm[term].orEmpty(),
-                    // 稳定的 key 让 LazyColumn 能复用 item，滚动时不重建
-                    key = { g -> "$term|${g.name}|${g.credit}" },
-                ) { g ->
+                    // 稳定的 key 让 LazyColumn 能复用 item，滚动时不重建；
+                    // 带下标是因为同学期可能有同名同学分的课（重修/补考），重复 key 会崩
+                    key = { i, g -> "$term|$i|${g.name}|${g.credit}" },
+                ) { _, g ->
                     GradeRow(g)
                 }
                 item(key = "s_$term") { Spacer(Modifier.height(14.dp)) }
@@ -711,10 +712,12 @@ private fun GpaTrendCard(grades: List<CourseGrade>) {
                 .fillMaxWidth()
                 .height(150.dp)
                 .pointerInput(series) {
+                    // 与绘制保持一致：x = leftPad(8) + stepX * i，stepX = (w - 8 - 10) / (n - 1)
                     fun pick(x: Float, w: Int) {
                         if (series.size < 2 || w <= 0) return
-                        val step = w / (series.size - 1).toFloat()
-                        sel = (x / step).roundToInt().coerceIn(0, series.lastIndex)
+                        val step = (w - 8f - 10f) / (series.size - 1)
+                        if (step <= 0f) return
+                        sel = ((x - 8f) / step).roundToInt().coerceIn(0, series.lastIndex)
                     }
                     detectHorizontalDragGestures(
                         onDragStart = { off -> pick(off.x, size.width) },
@@ -724,8 +727,9 @@ private fun GpaTrendCard(grades: List<CourseGrade>) {
                 .pointerInput(series) {
                     detectTapGestures { off ->
                         if (series.size < 2) return@detectTapGestures
-                        val step = size.width / (series.size - 1).toFloat()
-                        val i = (off.x / step).roundToInt().coerceIn(0, series.lastIndex)
+                        val step = (size.width - 8f - 10f) / (series.size - 1)
+                        if (step <= 0f) return@detectTapGestures
+                        val i = ((off.x - 8f) / step).roundToInt().coerceIn(0, series.lastIndex)
                         sel = if (sel == i) -1 else i
                     }
                 },
@@ -990,7 +994,7 @@ private fun LevelTab(
         ),
         verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
-        items(levels.reversed(), key = { it.name + it.term + it.date }) { l ->
+        itemsIndexed(levels.reversed(), key = { i, l -> "$i|" + l.name + l.term + l.date }) { _, l ->
             Column(
                 Modifier
                     .fillMaxWidth()
@@ -1056,7 +1060,7 @@ private fun FitnessTab(
         ),
         verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
-        items(fitness.reversed(), key = { it.term + it.total }) { f ->
+        itemsIndexed(fitness.reversed(), key = { i, f -> "$i|" + f.term + f.total }) { _, f ->
             Column(
                 Modifier
                     .fillMaxWidth()

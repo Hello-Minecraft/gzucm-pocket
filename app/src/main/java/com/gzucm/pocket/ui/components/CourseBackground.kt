@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.FilterQuality
@@ -36,23 +37,35 @@ fun CourseBackground(
     useBlurred: Boolean = false,
 ) {
     if (path.isNullOrBlank()) return
-    val file = remember(path) { File(path) }
-    if (!file.exists()) return
+    val len = remember(path) { File(path).length() }
+    if (len <= 0L) return
 
-    val sharp = remember(path, file.length()) {
-        runCatching {
-            // 先读尺寸再按半分辨率解码，避免大图 OOM
-            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(path, opts)
-            val sample = when {
-                opts.outWidth > 2000 || opts.outHeight > 2000 -> 2
-                else -> 1
-            }
-            BitmapFactory.decodeFile(
-                path,
-                BitmapFactory.Options().apply { inSampleSize = sample },
-            )?.asImageBitmap()
-        }.getOrNull()
+    /*
+     * 原图解码放后台线程（2026-11-06）。原来在组合阶段主线程解码几 MB 的图，
+     * 进课表页那一帧会顿一下。解出来之前先不画（底下是主题背景色，不会闪白）。
+     *
+     * 开了「全屏背景模糊」并且模糊图已就绪时，压根不需要原图 —— 跳过解码。
+     */
+    val needSharp = !(useBlurred && blurred != null)
+    val sharp by androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+        null, path, len, needSharp,
+    ) {
+        if (!needSharp) return@produceState
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                // 先读尺寸再按半分辨率解码，避免大图 OOM
+                val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(path, opts)
+                val sample = when {
+                    opts.outWidth > 2000 || opts.outHeight > 2000 -> 2
+                    else -> 1
+                }
+                BitmapFactory.decodeFile(
+                    path,
+                    BitmapFactory.Options().apply { inSampleSize = sample },
+                )?.asImageBitmap()
+            }.getOrNull()
+        }
     }
 
     // 开了模糊且糊好的图可用，就不必解原图了

@@ -540,6 +540,23 @@ fun LoginScreen(
                         }
                     },
                     update = { webRef = it },
+                    /*
+                     * 离开组合时销毁 WebView（2026-11-06）。
+                     *
+                     * 原来不销毁：WebView 持有 Activity Context，登录页每进一次就泄漏一个，
+                     * 后台还在跑页面里的 JS 和定时器。切学段（key(campus) 变）也会新建一个，
+                     * 旧的同样要销毁。cookie 由 CookieManager 管，destroy 不影响已登录状态。
+                     */
+                    onRelease = { w ->
+                        if (webRef === w) webRef = null
+                        runCatching {
+                            w.stopLoading()
+                            w.webViewClient = android.webkit.WebViewClient()
+                            w.webChromeClient = null
+                            (w.parent as? android.view.ViewGroup)?.removeView(w)
+                            w.destroy()
+                        }
+                    },
                 )
                 } // key(campus)
             }

@@ -59,9 +59,12 @@ object Ecard {
         return out.sortedBy { it.date }
     }
 
-    /** 从任意字符串里抽出第一个数字，抽不到返回 0.0。容忍「3.23度」「剩余电量：3.23」 */
+    /**
+     * 从任意字符串里抽出第一个数字，抽不到返回 0.0。容忍「3.23度」「剩余电量：3.23」。
+     * 允许一个前导负号：欠费时余额是负数（「-2.50度」），不能吞掉符号显示成正数。
+     */
     private fun numOf(s: String): Double =
-        Regex("""([\d]+(?:\.[\d]+)?)""").find(s)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
+        Regex("""(-?[\d]+(?:\.[\d]+)?)""").find(s)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
 
     /**
      * 从电费页 HTML 里取余额。纯函数，可测。
@@ -81,7 +84,8 @@ object Ecard {
             .firstOrNull { it.isNotBlank() }
             .orEmpty()
 
-        val num = Regex("""([\d.]+)""").find(tips)?.groupValues?.get(1).orEmpty()
+        // 可选前导负号：欠费时页面显示「剩余电量：-2.50度」
+        val num = Regex("""(-?[\d.]+)""").find(tips)?.groupValues?.get(1).orEmpty()
 
         val token = Regex("""var token\s*=\s*['"]([A-Za-z0-9]+)['"]""")
             .find(html)?.groupValues?.get(1).orEmpty()

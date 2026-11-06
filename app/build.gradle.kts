@@ -17,8 +17,8 @@ android {
         targetSdk = 35
         // versionCode 由 versionName 推出：主*10000 + 次*100 + 修订
         // 1.2.5 → 10205。改版本名必须同步改 code，VersionTest 会校验。
-        versionCode = 10303
-        versionName = "1.3.3"
+        versionCode = 10304
+        versionName = "1.3.4"
         resourceConfigurations += listOf("zh", "en")
     }
 
