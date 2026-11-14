@@ -306,6 +306,91 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
     }
 
     var detail by remember { mutableStateOf<CourseSession?>(null) }
+    /**
+     * 正在看的考试详情（null = 没打开）。
+     *
+     * 三个面板（日程列表 / 日程编辑 / 考试详情）互斥打开 —— 手机端每个
+     * AdaptiveSheet 都是一个 Dialog 窗口，同时叠两个就会出
+     * 「窗口关不掉、整屏点不动」那种事。
+     */
+    var selectedExam by remember { mutableStateOf<com.gzucm.pocket.core.ExamItem?>(null) }
+
+    /*
+     * 日程面板状态放在 RootScreen 一层（不放在 ScheduleScreen 里）：
+     * 今日页和课表页都能点日程，切 Tab 不该把编辑到一半的内容丢掉。
+     */
+    var showAgendaList by remember { mutableStateOf(false) }
+    var showAgendaEdit by remember { mutableStateOf(false) }
+    var editingAgenda by remember { mutableStateOf<com.gzucm.pocket.core.Agenda?>(null) }
+    var draftAgendaDate by remember { mutableStateOf<java.time.LocalDate?>(null) }
+    var draftAgendaMinute by remember { mutableStateOf<Int?>(null) }
+
+    /** 从一个展开实例找到它的原始规则，打开编辑 */
+    /*
+     * 课表里全部可点条目（日程 + 考试）。
+     *
+     * 详情面板的「重叠安排」切换条要靠它算同时段还有谁 ——
+     * 跟课程详情里那条「重叠课程」是一个意思，只是这里混了两种来源。
+     */
+    val allEntries = vm.agendaOccurrences(state.semester) + vm.examOccurrences(state.semester)
+
+    /** 当前正在看的那条（日程走 editingAgenda，考试走 selectedExam） */
+    val editingEntry = editingAgenda?.let { a -> allEntries.firstOrNull { it.sourceId == a.id } }
+    val selectedEntry = selectedExam?.let { e ->
+        val key = com.gzucm.pocket.core.EXAM_PREFIX + vm.examId(e)
+        allEntries.firstOrNull { it.sourceId == key }
+    }
+
+    fun overlapsOf(o: com.gzucm.pocket.core.AgendaOccurrence?): List<com.gzucm.pocket.core.AgendaOccurrence> {
+        if (o == null) return emptyList()
+        return allEntries.filter {
+            it.date == o.date && it.startMinute < o.endMinute && o.startMinute < it.endMinute
+        }
+    }
+
+    /** 详情面板里点另一条：按类型换面板，日程去编辑、考试去只读详情 */
+    fun switchEntry(o: com.gzucm.pocket.core.AgendaOccurrence) {
+        val prefix = com.gzucm.pocket.core.EXAM_PREFIX
+        if (o.sourceId.startsWith(prefix)) {
+            val id = o.sourceId.removePrefix(prefix)
+            selectedExam = state.exams.firstOrNull { vm.examId(it) == id }
+            showAgendaEdit = false
+            showAgendaList = true
+        } else {
+            editingAgenda = state.agenda.firstOrNull { it.id == o.sourceId }
+            draftAgendaDate = o.date
+            draftAgendaMinute = o.startMinute
+            showAgendaList = false
+            showAgendaEdit = true
+        }
+    }
+
+    fun openAgendaFromOccurrence(
+        o: com.gzucm.pocket.core.AgendaOccurrence,
+        rules: List<com.gzucm.pocket.core.Agenda>,
+        exams: List<com.gzucm.pocket.core.ExamItem>,
+    ) {
+        /*
+         * 考试和日程共用一种渲染条目，靠 sourceId 前缀分流：
+         * 考试 → 只读详情；日程 → 可编辑表单。
+         */
+        if (o.sourceId.startsWith(com.gzucm.pocket.core.EXAM_PREFIX)) {
+            val id = o.sourceId.removePrefix(com.gzucm.pocket.core.EXAM_PREFIX)
+            val hit = exams.firstOrNull { vm.examId(it) == id }
+            if (hit != null) {
+                // 同一个面板内切到详情：不新开 Dialog，返回键才不会把 App 退到桌面
+                selectedExam = hit
+                showAgendaList = true
+            }
+            return
+        }
+        editingAgenda = rules.firstOrNull { it.id == o.sourceId }
+        draftAgendaDate = o.date
+        draftAgendaMinute = o.startMinute
+        selectedExam = null
+        showAgendaEdit = true
+    }
+
     var showSettings by remember { mutableStateOf(false) }
     var showEcardSync by remember { mutableStateOf(false) }
     var showRebindGuide by remember { mutableStateOf(false) }
@@ -405,6 +490,9 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                             powerDaily = state.powerDaily,
                             powerCheckedAt = prefs.powerCheckedAt,
                             onCourseClick = { detail = it },
+                            agendaOccurrences = vm.agendaOccurrences(state.semester) +
+                                vm.examOccurrences(state.semester),
+                            onAgendaClick = { o -> openAgendaFromOccurrence(o, state.agenda, state.exams) },
                             onOpenPower = { tab = Tab.Power },
                             onOpenSettings = { showSettings = true },
                             onOpenLogin = {
@@ -430,6 +518,17 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                             syncing = state.syncing,
                             progressDone = state.progressDone,
                             progressTotal = state.progressTotal,
+                            agendaRules = state.agenda,
+                            agendaOccurrences = vm.agendaOccurrences(state.semester) +
+                                vm.examOccurrences(state.semester),
+                            onOpenAgendaList = { showAgendaList = true; selectedExam = null },
+                            onAgendaClick = { o -> openAgendaFromOccurrence(o, state.agenda, state.exams) },
+                            onAddAgenda = { date, minute ->
+                                editingAgenda = null
+                                draftAgendaDate = date
+                                draftAgendaMinute = minute
+                                showAgendaEdit = true
+                            },
                         )
 
                         Tab.Grades -> {
@@ -525,6 +624,68 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
             overlapGroup = group,
         )
     }
+
+    /*
+     * 自定义日程的两个面板。
+     *
+     * 常驻组合树、靠 visible 控制：包 if 会让 AdaptiveSheet 的进入动画
+     * 不播、退场时整棵子树被直接摘掉（项目里踩过三次）。
+     * 保存/删除只走 ViewModel，state.sessions 一个字都不动 ——
+     * 提醒排程、同步、缓存失效都看不到日程。
+     */
+    com.gzucm.pocket.ui.schedule.AgendaListSheet(
+        visible = showAgendaList,
+        semester = state.semester,
+        rules = state.agenda,
+        exams = state.exams,
+        examDetail = selectedExam,
+        onExamDetailClose = { selectedExam = null },
+        examOverlapEntries = overlapsOf(selectedEntry),
+        examCurrentKey = selectedEntry?.key ?: "",
+        onSwitchEntry = { switchEntry(it) },
+        onExamClick = { e -> selectedExam = e },
+        onAdd = { date, minute ->
+            editingAgenda = null
+            draftAgendaDate = date
+            draftAgendaMinute = minute
+            showAgendaEdit = true
+        },
+        onEdit = { rule ->
+            editingAgenda = rule
+            draftAgendaDate = null
+            draftAgendaMinute = null
+            showAgendaEdit = true
+        },
+        onDismiss = {
+            showAgendaList = false
+            selectedExam = null
+        },
+    )
+
+    com.gzucm.pocket.ui.schedule.AgendaEditSheet(
+        visible = showAgendaEdit,
+        semester = state.semester,
+        initial = editingAgenda,
+        draftDate = draftAgendaDate,
+        draftStartMinute = draftAgendaMinute,
+        onSave = { item ->
+            vm.saveAgenda(item)
+            showAgendaEdit = false
+            editingAgenda = null
+        },
+        overlapEntries = overlapsOf(editingEntry),
+        currentEntryKey = editingEntry?.key ?: "",
+        onSwitchEntry = { switchEntry(it) },
+        onDelete = { id ->
+            vm.deleteAgenda(id)
+            showAgendaEdit = false
+            editingAgenda = null
+        },
+        onDismiss = {
+            showAgendaEdit = false
+            editingAgenda = null
+        },
+    )
 
     com.gzucm.pocket.ui.power.EcardSyncSheet(
         visible = showEcardSync,

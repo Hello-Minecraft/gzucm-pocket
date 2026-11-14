@@ -42,7 +42,10 @@ import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.ViewAgenda
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Wallpaper
+import androidx.compose.material.icons.rounded.EventNote
 import androidx.compose.material3.Icon
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -66,6 +69,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.sp
+import com.gzucm.pocket.core.Agenda
+import com.gzucm.pocket.core.AgendaGeometry
+import com.gzucm.pocket.core.AgendaLogic
+import com.gzucm.pocket.core.AgendaOccurrence
 import com.gzucm.pocket.core.CourseSession
 import com.gzucm.pocket.core.SlotEndTimes
 import com.gzucm.pocket.core.SlotTimes
@@ -98,6 +105,19 @@ fun ScheduleScreen(
     syncing: Boolean = false,
     progressDone: Int = 0,
     progressTotal: Int = 0,
+    /**
+     * 用户自建日程。**刻意不合并进 [sessions]**：
+     * sessions 是教务整表，会被同步覆盖、被提醒排程读取；
+     * 日程独立传、独立画，两边互不干扰。
+     */
+    agendaRules: List<Agenda> = emptyList(),
+    agendaOccurrences: List<AgendaOccurrence> = emptyList(),
+    /** 顶部图标 → 日程管理列表 */
+    onOpenAgendaList: () -> Unit = {},
+    /** 点某条日程 → 编辑（传原始规则 id 对应的规则） */
+    onAgendaClick: (AgendaOccurrence) -> Unit = {},
+    /** 长按空白格 / 日视图加日程 → 新建（带预填的日期与起始分钟） */
+    onAddAgenda: (LocalDate, Int?) -> Unit = { _, _ -> },
 ) {
     if (semester == null) {
         EmptyHint("正在获取学期信息…")
@@ -111,6 +131,11 @@ fun ScheduleScreen(
     // 虚线网格：默认关，背景设置面板里可开
     var gridLines by remember { mutableStateOf(store.courseGridLines) }
     var showBgSheet by remember { mutableStateOf(false) }
+    /*
+     * 日程面板的显隐和草稿都放在 RootScreen 一层：
+     * 今日页点日程、课表页长按空白格，都要打开同一个编辑面板，
+     * 放在这里的话切 Tab 就把状态丢了。
+     */
     /*
      * 冲突排布固定用「层叠」。
      *
@@ -203,6 +228,8 @@ fun ScheduleScreen(
     }
     // 一次分组，避免每页都全量 filter
     val byWeek = remember(sessions) { sessions.groupBy { it.week } }
+    // 日程同样按周分组，但和 [byWeek] 完全分开，不混进课程列表
+    val agendaByWeek = remember(agendaOccurrences) { agendaOccurrences.groupBy { it.week } }
 
     val pagerState = rememberPagerState(
         initialPage = (viewingWeek - 1).coerceIn(0, totalWeeks - 1),
@@ -310,6 +337,8 @@ fun ScheduleScreen(
                 dayView = !dayView
                 store.courseDayView = dayView
             },
+            onOpenAgenda = onOpenAgendaList,
+            agendaCount = agendaRules.size,
         )
         Spacer(Modifier.height(10.dp))
         /*
@@ -335,7 +364,10 @@ fun ScheduleScreen(
                 week = shownWeek,
                 currentWeek = currentWeek,
                 sessions = sessions,
+                agendaOccurrences = agendaOccurrences,
                 onCourseClick = onCourseClick,
+                onAgendaClick = onAgendaClick,
+                onAddAgenda = { date, minute -> onAddAgenda(date, minute) },
                 onWeekChange = onWeekChange,
                 modifier = Modifier.weight(1f),
             )
@@ -374,6 +406,15 @@ fun ScheduleScreen(
                     rotations = rotations + (key to ((rotations[key] ?: 0) + 1))
                 },
                 onCourseClick = onCourseClick,
+                agendaForWeek = agendaByWeek[week].orEmpty(),
+                onAgendaClick = onAgendaClick,
+                onLongPressBlank = { wd, minute ->
+                    // 长按空白格：日期取当前查看的这一周的这一天，时间由 y 反推
+                    val date = semester.dateOf(week, wd)
+                    if (AgendaLogic.inSemester(semester, date)) {
+                        onAddAgenda(date, minute)
+                    }
+                },
                 isLoading = loadedWeeks != null && week !in loadedWeeks,
             )
         }
@@ -456,6 +497,11 @@ private fun WeekGrid(
     rotationSnapshot: Map<Int, Int> = emptyMap(),
     onRotateCluster: (Int) -> Unit = {},
     onCourseClick: (CourseSession) -> Unit,
+    /** 这一周的日程实例（已按学期展开），和课程列表并列传入，不合并 */
+    agendaForWeek: List<AgendaOccurrence> = emptyList(),
+    onAgendaClick: (AgendaOccurrence) -> Unit = {},
+    /** 长按空白格：(星期 1..7, 反推出来的起始分钟) */
+    onLongPressBlank: (Int, Int) -> Unit = { _, _ -> },
     isLoading: Boolean = false,
 ) {
     // 这一周还没拿到数据：别让用户对着一片空白以为课表坏了
@@ -507,6 +553,9 @@ private fun WeekGrid(
                             rotationSnapshot = rotationSnapshot,
                             onRotateCluster = onRotateCluster,
                             onCourseClick = onCourseClick,
+                            agendaForDay = agendaForWeek.filter { it.weekday == wd },
+                            onAgendaClick = onAgendaClick,
+                            onLongPressBlank = { minute -> onLongPressBlank(wd, minute) },
                         )
                     }
                 }
@@ -675,6 +724,10 @@ private fun WeekHeader(
     /** 当前是不是日视图。顶部按钮靠它决定图标 */
     dayView: Boolean = false,
     onToggleDayView: () -> Unit = {},
+    /** 打开日程管理列表 */
+    onOpenAgenda: () -> Unit = {},
+    /** 已有几条日程，用来在图标上加个小角标 */
+    agendaCount: Int = 0,
 ) {
     Row(
         Modifier
@@ -748,6 +801,31 @@ private fun WeekHeader(
                 contentDescription = if (dayView) "切换到周视图" else "切换到日视图",
                 tint = MaterialTheme.colorScheme.primary,
             )
+        }
+        /*
+         * 日程入口（D4-A）。
+         *
+         * 放在视图切换和背景之间：三个按钮一排，手机上 48dp × 3 = 144dp
+         * 还能给标题留够地方；平板上更宽裕。
+         * 有日程时给个小圆点，不用打开列表也知道里面有几条。
+         */
+        IconButton(onClick = onOpenAgenda) {
+            Box(contentAlignment = Alignment.TopEnd) {
+                Icon(
+                    Icons.Rounded.EventNote,
+                    contentDescription = "我的日程",
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                if (agendaCount > 0) {
+                    Box(
+                        Modifier
+                            .offset(x = 4.dp, y = (-2).dp)
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary),
+                    )
+                }
+            }
         }
         // 背景设置入口，就放在课表页，不用去总设置里翻
         IconButton(onClick = onOpenBg) {
@@ -831,6 +909,11 @@ private fun DayColumn(
     rotationSnapshot: Map<Int, Int> = emptyMap(),
     onRotateCluster: (Int) -> Unit = {},
     onCourseClick: (CourseSession) -> Unit,
+    /** 这一天的日程实例。独立一层画，不进 placeSessions */
+    agendaForDay: List<AgendaOccurrence> = emptyList(),
+    onAgendaClick: (AgendaOccurrence) -> Unit = {},
+    /** 长按空白格：回传由 y 反推的起始分钟 */
+    onLongPressBlank: (Int) -> Unit = {},
 ) {
     val slotIndex = remember(slots) { slots.withIndex().associate { it.value to it.index } }
     // 时间冲突的排布：默认错位叠压，可选并排分列
@@ -859,6 +942,9 @@ private fun DayColumn(
             .fillMaxHeight()
             .padding(horizontal = 1.5.dp),
     ) {
+        // 提前取出列宽：下面嵌套的 Box / forEach 里隐式接收者会变，读不到 maxWidth
+        val colWidth = maxWidth
+
         // 今天整列一条连续的淡色带（逐格画会断成一截一截）
         if (isToday) {
             Box(
@@ -869,6 +955,35 @@ private fun DayColumn(
                     .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.055f)),
             )
         }
+
+        /*
+         * 长按空白格就地新建日程（D4-B）。
+         *
+         * 这一层画在最底下：课程块 / 日程块都在它上面。短按时上层 clickable
+         * 先拿到 tap，这层不消费；长按超时后上层不会触发 tap，由这层接住。
+         * 所以「点格子看详情」和「长按空白新建」不会互相抢。
+         *
+         * 判空白：把 y 反推成分钟，落在任何课程 / 日程的时段里就不算空白。
+         */
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        Box(
+            Modifier
+                .fillMaxSize()
+                .pointerInput(placed, agendaForDay, slots) {
+                    detectTapGestures(onLongPress = { offset ->
+                        val row = with(density) { offset.y.toDp() }.value / cellHeight.value
+                        val minute = AgendaGeometry.rowToMinute(row, slots)
+                        val covered = placed.any { p ->
+                            minute >= com.gzucm.pocket.core.startMinutesOf(p.session) &&
+                                minute < com.gzucm.pocket.core.endMinutesOf(p.session)
+                        } || agendaForDay.any { o ->
+                            minute >= o.startMinute && minute < o.endMinute
+                        }
+                        if (!covered) onLongPressBlank(minute)
+                    })
+                },
+        )
+
         // 课程块：纵向按 startUnit 偏移、高度按跨节数；横向按冲突分列切开
         placed.forEach { p ->
             val s = p.session
@@ -952,6 +1067,172 @@ private fun DayColumn(
                 },
                 onClick = { onCourseClick(s) },
             )
+        }
+
+        /*
+         * 日程独立层（D3-A）。
+         *
+         * 不进 placeSessions、不改 slots：课程的分簇只看节次区间，把日程塞进去
+         * 会改变 cols，把原本能读的课名压成色标。这里单独按真实分钟插值画，
+         * zIndex 用 50 —— 压在课程块上面（课程块 z 是 0/1/2）、
+         * 但低于轮换按钮（99），冲突时两块都能看见、按钮也还点得到。
+         */
+        /*
+         * 时间重叠的日程/考试**层叠**画，规则和课程完全一致（placeSessions）：
+         *
+         *   手机 <840dp → 卡片层叠，上层右下缩 3dp，只有最上层显示完整内容；
+         *                 右下角一个 ⇄ 按钮轮换谁在上面
+         *   平板 ≥840dp → 一律并排 1/n，不显示按钮
+         *
+         * 用户同一天既建了「经典等级考」日程、教务又推了「中医经典知识Ⅱ级」考试，
+         * 两条时段完全相同 —— 必须能切换，不然下面那条永远看不到。
+         */
+        val agendaClusters = ArrayList<MutableList<AgendaOccurrence>>()
+        agendaForDay.forEach { o ->
+            val hit = agendaClusters.firstOrNull { cl ->
+                cl.any { it.startMinute < o.endMinute && o.startMinute < it.endMinute }
+            }
+            if (hit != null) hit.add(o) else agendaClusters.add(mutableListOf(o))
+        }
+        /*
+         * 簇 id 用 10000+ 段位，和课程的 clusterId（(dayOffset shl 8) or localId，
+         * 最大不到 2000）错开，两套轮换共用一个 rotations map 也不会互相踩。
+         */
+        fun agendaClusterId(ci: Int): Int = 10_000 + weekday * 100 + ci
+        val agendaSlot = HashMap<String, Triple<Int, Int, Int>>()
+        agendaClusters.forEachIndexed { ci, raw ->
+            val cid = agendaClusterId(ci)
+            // 轮换一次就把「谁在最上面」往后挪一位
+            val ordered = if (raw.size > 1) {
+                val k = ((rotationSnapshot[cid] ?: 0) % raw.size + raw.size) % raw.size
+                raw.drop(k) + raw.take(k)
+            } else {
+                raw
+            }
+            ordered.forEachIndexed { i, o -> agendaSlot[o.key] = Triple(i, ordered.size, cid) }
+        }
+
+        agendaForDay.forEachIndexed { idx, o ->
+            val startRow = AgendaGeometry.minuteToRow(o.startMinute, slots)
+            val endRow = AgendaGeometry.minuteToRow(o.endMinute, slots)
+            /*
+             * 紧凑模式的两个判据（实测出来的，不是猜的）：
+             *   · 和当天任何课程时段有交集 —— 满宽卡片会把课名盖掉
+             *   · 映射出来的高度不足 34dp —— 落在课间/午休里，正常卡片只剩一条线
+             */
+            val overlapsCourse = sessions.any { s ->
+                o.startMinute < com.gzucm.pocket.core.endMinutesOf(s) &&
+                    com.gzucm.pocket.core.startMinutesOf(s) < o.endMinute
+            }
+            val spanDp = (endRow - startRow) * cellHeight.value
+            /*
+             * 紧凑模式只看**高度够不够**，不再跟着「有没有和课程重叠」走。
+             *
+             * 原来 `compact = overlapsCourse || spanDp < 34f`，本意是「别盖住课名」。
+             * 但防遮挡现在由 narrow（收窄靠右 62%）负责了，两个一起用等于双重惩罚：
+             * 「见习报到」10:30–11:40 实际跨一个半小时，被压成 26dp 一条，
+             * 标题只剩「见…」，地点和时间全被挤掉 —— 用户就是这个反馈。
+             */
+            val compact = spanDp < 34f
+            // 和课程抢同一块地方时收窄靠右，保证课名还能读出来；
+            // 只是落在空档（课间/午休）里的，保持满宽，因为没人跟它抢
+            /*
+             * 早于第一节的日程（比如 07:20 晨读）也走窄条：
+             * 它在时间上不跟任何课重叠，但映射到 row=0，26dp 的卡片正好压住
+             * 第一节课顶部那行字，实测把「中医骨伤科学」盖掉半行。
+             */
+            val beforeFirst = slots.firstOrNull()
+                ?.let { o.startMinute < AgendaLogic.minutesOfUnit(it).first }
+                ?: false
+            val (colIndex, colCount, _) = agendaSlot[o.key] ?: Triple(0, 1, -1)
+            // 同组只有一条时才走「收窄靠右」；多条并排时不需要，并排本身就不遮课名
+            val narrow = colCount == 1 && (overlapsCourse || beforeFirst)
+
+            /*
+             * 这里**不能用 matchParentSize**。
+             *
+             * BoxWithConstraints 的 content 是 SubcomposeLayout，matchParentSize 的
+             * parent data 在它下面量出来是 0×0，于是子级 size() 被压成 0，
+             * 卡片存在但一个像素都画不出来（真机日志能看到 daycol agenda=1，
+             * 界面却什么都没有）。fillMaxSize 用 incoming 约束的最大值，正常。
+             */
+            /*
+             * 重叠排布沿用课程那套（placeSessions）：
+             *   手机 <840dp → 卡片层叠，上层右下各缩一点，只有最上层显示完整文字
+             *   平板 ≥840dp → 一律并排 wFrac = 1/n
+             * 不另造第三种视觉，否则同一页里课程和日程两套重叠逻辑长得不一样。
+             */
+            val stacked = colCount > 1 && !wide
+            val z = when {
+                !stacked -> if (compact) 60f else 50f
+                // 层叠时序号大的在上面
+                else -> 50f + colIndex
+            }
+            Box(Modifier.fillMaxSize().zIndex(z)) {
+                AgendaGridBlock(
+                    occurrence = o,
+                    startRow = startRow,
+                    endRow = endRow,
+                    cellHeight = cellHeight,
+                    width = colWidth,
+                    layer = idx,
+                    compact = compact,
+                    narrow = narrow,
+                    layerIndex = colIndex,
+                    layerCount = colCount,
+                    wide = wide,
+                    onTop = !stacked || colIndex == colCount - 1,
+                    onClick = { onAgendaClick(o) },
+                )
+            }
+        }
+
+        /*
+         * 日程/考试簇的轮换按钮。
+         *
+         * 位置、尺寸、zIndex 全部照抄下面课程那个（簇右下角 28dp 触摸区里画
+         * 13dp 小方块），不另外发明一套。只在手机显示 —— 宽屏是并排，
+         * 没有谁盖谁的问题，按钮反而是干扰。
+         */
+        if (!wide) {
+            agendaClusters.forEachIndexed { ci, cl ->
+                if (cl.size < 2) return@forEachIndexed
+                val cid = agendaClusterId(ci)
+                val bottomRow = cl.maxOf { AgendaGeometry.minuteToRow(it.endMinute, slots) }
+                Box(
+                    Modifier
+                        .align(Alignment.TopStart)
+                        .zIndex(99f)
+                        .offset(
+                            x = (colWidth - 28.dp).coerceAtLeast(0.dp),
+                            y = (cellHeight * bottomRow - 28.dp).coerceAtLeast(0.dp),
+                        )
+                        .requiredSize(28.dp)
+                        .clickable(onClickLabel = "切换重叠日程") { onRotateCluster(cid) },
+                    contentAlignment = Alignment.BottomEnd,
+                ) {
+                    Box(
+                        Modifier
+                            .size(13.dp)
+                            .padding(end = 1.dp, bottom = 1.dp)
+                            .clip(RoundedCornerShape(3.5.dp))
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f))
+                            .border(
+                                0.7.dp,
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                RoundedCornerShape(3.5.dp),
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "⇄",
+                            fontSize = 9.sp,
+                            lineHeight = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
         }
 
         /*

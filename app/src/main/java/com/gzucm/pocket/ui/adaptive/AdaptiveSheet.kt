@@ -139,6 +139,19 @@ fun AdaptiveSheet(
             val scheme = MaterialTheme.colorScheme
             ModalBottomSheet(
                 onDismissRequest = onDismiss,
+                /*
+                 * 不要用 confirmValueChange 去拦 SheetValue.Hidden（2026-11-14 踩过）。
+                 *
+                 * 曾经为了「表单别被下拉误关」这么写过：
+                 *     confirmValueChange = { it != SheetValue.Hidden }
+                 * 结果面板关不掉了 —— M3 的 hide() 被永久拒绝，Dialog 窗口留在原地，
+                 * scrim 继续拦截触摸，而面板内容因为 visible=false 已经从组合里移除，
+                 * 表现就是**整屏什么都点不了**，只能杀进程。
+                 *
+                 * 跟当初 Popup 那个「存在即拦触摸」是同一类错误：为了省一次误触，
+                 * 把关闭路径堵死了。误关要防，但只能靠在**数据层保住草稿**，
+                 * 绝不能在窗口/手势层面拦。
+                 */
                 sheetState = rememberModalBottomSheetState(
                     skipPartiallyExpanded = skipPartiallyExpanded,
                 ),

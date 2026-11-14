@@ -2,6 +2,7 @@ package com.gzucm.pocket.data
 
 import com.gzucm.pocket.core.CourseGrade
 import com.gzucm.pocket.core.CourseSession
+import com.gzucm.pocket.core.ExamDetail
 import com.gzucm.pocket.core.ExamItem
 import com.gzucm.pocket.core.FitnessGrade
 import com.gzucm.pocket.core.FitnessItem
@@ -516,13 +517,36 @@ object Jw {
         val root = runCatching { Net.json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return emptyList()
         return root["rows"]?.jsonArray?.map { el ->
             val o = el.jsonObject
+            /*
+             * 字段名以真实响应为准（2026-11-14 抓到的样例）：
+             *   kcmc 课程 / ksrq 日期 / kssj 时间 / kscdmc 考场 / zwh 座位
+             *   ksaplxmc 安排类型 / khxsmc 考核形式 / kslbmc 类别
+             *   jkteaxms 监考 / xqmc 校区 / zc 周次 / jcdm2 节次 / sjbh 试卷号 / xs 学分
+             *
+             * 之前猜的是 cdmc/jxcdmc（课表的教室字段），所以地点一直是空的 ——
+             * 考试的考场字段叫 kscdmc，跟课表不是一套。
+             */
+            val week = o.str("zc")
+            val credit = o.str("xs")
             ExamItem(
                 course = o.str("kcmc"),
-                date = o.str("rq").ifBlank { o.str("ksrq") },
-                time = o.str("kssj").ifBlank { o.str("jcdm2") },
-                room = o.str("cdmc").ifBlank { o.str("jxcdmc") },
+                date = o.str("ksrq"),
+                time = o.str("kssj"),
+                room = o.str("kscdmc"),
                 seat = o.str("zwh"),
-                type = o.str("ksxzmc").ifBlank { o.str("kslxmc") },
+                type = o.str("ksaplxmc").ifBlank { o.str("khxsmc") },
+                details = listOf(
+                    ExamDetail("考试类别", o.str("kslbmc")),
+                    ExamDetail("考核形式", o.str("khxsmc")),
+                    ExamDetail("安排类型", o.str("ksaplxmc")),
+                    ExamDetail("监考老师", o.str("jkteaxms")),
+                    ExamDetail("校区", o.str("xqmc")),
+                    ExamDetail("周次", if (week.isBlank() || week == "0") "" else "第 $week 周"),
+                    ExamDetail("节次", o.str("jcdm2")),
+                    ExamDetail("试卷编号", o.str("sjbh")),
+                    ExamDetail("课程编号", o.str("kcbh")),
+                    ExamDetail("学分", credit.removeSuffix(".0")),
+                ).filter { it.value.isNotBlank() },
             )
         } ?: emptyList()
     }

@@ -136,7 +136,26 @@ data class PowerInfo(
 @Serializable
 data class PowerDaily(val date: String, val usage: Double, val remain: Double, val total: Double)
 
-/** 考试安排 */
+/**
+ * 考试详情里的一行（中文标签 + 原始值）。
+ *
+ * 教务返回的键名是 `jkteaxms` `kslbmc` 这种拼音缩写，直接摆给用户看不懂，
+ * 所以在抓取时就翻好，详情页只负责显示。
+ */
+@Serializable
+data class ExamDetail(val label: String, val value: String)
+
+/**
+ * 考试安排。
+ *
+ * 主字段（课程/日期/时间/地点/座位/类型）拿来在课表和列表里直接展示，
+ * 其余字段收进 [details]，点开详情才显示。
+ *
+ * 日期和时间保留原始字符串：`ksrq` 是 `2026-11-14`，`kssj` 是
+ * `14:30:00--17:30:00`（两个连字符，秒位全是 0）。解析成分钟只在
+ * [startMinute] / [endMinute] 里做，解析不出来就返回 null，不猜。
+ */
+@Serializable
 data class ExamItem(
     val course: String,
     val date: String,
@@ -144,7 +163,24 @@ data class ExamItem(
     val room: String,
     val seat: String,
     val type: String,
-)
+    val details: List<ExamDetail> = emptyList(),
+) {
+    /** 开考分钟（当天第几分钟）。`kssj` 为空或格式变了就返回 null */
+    val startMinute: Int? get() = parseMinute(time, 0)
+
+    /** 结束分钟。没有结束时间时给 2 小时，够画出块又不至于太长 */
+    val endMinute: Int? get() = parseMinute(time, 1) ?: startMinute?.plus(120)
+
+    private fun parseMinute(raw: String, index: Int): Int? {
+        val segs = raw.split(Regex("-+")).map { it.trim() }.filter { it.isNotEmpty() }
+        val seg = segs.getOrNull(index) ?: return null
+        val m = Regex("(\\d{1,2}):(\\d{2})").find(seg) ?: return null
+        val h = m.groupValues[1].toIntOrNull() ?: return null
+        val min = m.groupValues[2].toIntOrNull() ?: return null
+        if (h !in 0..23 || min !in 0..59) return null
+        return h * 60 + min
+    }
+}
 
 /** 首页聚合数据 */
 data class HomeData(

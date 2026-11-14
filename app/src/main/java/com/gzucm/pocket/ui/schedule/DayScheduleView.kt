@@ -40,8 +40,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.gzucm.pocket.core.AgendaOccurrence
 import com.gzucm.pocket.core.CourseSession
+import com.gzucm.pocket.core.ScheduleEntry
 import com.gzucm.pocket.core.Semester
+import com.gzucm.pocket.core.mergeForDay
 import com.gzucm.pocket.core.SlotEndTimes
 import com.gzucm.pocket.core.SlotTimes
 import com.gzucm.pocket.core.phaseOf
@@ -75,6 +78,11 @@ internal fun DayScheduleView(
     currentWeek: Int,
     sessions: List<CourseSession>,
     onCourseClick: (CourseSession) -> Unit,
+    /** 用户自建日程（已按学期展开）。独立通道，不合并进 [sessions] */
+    agendaOccurrences: List<AgendaOccurrence> = emptyList(),
+    onAgendaClick: (AgendaOccurrence) -> Unit = {},
+    /** 空列表时提供的「添加日程」入口：(当天日期, 起始分钟或 null) */
+    onAddAgenda: (LocalDate, Int?) -> Unit = { _, _ -> },
     /**
      * 滑动跨周时通知外部。
      *
@@ -240,12 +248,25 @@ internal fun DayScheduleView(
             val w = page / 7 + 1
             val weekday = page % 7 + 1
             val date = firstMonday.plusDays(page.toLong())
-            val list = byDay[w to weekday].orEmpty().sortedBy { it.startUnit }
+            /*
+             * 课程和日程按真实开始分钟混排。
+             *
+             * 用联合类型而不是把日程伪装成 CourseSession：后者会让
+             * 同名同节次撞 key 崩溃，也会把日程混进上课提醒排程。
+             */
+            val entries = mergeForDay(
+                sessions = byDay[w to weekday].orEmpty(),
+                occurrences = agendaOccurrences,
+                week = w,
+                weekday = weekday,
+            )
+            val isTodayPage = w == currentWeek && todayWeekday == weekday
 
-            if (list.isEmpty()) {
+            if (entries.isEmpty()) {
                 EmptyDay(
-                    isToday = w == currentWeek && todayWeekday == weekday,
+                    isToday = isTodayPage,
                     date = date,
+                    onAddAgenda = { onAddAgenda(date, null) },
                 )
             } else {
                 LazyColumn(
@@ -256,23 +277,26 @@ internal fun DayScheduleView(
                     ),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    items(list, key = { "${it.name}|${it.startUnit}|${it.endUnit}" }) { s ->
-                        DayCourseCard(
-                            session = s,
-                            /*
-                             * 只有「正在看的这天就是今天」时才算现在时刻。
-                             *
-                             * 别的时候传 -1：phaseOf 会判成 UPCOMING，
-                             * 于是别的日期不会出现「正在上」—— 否则用户
-                             * 翻到上周三，那天的课也会被标成正在上。
-                             */
-                            nowMinutes = if (w == currentWeek && todayWeekday == weekday) {
-                                nowMinutes
-                            } else {
-                                -1
-                            },
-                            onClick = { onCourseClick(s) },
-                        )
+                    items(entries, key = { it.stableKey }) { entry ->
+                        when (entry) {
+                            is ScheduleEntry.Course -> {
+                                val s = entry.session
+                                DayCourseCard(
+                                    session = s,
+                                    /*
+                                     * 只有「正在看的这天就是今天」时才算现在时刻。
+                                     * 别的时候传 -1：phaseOf 会判成 UPCOMING，
+                                     * 翻到上周三时那天的课不会被标成「正在上」。
+                                     */
+                                    nowMinutes = if (isTodayPage) nowMinutes else -1,
+                                    onClick = { onCourseClick(s) },
+                                )
+                            }
+                            is ScheduleEntry.Custom -> AgendaDayCard(
+                                occurrence = entry.occurrence,
+                                onClick = { onAgendaClick(entry.occurrence) },
+                            )
+                        }
                     }
                 }
             }
@@ -554,7 +578,11 @@ private fun TimeColumn(
  * 别的日子就正常说「没课」—— 用玩笑语气说一个还没到的日期会有点怪。
  */
 @Composable
-private fun EmptyDay(isToday: Boolean, date: java.time.LocalDate) {
+private fun EmptyDay(
+    isToday: Boolean,
+    date: java.time.LocalDate,
+    onAddAgenda: () -> Unit,
+) {
     Box(
         Modifier
             .fillMaxSize()
@@ -572,6 +600,17 @@ private fun EmptyDay(isToday: Boolean, date: java.time.LocalDate) {
                 "${date.monthValue} 月 ${date.dayOfMonth} 日",
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            )
+            Spacer(Modifier.height(14.dp))
+            Text(
+                "+ 加个日程",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                    .clickable(onClickLabel = "添加日程", onClick = onAddAgenda)
+                    .padding(horizontal = 14.dp, vertical = 7.dp),
             )
         }
     }

@@ -8,8 +8,15 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.gzucm.pocket.Graph
+import com.gzucm.pocket.core.Agenda
+import com.gzucm.pocket.core.AgendaLogic
+import com.gzucm.pocket.core.AgendaOccurrence
+import com.gzucm.pocket.core.AgendaStore
 import com.gzucm.pocket.core.CourseGrade
 import com.gzucm.pocket.core.CourseSession
+import com.gzucm.pocket.core.EXAM_COLOR_INDEX
+import com.gzucm.pocket.core.EXAM_PREFIX
+import com.gzucm.pocket.core.ExamItem
 import com.gzucm.pocket.core.FitnessGrade
 import com.gzucm.pocket.core.LevelGrade
 import com.gzucm.pocket.core.ClassReminder
@@ -40,6 +47,8 @@ data class UiState(
     val grades: List<CourseGrade> = emptyList(),
     val levels: List<LevelGrade> = emptyList(),
     val fitness: List<FitnessGrade> = emptyList(),
+    /** 考试安排（教务自动抓取，只读）。字段保持原始字符串，不做日期解析 */
+    val exams: List<ExamItem> = emptyList(),
     val syncing: Boolean = false,
     /**
      * 最近一次手动同步的结果，用来弹一次轻提示。
@@ -77,6 +86,14 @@ data class UiState(
     val progressTotal: Int = 0,
     /** 已经拿到数据的周次；不在里面的周显示「正在加载」，而不是空白 */
     val loadedWeeks: Set<Int> = emptySet(),
+    /**
+     * 用户自建日程（规则，未展开）。
+     *
+     * 刻意和 [sessions] 分开：sessions 是教务整表缓存，会被同步覆盖、
+     * 被版本失效清空、被切学段/退出登录清掉；日程不能跟着一起消失。
+     * 提醒排程读的是 sessions，所以日程天然不会进上课提醒（v1 约定）。
+     */
+    val agenda: List<Agenda> = emptyList(),
 )
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -129,6 +146,67 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun rememberCampusPicked(c: Campus) {
         store.pickedCampus = c
     }
+
+    // ── 自定义日程 ────────────────────────────────────────────────
+    //
+    // 只动 state.agenda 和独立存储，**不碰 state.sessions**。
+    // 这样同步、缓存版本失效、切学段、退出登录、提醒重排全都看不到日程，
+    // 两边互不干扰。展开成每周实例是 UI 层的事（AgendaLogic.expand）。
+
+    /** 新增或编辑一条日程（按 id 覆盖） */
+    fun saveAgenda(item: Agenda) {
+        state = state.copy(agenda = agendaStore.upsert(item))
+    }
+
+    /** 删除一条日程（每周重复会整条删掉，v1 不支持单天例外） */
+    fun deleteAgenda(id: String) {
+        state = state.copy(agenda = agendaStore.delete(id))
+    }
+
+    /**
+     * 按当前校历展开成可以画进课表的实例。
+     * 没拿到校历（未登录 / 还没同步）时返回空 —— 日程界面照样能看列表，
+     * 但课表上不画，免得硬造一套不依赖 Semester 的坐标系。
+     */
+    fun agendaOccurrences(semester: Semester?): List<AgendaOccurrence> =
+        if (semester == null) emptyList() else AgendaLogic.expand(semester, state.agenda)
+
+    /**
+     * 把考试也转成课表条目，跟日程一起画进周课表和日视图。
+     *
+     * 约定 `sourceId` 以 [EXAM_PREFIX] 开头表示这是考试 —— 点击时用它分流：
+     * 考试打开只读详情，日程打开编辑表单。用前缀而不是单独一个类型，
+     * 是因为渲染层（placeSessions 之外的那套绘制、日视图混排、今日页）
+     * 全都吃 `AgendaOccurrence`，加类型会把七处签名一起改掉。
+     */
+    fun examOccurrences(semester: Semester?): List<AgendaOccurrence> {
+        if (semester == null) return emptyList()
+        return state.exams.mapNotNull { e ->
+            val date = runCatching { LocalDate.parse(e.date) }.getOrNull() ?: return@mapNotNull null
+            val s = e.startMinute ?: return@mapNotNull null
+            val en = (e.endMinute ?: (s + 120)).coerceAtLeast(s + 30)
+            AgendaOccurrence(
+                key = "${EXAM_PREFIX}${examId(e)}",
+                sourceId = "${EXAM_PREFIX}${examId(e)}",
+                title = e.course,
+                date = date,
+                week = semester.weekOf(date),
+                weekday = date.dayOfWeek.value,
+                startMinute = s,
+                endMinute = en,
+                place = e.room,
+                note = e.type,
+                colorIndex = EXAM_COLOR_INDEX,
+                unitStart = 0,
+                unitEnd = 0,
+                weekly = false,
+            )
+        }
+    }
+
+    /** 考试的唯一键：同名课可能考好几次，所以带上日期和开考时间 */
+    fun examId(e: ExamItem): String =
+        "${e.course}|${e.date}|${e.time}|${e.seat}"
 
     /**
      * 刷新「有没有一卡通会话」并写进 state。
@@ -346,6 +424,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private val store = Graph.store
 
+    /** 日程独立存储，声明在 init 之前：bootstrap 就要读它 */
+    private val agendaStore = AgendaStore(getApplication())
+
     /**
      * 正在跑的那份同步。**必须声明在 init 之前**：init 里 bootstrap() 就会调
      * syncQuietly()，Kotlin 按声明顺序初始化属性，放在后面的话那一刻它还没被赋初值，
@@ -377,6 +458,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
          */
         store.dropStaleSessionCache()
         store.dropStaleGradeCache()
+
+        // 日程独立读回：不参与上面的失效逻辑，也不需要登录态。
+        // 用户手输的数据不该因为课表缓存版本升级而消失。
+        val savedAgenda = agendaStore.load()
+        if (savedAgenda.isNotEmpty()) state = state.copy(agenda = savedAgenda)
+
+        /*
+         * 考试缓存单独读回，不套用课表的版本失效。
+         *
+         * 两者的解析字段完全不同（考试是 course/date/time/room/seat/type 全字符串），
+         * 课表算法改一次就顺手清掉考试缓存没有道理，而且会逼用户重新联网一次。
+         */
+        readExamCache().let { if (it.isNotEmpty()) state = state.copy(exams = it) }
 
         val cachedSessions = readSessionCache()
         val cachedSemester = readSemesterCache()
@@ -503,6 +597,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             grades = emptyList(),
             levels = emptyList(),
             fitness = emptyList(),
+            exams = emptyList(),
         )
         loginExpired = false
         checkUpdateSilently()
@@ -519,6 +614,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (store.campus == target) return
         store.campus = target
         store.cachedSessions = null
+        // 考试跟着课表走：研究生没有对应接口，留着本科的会串学段
+        store.cachedExams = null
         store.cachedSemester = null
         store.semesterCode = null
         store.cachedGrades = null
@@ -571,13 +668,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
             Net.cookies.clear()
             store.cachedSessions = null
+            store.cachedExams = null
             store.cachedSemester = null
             store.cachedPower = null
             store.cachedPowerDaily = null
             store.cachedGrades = null
             store.cachedLevels = null
             store.cachedFitness = null
-            state = UiState(phase = Phase.NeedLogin)
+            // 日程是用户自建数据，退出登录不该把它清掉；从独立存储原样带回来
+            state = UiState(phase = Phase.NeedLogin, agenda = agendaStore.load())
         }
     }
 
@@ -918,6 +1017,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 syncResultSeq = if (manual) state.syncResultSeq + 1 else state.syncResultSeq,
                 syncResultText = if (manual) "同步完成 · 共 ${sessions.size} 节课" else state.syncResultText,
             )
+
+            /*
+             * 顺带抓考试安排。
+             *
+             * 单独一个 try：考试接口挂掉不能连累课表 —— 课表是本命功能，
+             * 考试是附加信息，而且很多学期前几周根本没有考试数据。
+             *
+             * 抓不到就保留上一次的缓存，不写空值覆盖（否则用户刚看到的考试
+             * 会因为一次网络抖动集体消失）。
+             */
+            withContext(Dispatchers.IO) {
+                runCatching { Jw.fetchExams(semester.code) }
+            }.onSuccess { exams ->
+                if (exams.isNotEmpty()) {
+                    store.cachedExams = Net.json.encodeToString(
+                        kotlinx.serialization.builtins.ListSerializer(ExamItem.serializer()),
+                        exams,
+                    )
+                    state = state.copy(exams = exams)
+                }
+            }
         } else {
             state = state.copy(
                 syncing = false,
@@ -936,6 +1056,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun readSemesterCache(): Semester? {
         val raw = store.cachedSemester ?: return null
         return runCatching { Net.json.decodeFromString(Semester.serializer(), raw) }.getOrNull()
+    }
+
+    private fun readExamCache(): List<ExamItem> {
+        val raw = store.cachedExams ?: return emptyList()
+        return runCatching { Net.json.decodeFromString<List<ExamItem>>(raw) }.getOrDefault(emptyList())
     }
 
     // ── 成绩 ────────────────────────────────────────────────────────────

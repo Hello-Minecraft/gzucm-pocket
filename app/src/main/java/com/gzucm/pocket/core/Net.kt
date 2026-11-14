@@ -92,6 +92,17 @@ class SessionStore(context: Context) {
         set(v) = sp.edit().putString(KEY_CACHE_SESSIONS, v).apply()
 
     /**
+     * 考试安排缓存（json 字符串）。
+     *
+     * 单独一个 key，不跟课表混：考试条数是零散的（一学期几场到十几场），
+     * 而且解析字段完全不同。混进去会让 `sessions_data_version` 的失效逻辑
+     * 同时影响两边 —— 改课表解析算法不该顺手把考试缓存也清掉。
+     */
+    var cachedExams: String?
+        get() = sp.getString(KEY_CACHE_EXAMS, null)
+        set(v) = sp.edit().putString(KEY_CACHE_EXAMS, v).apply()
+
+    /**
      * 课表缓存的数据版本。算法改了（比如修了周次错位）就 +1，
      * 旧的缓存会被判定失效并清掉，强制重新同步。
      *
@@ -397,6 +408,7 @@ class SessionStore(context: Context) {
         const val KEY_SYNC_AT = "sync_at"
         const val KEY_CACHE_SEM = "cache_semester"
         const val KEY_CACHE_SESSIONS = "cache_sessions"
+        const val KEY_CACHE_EXAMS = "cache_exams"
         const val KEY_SESSIONS_VERSION = "sessions_data_version"
         const val KEY_CAMPUS = "campus"
         const val KEY_GRAD_TERM = "graduate_term_code"

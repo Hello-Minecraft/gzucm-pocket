@@ -45,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.gzucm.pocket.core.AgendaOccurrence
 import com.gzucm.pocket.core.CourseSession
 import com.gzucm.pocket.ui.components.LocalFloatingBarInset
 import com.gzucm.pocket.ui.components.Fmt
@@ -84,6 +85,15 @@ fun TodayScreen(
      * 默认回落到 [onOpenSettings]，老调用方不用改。
      */
     onOpenLogin: () -> Unit = onOpenSettings,
+    /**
+     * 用户自建日程（已按学期展开）。
+     *
+     * 放在参数表最后：现有截图测试是按位置传参的（`TodayScreen(semester, 8, …)`），
+     * 插在中间会整体错位。新字段一律追加在末尾也是项目一贯做法。
+     * 只在本页追加显示，不参与「下次上课」「本周概览」的原有计算。
+     */
+    agendaOccurrences: List<AgendaOccurrence> = emptyList(),
+    onAgendaClick: (AgendaOccurrence) -> Unit = {},
 ) {
     // today 也挂在同一个 tick 上：停在首页跨过 0 点后要切到新的一天，
     // 下面 remember(…, today) 那几处才会重算
@@ -119,6 +129,15 @@ fun TodayScreen(
             .sortedBy { it.startUnit }
     }
     val showingTomorrow = todayDone && tomorrowSessions.isNotEmpty()
+
+    /*
+     * 今日页的日程：只跟着「显示今天还是明天」切换，不改 [todayDone] 的判定
+     * （那是按最后一节课算的，把日程混进去会让首页提前翻到明天）。
+     */
+    val shownAgenda = remember(agendaOccurrences, today, showingTomorrow) {
+        val d = if (showingTomorrow) today.plusDays(1) else today
+        agendaOccurrences.filter { it.date == d }
+    }
 
     /*
      * 按可用宽度分两套排版。
@@ -204,6 +223,8 @@ fun TodayScreen(
                             CourseSection(
                                 title = if (showingTomorrow) "明日课程" else "今日课程",
                                 sessions = if (showingTomorrow) tomorrowSessions else todaySessions,
+                                agenda = shownAgenda,
+                                onAgendaClick = onAgendaClick,
                                 syncing = syncing,
                                 allEmpty = sessions.isEmpty(),
                                 progressDone = progressDone,
@@ -251,6 +272,8 @@ fun TodayScreen(
                 CourseSection(
                     title = if (showingTomorrow) "明日课程" else "今日课程",
                     sessions = if (showingTomorrow) tomorrowSessions else todaySessions,
+                    agenda = shownAgenda,
+                    onAgendaClick = onAgendaClick,
                     syncing = syncing,
                     allEmpty = sessions.isEmpty(),
                     progressDone = progressDone,
@@ -414,6 +437,8 @@ private fun NoticeBar(notice: String, onOpenLogin: () -> Unit) {
 private fun CourseSection(
     title: String,
     sessions: List<CourseSession>,
+    agenda: List<AgendaOccurrence>,
+    onAgendaClick: (AgendaOccurrence) -> Unit,
     syncing: Boolean,
     allEmpty: Boolean,
     progressDone: Int,
@@ -429,30 +454,55 @@ private fun CourseSection(
     )
     Spacer(Modifier.height(10.dp))
 
+    /*
+     * 课程时间轴原样保留 —— 它的「正在上 / 已下课」判定和竖线连线
+     * 都绑在 CourseSession 上，重做成混排会牵动一堆视觉细节。
+     * 日程追加在下面，用独立卡片区分来源。
+     */
     if (sessions.isEmpty()) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(scheme.surface)
-                .padding(vertical = if (syncing && allEmpty) 26.dp else 30.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (syncing && allEmpty) {
-                com.gzucm.pocket.ui.components.SyncPlaceholder(
-                    done = progressDone,
-                    total = progressTotal,
-                )
-            } else {
-                Text(
-                    "今天没有课",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = scheme.onSurfaceVariant,
-                )
+        if (agenda.isEmpty()) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(scheme.surface)
+                    .padding(vertical = if (syncing && allEmpty) 26.dp else 30.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (syncing && allEmpty) {
+                    com.gzucm.pocket.ui.components.SyncPlaceholder(
+                        done = progressDone,
+                        total = progressTotal,
+                    )
+                } else {
+                    Text(
+                        "今天没有课，也没有日程",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     } else {
         Timeline(sessions = sessions, onCourseClick = onCourseClick)
+    }
+
+    if (agenda.isNotEmpty()) {
+        if (sessions.isNotEmpty()) Spacer(Modifier.height(14.dp))
+        Text(
+            "我的日程",
+            fontSize = 12.sp,
+            color = scheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(6.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            agenda.forEach { o ->
+                com.gzucm.pocket.ui.schedule.AgendaDayCard(
+                    occurrence = o,
+                    onClick = { onAgendaClick(o) },
+                )
+            }
+        }
     }
 }
 

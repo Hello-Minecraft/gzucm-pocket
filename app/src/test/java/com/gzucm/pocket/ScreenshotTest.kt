@@ -1021,4 +1021,149 @@ class ScreenshotTest {
             8, 8, {}, {},
         )
     }
+
+    // ── 自定义日程 ────────────────────────────────────────────────
+
+    /**
+     * 三条日程，专门覆盖容易出问题的位置：
+     *   ① 早于第一节（07:20）—— 网格里没有这一行
+     *   ② 午休中间（12:20）—— 11:50 到 13:10 之间，网格里是空档
+     *   ③ 和周一的「五官学」撞时段 —— 验证独立层不破坏课程排布
+     */
+    private val agendaRules = listOf(
+        com.gzucm.pocket.core.Agenda(
+            id = "a1", title = "晨读", date = "2026-10-26",
+            startMinute = 7 * 60 + 20, endMinute = 8 * 60 + 10,
+            place = "图书馆",
+        ),
+        com.gzucm.pocket.core.Agenda(
+            id = "a2", title = "部门例会", date = "2026-10-26",
+            startMinute = 12 * 60 + 20, endMinute = 13 * 60 + 5,
+            place = "融媒体中心", colorIndex = 2,
+        ),
+        com.gzucm.pocket.core.Agenda(
+            id = "a3", title = "见习报到", date = "2026-10-26",
+            startMinute = 10 * 60 + 30, endMinute = 11 * 60 + 40,
+            place = "一附院", colorIndex = 3,
+        ),
+        com.gzucm.pocket.core.Agenda(
+            id = "a4", title = "每周病例讨论", date = "2026-10-27",
+            startMinute = 19 * 60, endMinute = 20 * 60 + 30,
+            // 带地点：验证「标题 / 地点 / 起止时间」三段能不能在一格里排开
+            place = "一附院示教室",
+            weekly = true, colorIndex = 4,
+        ),
+    )
+
+    private fun agendaOccurrences() =
+        com.gzucm.pocket.core.AgendaLogic.expand(semester, agendaRules)
+
+    @Test
+    fun scheduleWithAgenda() = shot("23_schedule_agenda") {
+        ScheduleScreen(
+            semester = semester,
+            sessions = sessions,
+            currentWeek = 8,
+            viewingWeek = 8,
+            onWeekChange = {},
+            onCourseClick = {},
+            agendaRules = agendaRules,
+            agendaOccurrences = agendaOccurrences(),
+        )
+    }
+
+    @Test
+    fun scheduleWithAgendaLight() = shot("23_schedule_agenda_light", dark = false) {
+        ScheduleScreen(
+            semester = semester,
+            sessions = sessions,
+            currentWeek = 8,
+            viewingWeek = 8,
+            onWeekChange = {},
+            onCourseClick = {},
+            agendaRules = agendaRules,
+            agendaOccurrences = agendaOccurrences(),
+        )
+    }
+
+    @Test
+    fun dayViewWithAgenda() = shot("23_day_agenda") {
+        // currentWeek 故意给 7：week(8) != currentWeek 时才会落到 initialDay，
+        // 否则会停在「今天」（跑测试那天是周六，只有一门课）
+        com.gzucm.pocket.ui.schedule.DayScheduleView(
+            semester = semester,
+            week = 8,
+            currentWeek = 7,
+            sessions = sessions,
+            onCourseClick = {},
+            agendaOccurrences = agendaOccurrences(),
+            initialDay = 1,
+        )
+    }
+
+    @Test
+    fun todayWithAgenda() = shot("23_today_agenda") {
+        /*
+         * 今日页按 LocalDate.now() 取"今天"，所以这里必须造一条今天的日程，
+         * 用 10 月那批测试数据是看不到的（截图会显示真实当天）。
+         */
+        val today = java.time.LocalDate.now()
+        val todayOcc = listOf(
+            com.gzucm.pocket.core.AgendaOccurrence(
+                key = "t1|$today", sourceId = "t1", title = "病例讨论",
+                date = today, week = semester.weekOf(today),
+                weekday = today.dayOfWeek.value,
+                startMinute = 19 * 60, endMinute = 20 * 60 + 30,
+                place = "一附院示教室", note = "带病历本", colorIndex = 2,
+                unitStart = 0, unitEnd = 0, weekly = false,
+            ),
+        )
+        TodayScreen(
+            semester, 8, sessions, power, daily, 0L, {}, {}, {}, {}, false, 0, 0, false, null,
+            agendaOccurrences = agendaOccurrences() + todayOcc,
+        )
+    }
+
+    @Test
+    @Config(sdk = [34], qualifiers = "w900dp-h1000dp-xhdpi")
+    fun agendaList() = shot("24_agenda_list", settleMs = 1200) {
+        com.gzucm.pocket.ui.schedule.AgendaListSheet(
+            visible = true,
+            semester = semester,
+            rules = agendaRules,
+            onAdd = { _, _ -> },
+            onEdit = {},
+            onDismiss = {},
+        )
+    }
+
+    @Test
+    @Config(sdk = [34], qualifiers = "w900dp-h1000dp-xhdpi")
+    fun agendaEditNew() = shot("24_agenda_edit_new", settleMs = 1200) {
+        com.gzucm.pocket.ui.schedule.AgendaEditSheet(
+            visible = true,
+            semester = semester,
+            initial = null,
+            draftDate = semester.dateOf(8, 3),
+            draftStartMinute = 14 * 60,
+            onSave = {},
+            onDelete = {},
+            onDismiss = {},
+        )
+    }
+
+    @Test
+    @Config(sdk = [34], qualifiers = "w900dp-h1000dp-xhdpi")
+    fun agendaEditExisting() = shot("24_agenda_edit_existing", settleMs = 1200) {
+        com.gzucm.pocket.ui.schedule.AgendaEditSheet(
+            visible = true,
+            semester = semester,
+            initial = agendaRules[2],
+            draftDate = null,
+            draftStartMinute = null,
+            onSave = {},
+            onDelete = {},
+            onDismiss = {},
+        )
+    }
 }
