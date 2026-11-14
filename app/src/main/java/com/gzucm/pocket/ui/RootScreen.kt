@@ -325,6 +325,15 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
     var draftAgendaDate by remember { mutableStateOf<java.time.LocalDate?>(null) }
     var draftAgendaMinute by remember { mutableStateOf<Int?>(null) }
 
+    /*
+     * 日程列表里「＋ 新建日程」的默认日期。
+     *
+     * 由 ScheduleScreen 按当前视图算好传上来：周视图 → 本周今天 / 别的周周一，
+     * 日视图 → 当前翻到的那一天。打开列表那一刻定下来就够了 ——
+     * 列表是全屏面板，开着的时候翻不了周。
+     */
+    var agendaListDate by remember { mutableStateOf<java.time.LocalDate?>(null) }
+
     /** 从一个展开实例找到它的原始规则，打开编辑 */
     /*
      * 课表里全部可点条目（日程 + 考试）。
@@ -521,7 +530,11 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                             agendaRules = state.agenda,
                             agendaOccurrences = vm.agendaOccurrences(state.semester) +
                                 vm.examOccurrences(state.semester),
-                            onOpenAgendaList = { showAgendaList = true; selectedExam = null },
+                            onOpenAgendaList = { date ->
+                                agendaListDate = date
+                                showAgendaList = true
+                                selectedExam = null
+                            },
                             onAgendaClick = { o -> openAgendaFromOccurrence(o, state.agenda, state.exams) },
                             onAddAgenda = { date, minute ->
                                 editingAgenda = null
@@ -638,6 +651,7 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
         semester = state.semester,
         rules = state.agenda,
         exams = state.exams,
+        defaultDraftDate = agendaListDate,
         examDetail = selectedExam,
         onExamDetailClose = { selectedExam = null },
         examOverlapEntries = overlapsOf(selectedEntry),

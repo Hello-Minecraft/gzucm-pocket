@@ -33,6 +33,11 @@
             android:name=".core.ClassReminderReceiver"
             android:exported="false" />
 
+        <!-- 日程提醒：和课程提醒并列的独立 Receiver（隔离见 AgendaReminder 的注释） -->
+        <receiver
+            android:name=".core.AgendaReminderReceiver"
+            android:exported="false" />
+
         <!--
           时间类广播（TIME_SET / TIMEZONE_CHANGED / DATE_CHANGED）是系统豁免清单里的，
           targetSdk 26+ 依然能用清单静态注册收到，不需要常驻进程。

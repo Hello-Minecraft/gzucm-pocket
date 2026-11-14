@@ -29,6 +29,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -53,6 +55,7 @@ import androidx.compose.ui.unit.sp
 import com.gzucm.pocket.core.Agenda
 import com.gzucm.pocket.core.AgendaOccurrence
 import com.gzucm.pocket.core.AgendaLogic
+import com.gzucm.pocket.core.AgendaReminder
 import com.gzucm.pocket.core.EXAM_COLOR_INDEX
 import com.gzucm.pocket.core.ExamItem
 import com.gzucm.pocket.core.Semester
@@ -156,6 +159,8 @@ private data class EditDraft(
     val unitEnd: Int,
     val startText: String,
     val endText: String,
+    /** 提醒档位（分钟，0 = 准时）。空 = 不提醒。见 [com.gzucm.pocket.core.AgendaReminder.LEADS] */
+    val remind: List<Int>,
 )
 
 /**
@@ -243,8 +248,8 @@ private fun buildDraft(
     val effEnd = if (byUnit) AgendaLogic.minutesOfUnit(unitEnd).second else seedEnd
 
     /*
-     * 新建默认「今天」，不是开学第一天。
-     * 今天是寒暑假里的一天时，夹回学期内 —— 表单本身只允许学期内日期，
+     * 日期初值由调用方给（[defaultDate]），这里只兜底「今天」。
+     * 今天落在寒暑假里时夹回学期内 —— 表单本身只允许学期内日期，
      * 给一个必然报错的默认值等于让用户先改日期才能保存。
      */
     val resolvedDate = initial?.let { parseIso(it.date) }
@@ -264,6 +269,15 @@ private fun buildDraft(
         unitEnd = unitEnd,
         startText = hhmm(effStart),
         endText = hhmm(effEnd),
+        /*
+         * 提醒：编辑沿用原值；新建默认「准时」。
+         *
+         * 默认不是「不提醒」——致辉 2026-11-15 定的：日程是用户主动加的事，
+         * 加的时候多半就想被提醒一次；到点响一下，比事后发现忘了强。
+         * 老数据的 `remindMinutesBefore` 字段已废（v1.3.5 上线时就没有 UI），
+         * 反序列化后 `remindLeads` 是空列表 → 打开编辑显示「不提醒」，不会凭空多出通知。
+         */
+        remind = initial?.remindLeads ?: listOf(0),
     )
 }
 
@@ -285,6 +299,13 @@ fun AgendaListSheet(
      * 用户找考试自然会来翻这里；再加一个顶部图标反而让本来就挤的工具栏更难认。
      */
     exams: List<ExamItem> = emptyList(),
+    /**
+     * 「＋ 新建日程」预填的日期。
+     *
+     * 由课表页按当前视图算好：周视图看别的周 → 那一周周一；日视图 → 当前那天；
+     * 本周 → 今天。null 时表单自己退回「今天」，今日页等入口不需要传。
+     */
+    defaultDraftDate: LocalDate? = null,
     onExamClick: (ExamItem) -> Unit = {},
     /**
      * 非 null 时，这个面板的内容换成考试详情。
@@ -364,7 +385,7 @@ fun AgendaListSheet(
                         primary = true,
                         enabled = semester != null,
                         modifier = Modifier.fillMaxWidth(),
-                        onClick = { onAdd(null, null) },
+                        onClick = { onAdd(defaultDraftDate, null) },
                     )
                     if (semester == null) {
                         Spacer(Modifier.height(8.dp))
@@ -578,6 +599,20 @@ private fun AgendaRow(
                     Spacer(Modifier.width(6.dp))
                     Tag("每周")
                 }
+                /*
+                 * 提醒标记：只有设了提醒才显示。
+                 * 用铃铛而不是「提醒」文字，是因为这一行已经有「每周 / 不在本学期」
+                 * 两个文字标签，再加一个会挤掉标题；图标 13dp 只占一点点。
+                 */
+                if (agenda.remindLeads.isNotEmpty()) {
+                    Spacer(Modifier.width(6.dp))
+                    androidx.compose.material3.Icon(
+                        Icons.Rounded.NotificationsActive,
+                        contentDescription = "已设提醒",
+                        tint = scheme.primary.copy(alpha = dim),
+                        modifier = Modifier.size(13.dp),
+                    )
+                }
                 if (!inSemester) {
                     Spacer(Modifier.width(6.dp))
                     Tag("不在本学期", error = true)
@@ -655,17 +690,46 @@ fun AgendaEditSheet(
     val rangeText = if (firstDay != null && lastDay != null) "$firstDay ~ $lastDay" else "—"
 
     /*
+     * 通知权限：自己查、自己要，不依赖上层传参。
+     *
+     * 面板是常驻组合树（visible 控制显隐），每次打开都要重新查一遍 ——
+     * 用户可能刚在系统设置里点过允许。Activity 启动时已经要过一次，
+     * 这里只在「被拒绝过」的情况下作为补救入口。
+     */
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var notifyGranted by remember { mutableStateOf(hasNotifyPermission(ctx)) }
+    val requestNotify = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { notifyGranted = it }
+    LaunchedEffect(visible) {
+        if (visible) notifyGranted = hasNotifyPermission(ctx)
+    }
+
+    /*
+     * 默认日期在这一层就算定，[buildDraft] 和草稿 key 共用同一个值。
+     *
+     * 来源优先级：编辑已有 → 入参预填（长按格子 / 日视图那天 / 周视图那一周）
+     * → 今天（夹回学期内）。
+     */
+    val defaultDate = initial?.let { parseIso(it.date) }
+        ?: clampDate(draftDate ?: LocalDate.now(), firstDay, lastDay)
+
+    /*
      * 草稿缓存：误关面板时不丢已填内容。
      *
      * 用户反馈「下拉把面板关了，刚编辑的全没了」。第一版想用
      * `confirmValueChange` 拦掉关闭手势，结果 M3 的 hide() 被永久拒绝、
-     * Dialog 关不掉，整屏点不动 —— 比误关严重得多，当天撤掉。
+     * Dialog 关不掉、整屏点不动 —— 比误关严重得多，当天撤掉。
      *
      * 现在改成：关闭手势不拦（下拉、遮罩、返回都能正常关），但**内容留在这里**，
-     * 下次打开同一条（新建则同一个 "new"）自动恢复，顶部给一条提示和「清空」。
-     * 拦手势是把路堵死，留草稿才是把损失补回来。
+     * 下次打开同一条自动恢复。新建的 key 里带上默认日期 ——
+     * 不加的话，「第 5 周新建」填一半关掉、翻到第 12 周再新建，
+     * 恢复出来的是第 5 周那份，刚改好的默认日期又被顶回去。
+     *
+     * 不弹「已恢复」提示了（致辉 2026-11-14）：内容对得上就够，
+     * 多一条横幅反而是干扰。
      */
-    val draftKey = initial?.id ?: "new"
+    val draftKey = initial?.id ?: "new|$defaultDate"
     /*
      * 不能用 remember(draftKey) 缓存这个值。
      *
@@ -674,11 +738,10 @@ fun AgendaEditSheet(
      * 直接读（两次字段比较，无开销）。
      */
     val cachedDraft = AgendaDraftCache.peek(draftKey)
-    var restoredNotice by remember(draftKey, visible) { mutableStateOf(cachedDraft != null) }
 
     // visible 也作为 key：每次重新打开都从入参重建草稿，不残留上次没保存的编辑。
-    var draft by remember(initial, draftDate, draftStartMinute, semester, visible) {
-        mutableStateOf(cachedDraft ?: buildDraft(initial, draftDate, draftStartMinute, semester))
+    var draft by remember(initial, defaultDate, draftStartMinute, semester, visible) {
+        mutableStateOf(cachedDraft ?: buildDraft(initial, defaultDate, draftStartMinute, semester))
     }
     // 每次改动落进缓存；面板不可见时不写，否则关闭那一刻会用默认值盖掉草稿
     LaunchedEffect(draft, draftKey, visible) {
@@ -778,8 +841,12 @@ fun AgendaEditSheet(
          * 填一半的内容全没了。开启半屏后：全屏往下拖只会回到半屏，
          * 要关得从半屏再拖一次 —— 误触成本从「一次手滑」变成「连续两次」，
          * 而且中间那一步是可逆的。
+         *
+         * 但**打开时要满屏**（致辉 2026-11-14 定）：表单字段多，
+         * 停在半屏得先往上拖一次才看得全。半屏留着但只在用户自己往下拖时出现。
          */
         skipPartiallyExpanded = false,
+        expandOnOpen = true,
     ) {
         Column(
             modifier
@@ -802,39 +869,6 @@ fun AgendaEditSheet(
                 currentKey = currentEntryKey,
                 onSwitch = onSwitchEntry,
             )
-
-            if (restoredNotice) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(scheme.primary.copy(alpha = 0.09f))
-                        .padding(start = 14.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "已恢复上次没保存的内容",
-                        fontSize = 12.sp,
-                        color = scheme.primary,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        "清空",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = scheme.primary,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable {
-                                AgendaDraftCache.clear(draftKey)
-                                draft = buildDraft(initial, draftDate, draftStartMinute, semester)
-                                restoredNotice = false
-                            }
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
-                    )
-                }
-                Spacer(Modifier.height(14.dp))
-            }
 
             if (!hasSemester) {
                 Box(
@@ -1048,6 +1082,43 @@ fun AgendaEditSheet(
                 )
             }
 
+            // 提醒
+            Spacer(Modifier.height(16.dp))
+            FieldRow(
+                label = "提醒",
+                value = AgendaReminder.summary(draft.remind),
+                expanded = openWheel == "remind",
+                onClick = { openWheel = if (openWheel == "remind") null else "remind" },
+            )
+            if (openWheel == "remind") {
+                Spacer(Modifier.height(8.dp))
+                RemindChips(
+                    selected = draft.remind,
+                    onSelect = { draft = draft.copy(remind = it) },
+                )
+            }
+            /*
+             * 设了提醒但通知权限没开 = 白设。和设置页「上课提醒」那里同一句文案，
+             * 直接给一个可点的入口，不用用户自己去系统设置里翻。
+             */
+            if (draft.remind.isNotEmpty() && !notifyGranted) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "通知权限未开启，提醒不会弹出 · 点这里开启",
+                    fontSize = 10.5.sp,
+                    lineHeight = 15.sp,
+                    color = scheme.error,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            runCatching {
+                                requestNotify.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                            }
+                        }
+                        .padding(vertical = 4.dp),
+                )
+            }
+
             // 地点 / 备注
             Spacer(Modifier.height(16.dp))
             LabeledInput(
@@ -1177,8 +1248,11 @@ fun AgendaEditSheet(
                                     weekly = draft.weekly,
                                     unitStart = if (draft.byUnit) draft.unitStart else 0,
                                     unitEnd = if (draft.byUnit) draft.unitEnd else 0,
-                                    // v1 不做提醒，沿用旧值 / 默认 -1，表单不展示
-                                    remindMinutesBefore = initial?.remindMinutesBefore ?: -1,
+                                    /*
+                                     * 提醒：表单里选了什么就存什么（-1 = 不提醒）。
+                                     * 排程由 ViewModel 在保存后统一重排，这里只管落库。
+                                     */
+                                    remindLeads = draft.remind,
                                 )
                             )
                         }
@@ -1422,6 +1496,69 @@ private fun WheelColumn(
 
 /** 一天里第几分钟 → 滚轮可读的 HH:mm */
 private fun minuteLabel(m: (Int) -> Int): (Int) -> String = { i -> "%02d".format(m(i)) }
+
+/**
+ * 提醒档位：一排胶囊，放不下自动换行。**多选**。
+ *
+ * 可以同时选「提前 1 天 + 提前 30 分钟 + 准时」，每个档位各响一次
+ * （致辉 2026-11-15 提的：考试这类事前一天提醒一次、当天再提醒一次是真实需求）。
+ *
+ * 「不提醒」是排他项：点它清空全部；一个都没选时它显示为选中。
+ * 样式抄「重叠安排」那条（选中 = 主色淡底 + 细边框），不另造一套视觉。
+ * 用胶囊不用滚轮：8 个离散值，滚轮要一格格翻，反而慢。
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun RemindChips(selected: List<Int>, onSelect: (List<Int>) -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    androidx.compose.foundation.layout.FlowRow(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        AgendaReminder.LEADS.forEach { lead ->
+            val sel = if (lead < 0) selected.isEmpty() else lead in selected
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(
+                        if (sel) scheme.primary.copy(alpha = 0.18f)
+                        else scheme.surfaceVariant.copy(alpha = 0.40f),
+                    )
+                    .border(
+                        if (sel) 1.dp else 0.dp,
+                        if (sel) scheme.primary.copy(alpha = 0.75f) else Color.Transparent,
+                        RoundedCornerShape(9.dp),
+                    )
+                    .clickable {
+                        onSelect(
+                            when {
+                                lead < 0 -> emptyList()
+                                lead in selected -> selected - lead
+                                else -> (selected + lead).sorted()
+                            },
+                        )
+                    }
+                    .padding(horizontal = 11.dp, vertical = 7.dp),
+            ) {
+                Text(
+                    AgendaReminder.label(lead),
+                    fontSize = 11.5.sp,
+                    fontWeight = if (sel) FontWeight.Medium else FontWeight.Normal,
+                    color = if (sel) scheme.primary else scheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/** Android 13+ 才需要通知权限；低版本一律视为已授权 */
+private fun hasNotifyPermission(ctx: android.content.Context): Boolean =
+    android.os.Build.VERSION.SDK_INT < 33 ||
+        androidx.core.content.ContextCompat.checkSelfPermission(
+            ctx, android.Manifest.permission.POST_NOTIFICATIONS,
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
 /**
  * 一行「标签 + 当前值 + 展开箭头」，点一下展开/收起下面的滚轮。

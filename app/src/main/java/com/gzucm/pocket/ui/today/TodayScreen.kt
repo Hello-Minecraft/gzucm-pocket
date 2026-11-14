@@ -489,8 +489,16 @@ private fun CourseSection(
 
     if (agenda.isNotEmpty()) {
         if (sessions.isNotEmpty()) Spacer(Modifier.height(14.dp))
+        /*
+         * 标题按内容写。考试是教务推的、不是用户加的，
+         * 混排之后还写「我的日程」就不准了 —— 一天里有考试就叫「日程与考试」。
+         */
         Text(
-            "我的日程",
+            if (agenda.any { it.colorIndex == com.gzucm.pocket.core.EXAM_COLOR_INDEX }) {
+                "日程与考试"
+            } else {
+                "我的日程"
+            },
             fontSize = 12.sp,
             color = scheme.onSurfaceVariant,
         )

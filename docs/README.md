@@ -9,6 +9,8 @@
 | `PITFALLS.md` | **踩坑与实现内幕**。日程/考试/周次错位/AdaptiveSheet/重叠布局/测试 —— 每条都写清「现象 → 根因 → 修法」，改代码前先读 |
 | `GRADUATE_SUPPORT_PLAN.md` | 研究生课表接入的调研记录（两套系统的差异、接口实测结论） |
 | `MINIPROGRAM_MIGRATION_PLAN.md` | 微信小程序迁移的可行性调研（**已搁置**，当前重心在 Android） |
+| `TUTORIAL_PLAN.md` | 使用教程 / 功能引导的规划（**方案待拍板**，起因是同学反馈「功能有点复杂」） |
+| `AGENDA_REMINDER_PLAN.md` | 日程提醒的设计方案（**待讨论**：排程窗口、requestCode 隔离、表单 UI、二期抽象） |
 | `release-notes/` | v1.2.1 ~ v1.2.6 的详细发版说明 |
 | `screenshots/` | README 里用的界面截图 |
 

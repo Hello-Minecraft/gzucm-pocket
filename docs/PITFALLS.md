@@ -168,6 +168,27 @@ xs        学分
 子级 `size()` 量成 **0×0** —— 卡片存在但一个像素都画不出来（真机日志能看到 `daycol agenda=1`，界面什么都没有）。
 **用 `fillMaxSize()`**。
 
+### 滚动容器里 `fillMaxHeight` 等于没写（v1.3.6 修）
+
+`DayColumn` 的根原来是 `BoxWithConstraints(Modifier.fillMaxHeight())`，而它的上层是
+`Column(verticalScroll)` → `Row`。滚动容器给下来的是**无限高度约束**，
+`fillMaxHeight` 在无限约束下不生效，整列高度退化成「最高的课程块有多高」，
+没有课的列直接是 0。
+
+连环后果：
+
+- 长按新建日程的热区是 `fillMaxSize`，跟着缩成一条缝甚至 0 ——
+  **这个功能从 v1.3.5 上线起就没真正生效过**。界面上完全看不出来，因为课程块用
+  `offset` 定位，画到父容器外面也不裁切。
+- 「今天」那列的淡色带同样被压成一小截，颜色太淡一直没人注意。
+
+修法：显式 `.height(cellHeight * slots.size)`。
+回归测试 `AgendaLongPressTest` 先断言热区高度 ≥ 500dp，再真的长按一次 ——
+把写法换回 `fillMaxHeight` 会直接失败。
+
+教训：**判断一个触摸区域有没有生效，看代码不如断言它的高度**。
+透明热区、靠 `offset` 画的元素，布局塌了肉眼是看不出来的。
+
 ---
 
 ## 七、日视图 `DayScheduleView`

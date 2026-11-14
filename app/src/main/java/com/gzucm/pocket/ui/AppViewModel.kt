@@ -155,12 +155,33 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 新增或编辑一条日程（按 id 覆盖） */
     fun saveAgenda(item: Agenda) {
-        state = state.copy(agenda = agendaStore.upsert(item))
+        val next = agendaStore.upsert(item)
+        state = state.copy(agenda = next)
+        rescheduleAgenda(next)
     }
 
     /** 删除一条日程（每周重复会整条删掉，v1 不支持单天例外） */
     fun deleteAgenda(id: String) {
-        state = state.copy(agenda = agendaStore.delete(id))
+        val next = agendaStore.delete(id)
+        state = state.copy(agenda = next)
+        rescheduleAgenda(next)
+    }
+
+    /**
+     * 日程变了就重排提醒（全量 cancel + 重新排）。
+     *
+     * 不做增量：改动可能是「改时间 / 改提前量 / 改日期 / 每周开关 / 删掉」，
+     * 每种都要单独算「哪些旧闹钟该留」，分支比全量多得多；日程就几十条，全量是毫秒级。
+     *
+     * 没设提醒的日程会被 [AgendaReminder.plan] 直接过滤掉，同时把 12h 兜底任务停掉。
+     */
+    private fun rescheduleAgenda(rules: List<Agenda>) {
+        val sem = state.semester
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                com.gzucm.pocket.core.AgendaReminder.scheduleAll(getApplication(), sem, rules)
+            }.onFailure { android.util.Log.w("AgendaReminder", "重排失败", it) }
+        }
     }
 
     /**
@@ -200,6 +221,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 unitStart = 0,
                 unitEnd = 0,
                 weekly = false,
+                seat = e.seat,
             )
         }
     }

@@ -90,7 +90,7 @@ class AgendaStoreTest {
     fun `缺字段的旧 JSON 能反序列化`() {
         val store = AgendaStore(ctx)
         val prefs = ctx.getSharedPreferences("gzucm_pocket_agenda", android.content.Context.MODE_PRIVATE)
-        // 故意少给 colorIndex / weekly / unitStart / remindMinutesBefore，模拟旧版本写下的数据
+        // 故意少给 colorIndex / weekly / unitStart / remindLeads，模拟旧版本写下的数据
         prefs.edit().putString(
             "agenda_rules",
             """[{"id":"x","title":"旧数据","date":"2026-10-26","startMinute":510,"endMinute":550}]""",
@@ -100,7 +100,7 @@ class AgendaStoreTest {
         assertEquals("应能读出", 1, back.size)
         assertEquals(-1, back[0].colorIndex)
         assertEquals(false, back[0].weekly)
-        assertEquals(-1, back[0].remindMinutesBefore)
+        assertEquals(emptyList<Int>(), back[0].remindLeads)
     }
 
     @Test

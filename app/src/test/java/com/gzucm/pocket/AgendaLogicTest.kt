@@ -39,7 +39,7 @@ class AgendaLogicTest {
         colorIndex: Int = -1,
         unitStart: Int = 0,
         unitEnd: Int = 0,
-        remindMinutesBefore: Int = -1,
+        remindLeads: List<Int> = emptyList(),
     ) = Agenda(
         id = id,
         title = title,
@@ -52,7 +52,7 @@ class AgendaLogicTest {
         weekly = weekly,
         unitStart = unitStart,
         unitEnd = unitEnd,
-        remindMinutesBefore = remindMinutesBefore,
+        remindLeads = remindLeads,
     )
 
     // ── 学期范围 ──────────────────────────────────────────
@@ -101,7 +101,7 @@ class AgendaLogicTest {
             colorIndex = 3,
             unitStart = 3,
             unitEnd = 4,
-            remindMinutesBefore = 15,
+            remindLeads = listOf(0, 15),
         )
         val got = AgendaLogic.expand(sem, listOf(rule))
         assertEquals("学期内的单次日程应展开成 1 条", 1, got.size)
@@ -248,7 +248,7 @@ class AgendaLogicTest {
                 id = "s1", date = "2026-10-28", start = 600, end = 640,
                 title = "开会", place = "行政楼", note = "带材料",
                 colorIndex = 2, weekly = true, unitStart = 3, unitEnd = 4,
-                remindMinutesBefore = 15,
+                remindLeads = listOf(0, 15),
             ),
             agenda(id = "s2", date = "2026-11-11", start = 780, end = 820, title = "夜跑"),
         )
@@ -261,8 +261,9 @@ class AgendaLogicTest {
     }
 
     @Test
-    fun `缺少 remindMinutesBefore 的旧 JSON 能反序列化并补默认值`() {
-        // 老缓存没有 remindMinutesBefore，还夹带一个未来新增的未知字段：
+    fun `缺少提醒字段的旧 JSON 能反序列化并补默认值`() {
+        // 老缓存没有 remindLeads（v1.3.5 那个 remindMinutesBefore 也已经废掉），
+        // 还夹带一个未来新增的未知字段：
         // 依赖 Net.json 的「缺字段用默认值 + ignoreUnknownKeys」。
         val old = """[{"id":"old1","title":"旧日程","date":"2026-10-28","startMinute":600,"endMinute":640,"futureField":"ignored"}]"""
         val back = Net.json.decodeFromString(ListSerializer(Agenda.serializer()), old)
@@ -280,6 +281,75 @@ class AgendaLogicTest {
         assertEquals("缺 weekly 应补 false", false, a.weekly)
         assertEquals("缺 unitStart 应补 0", 0, a.unitStart)
         assertEquals("缺 unitEnd 应补 0", 0, a.unitEnd)
-        assertEquals("缺 remindMinutesBefore 应补 -1", -1, a.remindMinutesBefore)
+        assertEquals("缺 remindLeads 应补空列表（= 不提醒）", emptyList<Int>(), a.remindLeads)
+    }
+
+    // ── 新建日程的默认日期（致辉 2026-11-14 定） ──────────────────────
+
+    @Test
+    fun `新建默认日期-看本周取今天`() {
+        val today = LocalDate.of(2026, 11, 14)
+
+        assertEquals(
+            "看的是本周，默认应落在今天",
+            today,
+            AgendaLogic.defaultDraftDate(sem, currentWeek = 10, viewingWeek = 10, today = today),
+        )
+    }
+
+    @Test
+    fun `新建默认日期-看别的周取那一周周一`() {
+        val today = LocalDate.of(2026, 11, 14)
+
+        assertEquals(
+            "翻到第 12 周，默认应落在该周周一（9-07 + 11 周）",
+            LocalDate.of(2026, 11, 23),
+            AgendaLogic.defaultDraftDate(sem, currentWeek = 10, viewingWeek = 12, today = today),
+        )
+    }
+
+    @Test
+    fun `新建默认日期-翻回前面某周同样取该周周一`() {
+        val today = LocalDate.of(2026, 11, 14)
+
+        assertEquals(
+            "第 2 周周一 = 9-14",
+            LocalDate.of(2026, 9, 14),
+            AgendaLogic.defaultDraftDate(sem, currentWeek = 10, viewingWeek = 2, today = today),
+        )
+    }
+
+    @Test
+    fun `新建默认日期-今天在假期里时夹回学期内`() {
+        val winter = LocalDate.of(2027, 2, 1)
+
+        // 假期里 currentWeek 会被夹到最后一两圈，viewingWeek 与它相等 → 用今天，
+        // 但今天已经超出学期 → 必须夹回学期最后一天，否则表单一打开就是非法日期。
+        assertEquals(
+            "假期里看本周，应夹到学期最后一天",
+            AgendaLogic.lastDay(sem),
+            AgendaLogic.defaultDraftDate(
+                sem,
+                currentWeek = sem.totalWeeks,
+                viewingWeek = sem.totalWeeks,
+                today = winter,
+            ),
+        )
+    }
+
+    @Test
+    fun `新建默认日期-越界的查看周先夹回合法周`() {
+        val today = LocalDate.of(2026, 11, 14)
+
+        assertEquals(
+            "viewingWeek 超出总周数时应取最后一周周一",
+            sem.dateOf(sem.totalWeeks, 1),
+            AgendaLogic.defaultDraftDate(sem, currentWeek = 10, viewingWeek = 99, today = today),
+        )
+        assertEquals(
+            "viewingWeek 为 0 时应取第 1 周周一",
+            sem.dateOf(1, 1),
+            AgendaLogic.defaultDraftDate(sem, currentWeek = 10, viewingWeek = 0, today = today),
+        )
     }
 }

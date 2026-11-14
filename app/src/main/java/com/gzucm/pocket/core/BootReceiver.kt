@@ -30,6 +30,10 @@ class BootReceiver : BroadcastReceiver() {
             try {
                 runCatching { ClassReminder.rescheduleFromCache(app) }
                     .onFailure { android.util.Log.w("ClassReminder", "$action 后重排失败", it) }
+                // 日程提醒和课程提醒是两套独立的闹钟（各自 Receiver / code 段 / prefs），
+                // 同一次系统事件里各排各的，互不影响
+                runCatching { AgendaReminder.rescheduleFromCache(app) }
+                    .onFailure { android.util.Log.w("AgendaReminder", "$action 后重排失败", it) }
             } finally {
                 pending.finish()
             }

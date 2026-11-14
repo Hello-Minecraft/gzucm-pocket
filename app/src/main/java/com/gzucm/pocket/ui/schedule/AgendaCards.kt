@@ -313,8 +313,15 @@ internal fun AgendaDayCard(
                         modifier = Modifier.weight(1f, fill = false),
                     )
                     Spacer(Modifier.width(6.dp))
+                    /*
+                     * 角标按来源写「考试 / 日程」。
+                     *
+                     * 之前一律写「日程」，考试卡片混在里面看着像自己加的 ——
+                     * 红色虚线本来能区分，但通知、截图、色觉障碍这几处都靠不住，
+                     * 文字最稳。
+                     */
                     Text(
-                        "日程",
+                        if (occurrence.colorIndex == EXAM_COLOR_INDEX) "考试" else "日程",
                         fontSize = 9.sp,
                         color = color,
                         modifier = Modifier
@@ -340,9 +347,20 @@ internal fun AgendaDayCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (occurrence.note.isNotBlank()) {
+                /*
+                 * 第二行：考试类型 + 座位号（致辉 2026-11-14 要的）。
+                 *
+                 * 座位单独拼一段而不是塞进 note，是因为 note 里可能还有用户
+                 * 自己写的备注；中间用「·」隔开，空值直接跳过。
+                 * 座位对考试是刚需（进场要对号入座），所以只要拿到了就一定显示。
+                 */
+                val noteText = listOf(
+                    occurrence.note,
+                    if (occurrence.seat.isNotBlank()) "座位 ${occurrence.seat}" else "",
+                ).filter { it.isNotBlank() }.joinToString(" · ")
+                if (noteText.isNotBlank()) {
                     Text(
-                        occurrence.note,
+                        noteText,
                         fontSize = 10.5.sp,
                         color = scheme.onSurfaceVariant.copy(alpha = 0.75f),
                         maxLines = 1,

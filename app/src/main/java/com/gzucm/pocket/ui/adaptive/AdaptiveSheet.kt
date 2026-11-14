@@ -29,17 +29,20 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.flow.first
 
 /**
  * 当前面板是否渲染成「右侧侧栏」形态。
@@ -79,6 +82,24 @@ fun AdaptiveSheet(
      * 否则用户要先上滑一次才能看到全部内容。
      */
     skipPartiallyExpanded: Boolean = true,
+    /**
+     * 打开时直接顶到满屏，但**仍然可以下拉到半屏**（致辉 2026-11-14 定）。
+     *
+     * 只对手机端的底部 Sheet 生效，平板侧栏本来就没有「半屏」这回事。
+     *
+     * 为什么需要它：`skipPartiallyExpanded = false` 的面板打开时会停在半屏，
+     * 表单字段多的时候得先往上拖一次才能看到全部（新建日程就是这样）。
+     * 但直接把 skipPartiallyExpanded 改成 true 会把半屏这一档从状态机里删掉 ——
+     * 拖下去只会一路关掉，回不到「半屏」。
+     *
+     * 所以这里保持三档状态机不动，只在面板开始出现时补一次 expand()：
+     * 打开是满屏，往下拖仍然先落到半屏，再拖一次才关。
+     *
+     * 时机是等 targetValue 离开 Hidden 再 expand —— 早于那一刻调用的话
+     * 锚点还没算出来，expand() 无处可去；也不能等 currentValue 落到半屏，
+     * 那样会先在半屏明显停一下再往上顶。
+     */
+    expandOnOpen: Boolean = false,
     /**
      * 正文是否由 AdaptiveSheet 负责滚动。
      *
@@ -137,6 +158,17 @@ fun AdaptiveSheet(
             )
         } else {
             val scheme = MaterialTheme.colorScheme
+            val sheetState = rememberModalBottomSheetState(
+                skipPartiallyExpanded = skipPartiallyExpanded,
+            )
+            if (expandOnOpen) {
+                androidx.compose.runtime.LaunchedEffect(sheetState) {
+                    // 面板开始出现（说明锚点已经算好）→ 直接顶到满屏
+                    snapshotFlow { sheetState.targetValue }
+                        .first { it != SheetValue.Hidden }
+                    sheetState.expand()
+                }
+            }
             ModalBottomSheet(
                 onDismissRequest = onDismiss,
                 /*
@@ -152,9 +184,7 @@ fun AdaptiveSheet(
                  * 把关闭路径堵死了。误关要防，但只能靠在**数据层保住草稿**，
                  * 绝不能在窗口/手势层面拦。
                  */
-                sheetState = rememberModalBottomSheetState(
-                    skipPartiallyExpanded = skipPartiallyExpanded,
-                ),
+                sheetState = sheetState,
                 containerColor = scheme.surface,
                 shape = androidx.compose.foundation.shape.RoundedCornerShape(
                     topStart = 24.dp, topEnd = 24.dp,

@@ -90,6 +90,14 @@ internal fun DayScheduleView(
      * 不回调的话滑到下一周、顶部还写着旧周次。
      */
     onWeekChange: (Int) -> Unit = {},
+    /**
+     * 当前翻到的是哪一天。
+     *
+     * 日程的「新建」默认日期要用：用户在日视图里翻到 11/20 打开日程面板，
+     * 新建应该落在 11/20，而不是跳回今天。日期由这里算（页索引 → 日期），
+     * 父组件不用重复推一遍 Pager 的逻辑。
+     */
+    onDayChange: (LocalDate) -> Unit = {},
     /** 初始停在哪一天（1=周一 … 7=周日）。默认今天；不是本周就落周一 */
     initialDay: Int = 1,
     modifier: Modifier = Modifier,
@@ -193,6 +201,20 @@ internal fun DayScheduleView(
                 val w = (page / 7 + 1).coerceIn(1, semester.totalWeeks.coerceAtLeast(1))
                 if (w != latestWeek) latestOnWeekChange(w)
             }
+    }
+
+    /*
+     * 当前页 → 日期，报给父组件。
+     *
+     * 同样要 rememberUpdatedState：key 里没有 onDayChange / firstMonday 的话，
+     * 闭包捕获的是首次组合时的旧 lambda。firstMonday 变化说明换了学期，
+     * 那本来就该重新起一次。
+     */
+    val latestOnDayChange by rememberUpdatedState(onDayChange)
+    LaunchedEffect(pagerState, firstMonday) {
+        snapshotFlow { pagerState.currentPage }
+            .distinctUntilChanged()
+            .collect { page -> latestOnDayChange(firstMonday.plusDays(page.toLong())) }
     }
 
     // 全部课按「周-星期」预分组

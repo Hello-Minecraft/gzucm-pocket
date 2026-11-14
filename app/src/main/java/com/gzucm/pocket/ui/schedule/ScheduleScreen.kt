@@ -57,6 +57,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -112,8 +113,8 @@ fun ScheduleScreen(
      */
     agendaRules: List<Agenda> = emptyList(),
     agendaOccurrences: List<AgendaOccurrence> = emptyList(),
-    /** 顶部图标 → 日程管理列表 */
-    onOpenAgendaList: () -> Unit = {},
+    /** 顶部图标 → 日程管理列表。参数 = 「新建日程」的默认日期 */
+    onOpenAgendaList: (LocalDate) -> Unit = {},
     /** 点某条日程 → 编辑（传原始规则 id 对应的规则） */
     onAgendaClick: (AgendaOccurrence) -> Unit = {},
     /** 长按空白格 / 日视图加日程 → 新建（带预填的日期与起始分钟） */
@@ -275,6 +276,19 @@ fun ScheduleScreen(
     }
 
     /*
+     * 「新建日程」的默认日期（致辉 2026-11-14 定）。
+     *
+     *   周视图：看的是本周 → 今天；翻到别的周 → 那一周的周一
+     *   日视图：当前翻到的那一天（由 DayScheduleView 回调上来）
+     *
+     * 只有日视图才用 [dayAnchor] —— 它切回周视图后还留着上次的值，
+     * 不判 dayView 的话「看完周三 → 切回周视图 → 新建」会默认到周三。
+     */
+    var dayAnchor by remember { mutableStateOf<LocalDate?>(null) }
+    val weekAnchor = AgendaLogic.defaultDraftDate(semester, currentWeek, shownWeek)
+    val newAgendaDate = if (dayView) dayAnchor ?: weekAnchor else weekAnchor
+
+    /*
      * 按当前可用宽度决定是否走宽屏布局。
      *
      * 这里用 BoxWithConstraints 而不是查设备型号：平板开分屏、
@@ -337,7 +351,7 @@ fun ScheduleScreen(
                 dayView = !dayView
                 store.courseDayView = dayView
             },
-            onOpenAgenda = onOpenAgendaList,
+            onOpenAgenda = { onOpenAgendaList(newAgendaDate) },
             agendaCount = agendaRules.size,
         )
         Spacer(Modifier.height(10.dp))
@@ -368,6 +382,7 @@ fun ScheduleScreen(
                 onCourseClick = onCourseClick,
                 onAgendaClick = onAgendaClick,
                 onAddAgenda = { date, minute -> onAddAgenda(date, minute) },
+                onDayChange = { dayAnchor = it },
                 onWeekChange = onWeekChange,
                 modifier = Modifier.weight(1f),
             )
@@ -936,10 +951,21 @@ private fun DayColumn(
         )
     }
 
-    // 用 BoxWithConstraints 拿到这一列的实际宽度，才能算出每块该多宽、从哪开始
+    /*
+     * 高度必须**显式给死**，不能用 fillMaxHeight。
+     *
+     * 这条链是 Column(verticalScroll) → Row → DayColumn，
+     * 滚动容器给下来的是无限高度约束，而 fillMaxHeight 在无限约束下等于没写。
+     * 于是这个 Box 的高度退化成「最高的那个课程块有多高」，没有课的列直接是 0。
+     *
+     * 后果（致辉 2026-11-14 报「长按任意位置加日程没反应」）：
+     * 下面那层长按检测是 fillMaxSize，跟着缩成一条缝甚至 0，
+     * 手指落在格子中间根本碰不到它 —— 这个功能从加进来就没真正生效过。
+     * 今天那列的高亮带同样被压短，只是因为颜色淡没被注意到。
+     */
     BoxWithConstraints(
         modifier
-            .fillMaxHeight()
+            .height(cellHeight * slots.size)
             .padding(horizontal = 1.5.dp),
     ) {
         // 提前取出列宽：下面嵌套的 Box / forEach 里隐式接收者会变，读不到 maxWidth
@@ -969,6 +995,9 @@ private fun DayColumn(
         Box(
             Modifier
                 .fillMaxSize()
+                // 给测试一个抓手：长按热区本身是透明的，没有语义节点，
+                // 不加 tag 就只能靠坐标硬猜（AgendaLongPressTest 用）。
+                .testTag("week-grid-longpress-$weekday")
                 .pointerInput(placed, agendaForDay, slots) {
                     detectTapGestures(onLongPress = { offset ->
                         val row = with(density) { offset.y.toDp() }.value / cellHeight.value

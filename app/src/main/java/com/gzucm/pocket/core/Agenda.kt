@@ -44,8 +44,17 @@ data class Agenda(
     val weekly: Boolean = false,
     val unitStart: Int = 0,
     val unitEnd: Int = 0,
-    /** v1 不做提醒，预留字段，将来接独立提醒时不用改序列化 */
-    val remindMinutesBefore: Int = -1,
+    /**
+     * 提醒档位（分钟，0 = 准时）。空列表 = 不提醒。
+     *
+     * **可以多选**，同一条日程既「提前 1 天」又「提前 30 分钟」又「准时」——
+     * 每个档位各排一个闹钟。之所以做成集合而不是单个 Int：
+     * 考试/交材料这类事，前一天提醒一次、当天再提醒一次是真实需求。
+     *
+     * v1.3.5 里这里叫 `remindMinutesBefore: Int`（-1 = 不提醒）但没做 UI，
+     * 线上不可能有值；旧 JSON 里那个 key 会被 Net.json 的 ignoreUnknownKeys 丢掉。
+     */
+    val remindLeads: List<Int> = emptyList(),
 )
 
 /** 一条日程在某一周某一天的实例（纯内存，不落盘） */
@@ -65,6 +74,14 @@ data class AgendaOccurrence(
     val unitStart: Int,
     val unitEnd: Int,
     val weekly: Boolean,
+    /**
+     * 座位号。只有考试有（[ExamItem.seat]），自建日程一律空串。
+     *
+     * 单独一个字段而不是塞进 [note]：note 是「闭卷 / 考查」这类考试类型，
+     * 也是用户自己填的备注，两者语义不同；而且卡片上时间/考场那行本来就快写满了，
+     * 座位放第二行更容易被省略号吃掉。
+     */
+    val seat: String = "",
 )
 
 object AgendaLogic {
@@ -83,6 +100,37 @@ object AgendaLogic {
      */
     fun inSemester(semester: Semester, date: LocalDate): Boolean =
         !date.isBefore(firstDay(semester)) && !date.isAfter(lastDay(semester))
+
+    /**
+     * 周视图里「新建日程」的默认日期（致辉 2026-11-14 定）。
+     *
+     * 看的是哪一周，默认值就落在哪一周：
+     *   · 正在看本周 → 今天
+     *   · 翻到别的周 → 那一周的周一
+     *
+     * 之前一律取 `LocalDate.now()`，翻到第 12 周点新建、日期还是今天，
+     * 得先手动改一遍日期 —— 用户翻周本来就是为了在那一周加东西。
+     *
+     * 结果夹回学期内：表单只允许学期内日期，给一个必然报错的默认值
+     * 等于让用户先改日期才能保存。
+     */
+    fun defaultDraftDate(
+        semester: Semester,
+        currentWeek: Int,
+        viewingWeek: Int,
+        today: LocalDate = LocalDate.now(),
+    ): LocalDate {
+        val lastWeek = semester.totalWeeks.coerceAtLeast(1)
+        val week = viewingWeek.coerceIn(1, lastWeek)
+        val anchor = if (week == currentWeek) today else semester.dateOf(week, 1)
+        val from = firstDay(semester)
+        val to = lastDay(semester)
+        return when {
+            anchor.isBefore(from) -> from
+            anchor.isAfter(to) -> to
+            else -> anchor
+        }
+    }
 
     /** 第 unit 节的上课 / 下课分钟。节次号非法时给一个安全值 */
     fun minutesOfUnit(unit: Int): Pair<Int, Int> {
