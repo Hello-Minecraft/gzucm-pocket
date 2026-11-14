@@ -6,6 +6,7 @@
 
 | 路径 | 内容 |
 |---|---|
+| `PITFALLS.md` | **踩坑与实现内幕**。日程/考试/周次错位/AdaptiveSheet/重叠布局/测试 —— 每条都写清「现象 → 根因 → 修法」，改代码前先读 |
 | `GRADUATE_SUPPORT_PLAN.md` | 研究生课表接入的调研记录（两套系统的差异、接口实测结论） |
 | `MINIPROGRAM_MIGRATION_PLAN.md` | 微信小程序迁移的可行性调研（**已搁置**，当前重心在 Android） |
 | `release-notes/` | v1.2.1 ~ v1.2.6 的详细发版说明 |
