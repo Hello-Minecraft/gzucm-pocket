@@ -17,7 +17,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import com.gzucm.pocket.ui.components.G3CornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -88,7 +88,7 @@ fun WeekStrip(
             Column(
                 Modifier
                     .width(38.dp)
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(G3CornerShape(10.dp))
                     .background(
                         if (active) scheme.primary.copy(alpha = 0.15f)
                         else Color.Transparent,
@@ -97,7 +97,7 @@ fun WeekStrip(
                         0.7.dp,
                         if (active) scheme.primary.copy(alpha = 0.45f)
                         else scheme.outlineVariant.copy(alpha = 0.6f),
-                        RoundedCornerShape(10.dp),
+                        G3CornerShape(10.dp),
                     )
                     .clickable { onSelect(w) }
                     .padding(vertical = 6.dp),

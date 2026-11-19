@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import com.gzucm.pocket.ui.components.G3CornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import com.gzucm.pocket.ui.adaptive.AdaptiveSheet
@@ -94,7 +94,7 @@ fun PowerWhySheet(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(G3CornerShape(12.dp))
                     .background(scheme.surfaceVariant.copy(alpha = 0.35f))
                     // 用 toggleable 单点处理；Switch 自己不接点击，
                     // 否则同一次点击会翻两次，看起来「卡卡的」
@@ -250,7 +250,7 @@ private fun PointLink(title: String, body: String, action: String, onClick: () -
                     color = scheme.primary,
                     textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
+                        .clip(G3CornerShape(4.dp))
                         .clickable(onClick = onClick)
                         .padding(vertical = 2.dp, horizontal = 2.dp),
                 )

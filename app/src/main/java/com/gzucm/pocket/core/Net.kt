@@ -362,15 +362,18 @@ class SessionStore(context: Context) {
         set(v) = sp.edit().putInt(KEY_DARK_MODE, v).apply()
 
     /**
-     * 课表格子底色不透明度（0.10~1.00），默认 0.40。
+     * 课表格子底色不透明度（0.03~1.00），默认 0.40。
+     *
+     * 下限 2026-11-19 从 0.10 放到 0.03：致辉想在近乎纯磨砂的状态下看壁纸，
+     * 10% 时课程色还剩一层薄灰，压不到底。
      *
      * 以前是写死的 0.16，配上自定义壁纸时太透 —— 壁纸的花纹会从字底下穿过去。
      * 现在配磨砂用。上限放到 100% 是致辉要的：壁纸太暗时，
      * 中间档位看不出"玻璃"，得能一路推到接近实心。
      */
     var courseCellOpacity: Float
-        get() = sp.getFloat(KEY_CELL_OPACITY, 0.40f).coerceIn(0.10f, 1.00f)
-        set(v) = sp.edit().putFloat(KEY_CELL_OPACITY, v.coerceIn(0.10f, 1.00f)).apply()
+        get() = sp.getFloat(KEY_CELL_OPACITY, 0.40f).coerceIn(0.03f, 1.00f)
+        set(v) = sp.edit().putFloat(KEY_CELL_OPACITY, v.coerceIn(0.03f, 1.00f)).apply()
 
     /**
      * 课程格子背景是否做磨砂。

@@ -18,7 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import com.gzucm.pocket.ui.components.G3CornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -113,14 +113,14 @@ fun SyncPlaceholder(
                     Modifier
                         .width(120.dp)
                         .height(3.dp)
-                        .clip(RoundedCornerShape(2.dp))
+                        .clip(G3CornerShape(2.dp))
                         .background(scheme.onSurfaceVariant.copy(alpha = 0.15f)),
                 ) {
                     Box(
                         Modifier
                             .fillMaxWidth(done.toFloat() / total)
                             .height(3.dp)
-                            .clip(RoundedCornerShape(2.dp))
+                            .clip(G3CornerShape(2.dp))
                             .background(scheme.primary),
                     )
                 }

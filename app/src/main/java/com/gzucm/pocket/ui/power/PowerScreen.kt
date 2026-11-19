@@ -21,10 +21,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Tune
+import com.gzucm.pocket.ui.components.G3CornerShape
+import com.gzucm.pocket.ui.components.micaPanel
+import com.gzucm.pocket.ui.components.micaPanelColor
 import androidx.compose.material3.Icon
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -57,9 +56,10 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.Canvas
 import com.gzucm.pocket.core.PowerDaily
-import com.gzucm.pocket.ui.components.LocalFloatingBarInset
-import com.gzucm.pocket.ui.components.Fmt
 import com.gzucm.pocket.core.PowerInfo
+import com.gzucm.pocket.ui.components.Fmt
+import com.gzucm.pocket.ui.components.LocalFloatingBarInset
+import com.gzucm.pocket.ui.icons.AppIcons
 
 @Composable
 fun PowerScreen(
@@ -134,7 +134,7 @@ fun PowerScreen(
                 // 主入口：用 WebView 走一遍，cookie 由浏览器自己管，不会搬错
                 Box(
                     Modifier
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(G3CornerShape(12.dp))
                         .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
                         .clickable(onClick = onSync)
                         .padding(horizontal = 20.dp, vertical = 10.dp),
@@ -215,7 +215,9 @@ fun PowerScreen(
             Modifier
                 .fillMaxSize()
                 .padding(horizontal = hPad),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            // 卡片之间 16dp：7dp 阴影向下溢出的距离 ≈ 12~14dp，12dp 间距会把
+            // 上下两张卡的影接成一条灰带（2026-11-19 致辉报「下方阴影高一截」）
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             PowerHeader(updatedText = updatedText, onSync = onSync)
 
@@ -229,7 +231,7 @@ fun PowerScreen(
                     Modifier
                         .weight(1.12f)
                         .fillMaxHeight(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     BalanceCard(
                         power = power,
@@ -298,15 +300,26 @@ fun PowerScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item { PowerHeader(updatedText = updatedText, onSync = onSync) }
+            /*
+             * 单列这里不能直接把 LazyColumn 的 spacedBy 调到 16 ——
+             * 它同时管着下面的「每日明细」行，行距被拉大会显得松散。
+             * 所以只给两张**卡片**补 4dp，让卡片之间变 16、明细节保持 12。
+             */
             item {
-                BalanceCard(
-                    power = power,
-                    avg7 = avg7,
-                    onOpenWhy = { showWhy = true },
-                )
+                Box(Modifier.padding(bottom = 4.dp)) {
+                    BalanceCard(
+                        power = power,
+                        avg7 = avg7,
+                        onOpenWhy = { showWhy = true },
+                    )
+                }
             }
             if (daily.size >= 3) {
-                item { TrendCard(daily = daily) }
+                item {
+                    Box(Modifier.padding(bottom = 4.dp)) {
+                        TrendCard(daily = daily)
+                    }
+                }
             }
             item {
                 Text(
@@ -372,13 +385,13 @@ private fun PowerHeader(updatedText: String, onSync: () -> Unit) {
         }
         Row(
             Modifier
-                .clip(RoundedCornerShape(8.dp))
+                .clip(G3CornerShape(8.dp))
                 .clickable(onClick = onSync)
                 .padding(horizontal = 9.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                Icons.Rounded.Refresh,
+                AppIcons.Refresh,
                 contentDescription = null,
                 modifier = Modifier.size(14.dp),
                 tint = scheme.primary,
@@ -411,12 +424,27 @@ private fun BalanceCard(
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(
-                Brush.linearGradient(
+            /*
+             * 渐变的第二个色改走 micaPanelColor()：深色下面板要提亮一档，
+             * 否则外层阴影叠在近黑底上等于没加（见 MicaPanel.kt 的说明）。
+             */
+            .micaPanel(
+                20.dp,
+                /*
+                 * 两端都必须**不透明**（2026-11-19 修浅色下的色彩断层）。
+                 *
+                 * 原来第一端写的是 scheme.primary.copy(alpha = 0.14f) —— 半透明。
+                 * 它画上去之后透出来的是**页面背景** #F6F7F9，而第二端是不透明的白色面板。
+                 * 于是这一条渐变实际是「14% 主色混灰底」→「纯白」，
+                 * 中途出现一条颜色对不上的色带，看着像面板底下还压了另一层浅色。
+                 *
+                 * 改成把主色 lerp 进面板底色：还是"很淡的主色"，但完全不透明，
+                 * 两端同一个底子，过渡就干净了。
+                 */
+                brush = Brush.linearGradient(
                     listOf(
-                        scheme.primary.copy(alpha = 0.14f),
-                        scheme.surface,
+                        androidx.compose.ui.graphics.lerp(micaPanelColor(), scheme.primary, 0.14f),
+                        micaPanelColor(),
                     ),
                 ),
             )
@@ -431,14 +459,14 @@ private fun BalanceCard(
             Spacer(Modifier.width(10.dp))
             Row(
                 Modifier
-                    .clip(RoundedCornerShape(6.dp))
+                    .clip(G3CornerShape(6.dp))
                     .clickable { onOpenWhy() }
                     .padding(horizontal = 3.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // 原来的「!」圆圈换成调节图标，跟「设置」这个语义更搭
                 Icon(
-                    Icons.Rounded.Tune,
+                    AppIcons.Tune,
                     contentDescription = null,
                     modifier = Modifier.size(13.dp),
                     tint = scheme.onSurfaceVariant.copy(alpha = 0.65f),
@@ -515,8 +543,8 @@ private fun TrendCard(
 
     Column(
         outer
-            .clip(RoundedCornerShape(16.dp))
-            .background(scheme.surface)
+            // 趋势卡吃满剩余高度，是页面上最高的卡 → 降一档
+            .micaPanel(16.dp)
             .padding(horizontal = 16.dp, vertical = 15.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -606,7 +634,7 @@ private fun DeltaLegend(show: Boolean) {
         Box(
             Modifier
                 .size(7.dp)
-                .clip(RoundedCornerShape(2.dp))
+                .clip(G3CornerShape(2.dp))
                 .background(scheme.secondary),
         )
         Spacer(Modifier.width(4.dp))
@@ -619,7 +647,7 @@ private fun DeltaLegend(show: Boolean) {
         Box(
             Modifier
                 .size(7.dp)
-                .clip(RoundedCornerShape(2.dp))
+                .clip(G3CornerShape(2.dp))
                 .background(scheme.primary),
         )
         Spacer(Modifier.width(4.dp))
@@ -858,7 +886,7 @@ private fun EmptyDailyHint() {
     Box(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(G3CornerShape(12.dp))
             .background(scheme.surfaceVariant.copy(alpha = 0.35f))
             .padding(horizontal = 16.dp, vertical = 18.dp),
     ) {
@@ -892,7 +920,7 @@ private fun DailyRow(day: PowerDaily) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(11.dp))
+            .clip(G3CornerShape(11.dp))
             .background(MaterialTheme.colorScheme.surface)
             .padding(horizontal = 14.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,

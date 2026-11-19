@@ -19,11 +19,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import com.gzucm.pocket.ui.components.G3CornerShape
+import com.gzucm.pocket.ui.components.micaPanel
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -35,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.gzucm.pocket.core.ReleaseNotes
+import com.gzucm.pocket.ui.icons.AppIcons
 
 /**
  * 关于软件：应用信息 + 版本更新日志。
@@ -167,13 +166,13 @@ fun AboutScreen(
         // 返回
         Row(
             Modifier
-                .clip(RoundedCornerShape(10.dp))
+                .clip(G3CornerShape(10.dp))
                 .clickable(onClick = onBack)
                 .padding(vertical = 6.dp, horizontal = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                Icons.Rounded.ArrowBack,
+                AppIcons.ArrowBack,
                 contentDescription = "返回",
                 modifier = Modifier.size(18.dp),
                 tint = scheme.onSurfaceVariant,
@@ -195,8 +194,7 @@ fun AboutScreen(
         Column(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(scheme.surface)
+                .micaPanel(14.dp)
                 .padding(16.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -229,7 +227,7 @@ fun AboutScreen(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(G3CornerShape(10.dp))
                     .background(scheme.surfaceVariant.copy(alpha = 0.3f))
                     .clickable(enabled = !checking && !downloading) { check() }
                     .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -255,7 +253,7 @@ fun AboutScreen(
                     )
                 } else {
                     Icon(
-                        Icons.Rounded.Refresh,
+                        AppIcons.Refresh,
                         contentDescription = null,
                         modifier = Modifier.size(14.dp),
                         tint = scheme.primary.copy(alpha = 0.8f),
@@ -283,7 +281,7 @@ fun AboutScreen(
                         fontWeight = FontWeight.Medium,
                         color = scheme.surface,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(G3CornerShape(8.dp))
                             .background(scheme.primary)
                             .clickable(enabled = !downloading) { download() }
                             .padding(horizontal = 12.dp, vertical = 7.dp),
@@ -324,8 +322,7 @@ fun AboutScreen(
         Column(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(scheme.surface)
+                .micaPanel(14.dp)
                 .padding(16.dp),
         ) {
             Text("更新日志", fontSize = 13.sp, color = scheme.onSurfaceVariant)
@@ -359,7 +356,7 @@ fun AboutScreen(
                         Spacer(Modifier.width(8.dp))
                         Box(
                             Modifier
-                                .clip(RoundedCornerShape(5.dp))
+                                .clip(G3CornerShape(5.dp))
                                 .background(scheme.primary.copy(alpha = 0.14f))
                                 .padding(horizontal = 6.dp, vertical = 1.dp),
                         ) {

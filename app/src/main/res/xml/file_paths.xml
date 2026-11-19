@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider 的可见范围。**只开 cache/exports/ 一个目录**，别开 <cache-path path="."/>。
+
+  为什么只放 cache：
+    · 导出文件是一次性的，分享完就该消失。放 cache 由系统在空间紧张时回收，
+      App 不用自己管过期清理；
+    · 不放外部存储 —— 那要 MANAGE_EXTERNAL_STORAGE / 分区存储适配，
+      为了一个导出功能不值当，而且文件散在用户目录里没人管。
+
+  content:// 只对拿到临时授权的应用可读（见 Manifest 里 provider 的
+  grantUriPermissions），别的应用即使猜到 URI 也读不了。
+-->
+<paths>
+    <cache-path name="exports" path="exports/" />
+</paths>

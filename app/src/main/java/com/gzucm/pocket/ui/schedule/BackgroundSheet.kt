@@ -13,11 +13,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
+import com.gzucm.pocket.ui.components.G3CornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import com.gzucm.pocket.ui.adaptive.LocalIsWidePane
 import com.gzucm.pocket.ui.adaptive.AdaptiveSheet
+import com.gzucm.pocket.ui.adaptive.LocalIsWidePane
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -180,7 +180,7 @@ fun BackgroundSheet(
             Slider(
                 value = cellOpacity,
                 onValueChange = onCellOpacityChange,
-                valueRange = 0.10f..1.00f,
+                valueRange = 0.03f..1.00f,
                 modifier = Modifier.fillMaxWidth(),
             )
             Text(
@@ -321,7 +321,7 @@ private fun Btn(
     val scheme = MaterialTheme.colorScheme
     Box(
         modifier
-            .clip(RoundedCornerShape(12.dp))
+            .clip(G3CornerShape(12.dp))
             .background(
                 if (primary) scheme.primary.copy(alpha = 0.15f)
                 else scheme.surfaceVariant.copy(alpha = 0.6f)

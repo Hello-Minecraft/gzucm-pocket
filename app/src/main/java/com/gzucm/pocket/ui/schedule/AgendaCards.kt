@@ -1,5 +1,7 @@
 package com.gzucm.pocket.ui.schedule
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,15 +16,23 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
+import com.gzucm.pocket.ui.components.G3CornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -31,8 +41,10 @@ import androidx.compose.ui.unit.sp
 import com.gzucm.pocket.core.AgendaLogic
 import com.gzucm.pocket.core.AgendaOccurrence
 import com.gzucm.pocket.core.EXAM_COLOR_INDEX
+import com.gzucm.pocket.core.taskDueLabel
 import com.gzucm.pocket.ui.components.LocalBlurredWallpaper
 import com.gzucm.pocket.ui.components.frostedBackdrop
+import com.gzucm.pocket.ui.icons.AppIcons
 import com.gzucm.pocket.ui.theme.CoursePalette
 import com.gzucm.pocket.ui.theme.courseColor
 
@@ -47,8 +59,74 @@ internal fun agendaColor(o: AgendaOccurrence): Color = when {
     // 考试统一用主题的 error 色：不管用户给日程挑了哪个颜色，
     // 考试必须是全场最扎眼的那个，否则「明天要考试」会被一堆日程淹没
     o.colorIndex == EXAM_COLOR_INDEX -> MaterialTheme.colorScheme.error
+    // 逾期的截止任务也用 error 色 —— 和考试同级扎眼，提醒「这事该做了」
+    o.isTask && o.doneAt == null && o.deadlineAt?.let { it < System.currentTimeMillis() } == true ->
+        MaterialTheme.colorScheme.error
     o.colorIndex in CoursePalette.indices -> CoursePalette[o.colorIndex]
     else -> courseColor(o.title)
+}
+
+/** 角标文案：考试 / 截止任务 / 待办 / 日程。角标颜色沿用卡片主色 */
+internal fun agendaBadgeText(o: AgendaOccurrence): String = when {
+    o.colorIndex == EXAM_COLOR_INDEX -> "考试"
+    o.isTask && o.deadlineAt != null -> "截止任务"
+    o.isTask -> "待办"
+    else -> "日程"
+}
+
+/**
+ * 截止任务的勾选圈。**受控组件**：完成状态从 `isDone` 读，不在内部存。
+ *
+ * 交互（致辉 2026-11-17 两轮定稿）：
+ *   未完成点一下 → 震动 + 对钩 scale 弹一下 → 立即回调写 doneAt
+ *   → 卡片不变淡不消失，沉到列表最下方，第二天自动不见。
+ *   已完成点一下 → 直接取消完成（回到未完成），同样震动。
+ *
+ * 为什么状态必须外部传：
+ *   · 卡片完成后**留在列表里**，内部 `var done=true` 会让它再也点不回来；
+ *   · 列表按位置复用组合时，内部状态会串到下一张卡上（踩过，见 PITFALLS 第十二节）。
+ *
+ * 震动走 [LocalHapticFeedback]（系统触摸反馈，无需 VIBRATE 权限），
+ * 尊重用户在系统里关掉触摸反馈的偏好 —— 比直接调 Vibrator 稳妥。
+ */
+@Composable
+internal fun TaskCheckCircle(isDone: Boolean, onToggle: () -> Unit) {
+    val haptic = LocalHapticFeedback.current
+    val scheme = MaterialTheme.colorScheme
+    // 只在「刚勾上」这一下弹一下；撤销回来不弹
+    var popped by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (popped) 1.2f else 1f,
+        animationSpec = tween(160),
+        label = "check-scale",
+    )
+    Box(
+        Modifier
+            .size(30.dp)
+            .scale(scale)
+            .clip(androidx.compose.foundation.shape.CircleShape)
+            .background(
+                if (isDone) scheme.primary.copy(alpha = 0.85f) else Color.Transparent,
+            )
+            .border(
+                1.8.dp,
+                if (isDone) Color.Transparent else scheme.onSurfaceVariant.copy(alpha = 0.55f),
+                androidx.compose.foundation.shape.CircleShape,
+            )
+            .clickable {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                if (!isDone) popped = true
+                onToggle() // 即时回调，不依赖组合存活
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        androidx.compose.material3.Icon(
+            AppIcons.Check,
+            contentDescription = if (isDone) "已完成，点此取消" else "标记完成",
+            tint = if (isDone) scheme.onPrimary else scheme.onSurfaceVariant.copy(alpha = 0.7f),
+            modifier = Modifier.size(15.dp),
+        )
+    }
 }
 
 /**
@@ -142,7 +220,7 @@ internal fun AgendaGridBlock(
         Modifier
             .offset(x = xOffset, y = cellHeight.value.dp * startRow)
             .size(width = cardWidth, height = height)
-            .clip(RoundedCornerShape(7.dp))
+            .clip(G3CornerShape(7.dp))
             .frostedBackdrop(bitmap = LocalBlurredWallpaper.current)
             .background(
                 color.copy(
@@ -279,16 +357,29 @@ internal fun AgendaDayCard(
     occurrence: AgendaOccurrence,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    /** 非 null 表示这是可勾选的截止任务 / 待办；普通日程和考试传 null */
+    onTaskCheck: (() -> Unit)? = null,
 ) {
     val color = agendaColor(occurrence)
     val scheme = MaterialTheme.colorScheme
+    val done = occurrence.isTask && occurrence.doneAt != null
+    val overdue = occurrence.isTask && occurrence.deadlineAt?.let {
+        it < System.currentTimeMillis() && occurrence.doneAt == null
+    } == true
+    /*
+     * 已完成的整卡压到 45% 透明度（致辉 2026-11-17 要的「变淡」）：
+     * 不删不闪，留在最下方当"刚做完"的回执；第二天自动消失。
+     * 不用 alpha 叠在背景色上而是整卡 graphicsLayer —— 文字一起淡，才是"作废"的观感。
+     */
+    val dim = if (done) 0.45f else 1f
     Box(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .graphicsLayer { alpha = dim }
+            .clip(G3CornerShape(12.dp))
             .frostedBackdrop(bitmap = LocalBlurredWallpaper.current)
             .background(color.copy(alpha = 0.12f))
-            .border(1.dp, color.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
+            .border(1.dp, color.copy(alpha = 0.55f), G3CornerShape(12.dp))
             .clickable(onClickLabel = "查看日程 ${occurrence.title}", onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
@@ -297,7 +388,7 @@ internal fun AgendaDayCard(
                 Modifier
                     .width(4.dp)
                     .height(40.dp)
-                    .clip(RoundedCornerShape(2.dp))
+                    .clip(G3CornerShape(2.dp))
                     .background(color),
             )
             Spacer(Modifier.width(12.dp))
@@ -310,48 +401,56 @@ internal fun AgendaDayCard(
                         color = scheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        textDecoration = if (done) {
+                            androidx.compose.ui.text.style.TextDecoration.LineThrough
+                        } else null,
                         modifier = Modifier.weight(1f, fill = false),
                     )
                     Spacer(Modifier.width(6.dp))
                     /*
-                     * 角标按来源写「考试 / 日程」。
-                     *
-                     * 之前一律写「日程」，考试卡片混在里面看着像自己加的 ——
-                     * 红色虚线本来能区分，但通知、截图、色觉障碍这几处都靠不住，
-                     * 文字最稳。
+                     * 角标四态：考试 / 截止任务 / 待办 / 日程。
+                     * 文字最稳 —— 颜色、虚线在通知、截图、色觉障碍几处都靠不住。
                      */
                     Text(
-                        if (occurrence.colorIndex == EXAM_COLOR_INDEX) "考试" else "日程",
+                        agendaBadgeText(occurrence),
                         fontSize = 9.sp,
                         color = color,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
+                            .clip(G3CornerShape(4.dp))
                             .background(color.copy(alpha = 0.16f))
                             .padding(horizontal = 4.dp, vertical = 1.dp),
                     )
                 }
                 Spacer(Modifier.height(4.dp))
-                val timeText = AgendaLogic.hhmm(occurrence.startMinute) +
-                    " — " + AgendaLogic.hhmm(occurrence.endMinute)
-                val extra = if (occurrence.unitStart > 0) {
-                    val span = if (occurrence.unitEnd > occurrence.unitStart) {
-                        "-${occurrence.unitEnd}"
+                if (occurrence.isTask) {
+                    // 任务：显示截止倒计时，逾期标红置顶（逾期状态由列表排序保证）
+                    Text(
+                        taskDueLabel(occurrence.deadlineAt, System.currentTimeMillis()),
+                        fontSize = 11.sp,
+                        color = if (overdue) scheme.error else scheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                } else {
+                    val timeText = AgendaLogic.hhmm(occurrence.startMinute) +
+                        " — " + AgendaLogic.hhmm(occurrence.endMinute)
+                    val extra = if (occurrence.unitStart > 0) {
+                        val span = if (occurrence.unitEnd > occurrence.unitStart) {
+                            "-${occurrence.unitEnd}"
+                        } else ""
+                        " · 第 ${occurrence.unitStart}$span 节"
                     } else ""
-                    " · 第 ${occurrence.unitStart}$span 节"
-                } else ""
-                Text(
-                    timeText + extra +
-                        (if (occurrence.place.isBlank()) "" else " · ${occurrence.place}"),
-                    fontSize = 11.sp,
-                    color = scheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                    Text(
+                        timeText + extra +
+                            (if (occurrence.place.isBlank()) "" else " · ${occurrence.place}"),
+                        fontSize = 11.sp,
+                        color = scheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 /*
                  * 第二行：考试类型 + 座位号（致辉 2026-11-14 要的）。
-                 *
-                 * 座位单独拼一段而不是塞进 note，是因为 note 里可能还有用户
-                 * 自己写的备注；中间用「·」隔开，空值直接跳过。
                  * 座位对考试是刚需（进场要对号入座），所以只要拿到了就一定显示。
                  */
                 val noteText = listOf(
@@ -367,6 +466,11 @@ internal fun AgendaDayCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+            }
+            // 截止任务右侧勾选圈：点击播对钩动画 + 震动，回调由 ViewModel 标记完成
+            if (onTaskCheck != null) {
+                Spacer(Modifier.width(10.dp))
+                TaskCheckCircle(isDone = done, onToggle = onTaskCheck)
             }
         }
     }

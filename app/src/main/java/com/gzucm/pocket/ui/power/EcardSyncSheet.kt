@@ -18,7 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
+import com.gzucm.pocket.ui.components.G3CornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -169,7 +169,7 @@ fun EcardSyncSheet(
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(G3CornerShape(10.dp))
                         .background(MaterialTheme.colorScheme.error.copy(alpha = 0.12f))
                         .padding(horizontal = 12.dp, vertical = 9.dp),
                 ) {
@@ -188,7 +188,7 @@ fun EcardSyncSheet(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(G3CornerShape(14.dp))
                     .background(MaterialTheme.colorScheme.background),
             ) {
                 AndroidView(

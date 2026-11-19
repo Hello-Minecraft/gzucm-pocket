@@ -1,12 +1,18 @@
 package com.gzucm.pocket.ui
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -16,6 +22,7 @@ import com.gzucm.pocket.ui.adaptive.AppNavigationRail
 import com.gzucm.pocket.ui.adaptive.NavRailItem
 import com.gzucm.pocket.ui.adaptive.rememberLayout
 import com.gzucm.pocket.ui.adaptive.usesNavigationRail
+import com.gzucm.pocket.ui.icons.AppIcons
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -28,14 +35,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Bolt
-import androidx.compose.material.icons.rounded.CalendarMonth
-import androidx.compose.material.icons.rounded.Insights
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.WbSunny
+import com.gzucm.pocket.ui.components.G3CornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -49,24 +49,34 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsPropertyKey
+import androidx.compose.ui.semantics.SemanticsPropertyReceiver
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.gzucm.pocket.core.CourseSession
+import com.gzucm.pocket.ui.components.FloatingBarDimAlpha
+import com.gzucm.pocket.ui.components.FloatingBarIdleMs
 import com.gzucm.pocket.ui.components.FloatingBarBottomGap
 import com.gzucm.pocket.ui.components.FloatingBarMinInset
 import com.gzucm.pocket.ui.components.FloatingBarOverscroll
+import com.gzucm.pocket.ui.components.FloatingBarTintAlpha
 import com.gzucm.pocket.ui.components.FloatingBarTotalInset
 import com.gzucm.pocket.ui.components.LocalFloatingBarInset
+import com.gzucm.pocket.ui.components.floatingBarGlassAlpha
 import com.gzucm.pocket.ui.components.glassStyle
 import com.gzucm.pocket.ui.components.rememberHazeState
 import com.gzucm.pocket.ui.grades.GradesScreen
@@ -74,16 +84,18 @@ import com.gzucm.pocket.ui.login.LoginScreen
 import com.gzucm.pocket.ui.power.PowerScreen
 import com.gzucm.pocket.ui.schedule.ScheduleScreen
 import com.gzucm.pocket.ui.schedule.SessionSheet
+import com.gzucm.pocket.ui.theme.ThemeState
 import com.gzucm.pocket.ui.today.TodayScreen
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeChild
 import dev.chrisbanes.haze.hazeSource
+import kotlinx.coroutines.delay
 
 internal enum class Tab(val label: String, val icon: ImageVector) {
-    Today("今日", Icons.Rounded.WbSunny),
-    Schedule("课表", Icons.Rounded.CalendarMonth),
-    Grades("成绩", Icons.Rounded.Insights),
-    Power("电费", Icons.Rounded.Bolt),
+    Today("今日", AppIcons.WbSunny),
+    Schedule("课表", AppIcons.CalendarMonth),
+    Grades("成绩", AppIcons.Insights),
+    Power("电费", AppIcons.Bolt),
 }
 
 /**
@@ -190,13 +202,13 @@ private fun WideScaffold(
                      * 侧栏底部是拇指最容易够到的地方（平板握持在两侧）。
                      */
                     com.gzucm.pocket.ui.adaptive.RailActionButton(
-                        icon = Icons.Rounded.Refresh,
+                        icon = AppIcons.Refresh,
                         label = "同步",
                         spinning = syncing,
                         onClick = onSyncClick,
                     )
                     com.gzucm.pocket.ui.adaptive.RailActionButton(
-                        icon = Icons.Rounded.Settings,
+                        icon = AppIcons.Settings,
                         label = "设置",
                         badge = hasUpdate,
                         onClick = onSettingsClick,
@@ -238,6 +250,12 @@ private fun PhoneScaffold(
                 tab = tab,
                 onSelect = onSelect,
                 campus = campus,
+                /*
+                 * 自动渐隐**只在课表页生效**（致辉 2026-11-18 补的硬约束）。
+                 * 今日 / 成绩 / 电费三页的底栏永远全亮 —— 那几页底栏是主要入口，
+                 * 淡下去会让人以为按钮没了。
+                 */
+                autoHide = tab == Tab.Schedule,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .onSizeChanged { size ->
@@ -405,6 +423,10 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
     var showRebindGuide by remember { mutableStateOf(false) }
     var showDonate by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
+    // 「导出课表」子页面（复制分享串 / 导出 JSON 文件），和关于、打赏同一层级
+    var showExport by remember { mutableStateOf(false) }
+    // 「问题反馈」子页面（大字版本号 + 问卷入口），同一层级
+    var showFeedback by remember { mutableStateOf(false) }
     // 从「登录已过期」点「去登录」进来时：设置页要自动滚到「重新登录」并抖动提示
     var focusRelogin by remember { mutableStateOf(false) }
 
@@ -499,9 +521,19 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                             powerDaily = state.powerDaily,
                             powerCheckedAt = prefs.powerCheckedAt,
                             onCourseClick = { detail = it },
+                            /*
+                             * 任务单独一路传，不混进 agendaOccurrences：
+                             * 它不受「显示明天」的日期过滤影响（截止前每天都显示），
+                             * 也需要独立的 key + 淡出动画（混在一起会 slot 复用）。
+                             */
                             agendaOccurrences = vm.agendaOccurrences(state.semester) +
                                 vm.examOccurrences(state.semester),
+                            taskCards = vm.todayTaskOccurrences(state.semester),
                             onAgendaClick = { o -> openAgendaFromOccurrence(o, state.agenda, state.exams) },
+                            onTaskCheck = { o ->
+                                // 已完成卡片仍留在首页最下方（变淡），点勾即取消完成
+                                vm.setTaskDone(o.sourceId, done = o.doneAt == null)
+                            },
                             onOpenPower = { tab = Tab.Power },
                             onOpenSettings = { showSettings = true },
                             onOpenLogin = {
@@ -670,6 +702,10 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
             draftAgendaMinute = null
             showAgendaEdit = true
         },
+        onTaskCheck = { rule ->
+            // 已完成点一下 = 取消完成（toggle），未完成点一下 = 标记完成
+            vm.setTaskDone(rule.id, done = rule.doneAt == null)
+        },
         onDismiss = {
             showAgendaList = false
             selectedExam = null
@@ -789,12 +825,14 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 // 之前只清一个，导致「在关于页下拉关掉面板」后 showSettings 还是 true，
                 // Compose 仍认为面板存在 → 留下一个透明遮罩盖在首页上，什么都点不动。
                 showAbout = false
+                showExport = false
                 showSettings = false
             },
             paneWidth = 460.dp,
             paneTitle = when {
                 showAbout -> "关于软件"
                 showDonate -> "打赏作者"
+                showExport -> "导出课表"
                 else -> "设置"
             },
             // 设置页和关于页正文自带 verticalScroll，这里必须关掉
@@ -812,10 +850,19 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
              * 整个设置面板关掉，用户以为退出了设置。跟系统设置的习惯相反。
              */
             androidx.activity.compose.BackHandler(
-                enabled = showAbout || showDonate,
+                enabled = showAbout || showDonate || showExport || showFeedback,
             ) {
                 showAbout = false
                 showDonate = false
+                showExport = false
+                showFeedback = false
+            }
+            if (showFeedback) {
+                com.gzucm.pocket.ui.settings.FeedbackSheet(
+                    visible = true,
+                    onDismiss = { showFeedback = false },
+                )
+                return@AdaptiveSheet
             }
             if (showAbout) {
                 com.gzucm.pocket.ui.settings.AboutScreen(
@@ -838,6 +885,118 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
             if (showDonate) {
                 com.gzucm.pocket.ui.settings.DonateContent(
                     onBack = { showDonate = false },
+                )
+                return@AdaptiveSheet
+            }
+            /*
+             * 导出课表子页面（致辉 2026-11-18 晚：太长就导出 json，发文件）。
+             *
+             * 和关于、打赏同一层级 —— 同一块面板换正文，返回回到设置。
+             * 不另开一层 Dialog：那会让 BACK 先关 Dialog 再关面板，
+             * 层级一乱就容易出现「按一下直接退到桌面」。
+             */
+            if (showExport) {
+                val sem = state.semester
+                val sessions = state.sessions
+                /*
+                 * 现算，不进 ViewModel：
+                 *   · 只在子页面渲染时才做（450 条分组 + 排序，几毫秒）；
+                 *   · key 里带 sessions，后台补齐周次后自动重算。
+                 *
+                 * includeContents = true **只给文件形态**：文件没有字数限制，
+                 * 逐周上课内容全带上；分享串那份仍然空着（它要能进微信）。
+                 */
+                val exportDoc = androidx.compose.runtime.remember(showExport, sem, sessions) {
+                    if (sem == null || sessions.isEmpty()) {
+                        null
+                    } else {
+                        com.gzucm.pocket.core.buildTimetableExport(
+                            semester = sem,
+                            sessions = sessions,
+                            loadedWeeks = state.loadedWeeks,
+                            versionName = com.gzucm.pocket.BuildConfig.VERSION_NAME,
+                            versionCode = com.gzucm.pocket.BuildConfig.VERSION_CODE,
+                            includeContents = true,
+                        )
+                    }
+                }
+                // 分享串永远不带 contents：它存在的唯一理由是塞进微信一条消息
+                val exportToken = androidx.compose.runtime.remember(exportDoc) {
+                    exportDoc?.let {
+                        com.gzucm.pocket.core.encodeTimetableToken(it.copy(contents = emptyList()))
+                    }
+                }
+                com.gzucm.pocket.ui.settings.ExportContent(
+                    courseCount = exportDoc?.courses?.size ?: 0,
+                    weeksCovered = exportDoc?.coverage?.weeks?.size ?: 0,
+                    totalWeeks = exportDoc?.semester?.totalWeeks ?: 0,
+                    tokenChars = exportToken?.length ?: 0,
+                    onBack = { showExport = false },
+                    onCopyToken = {
+                        if (exportToken == null || exportDoc == null) {
+                            android.widget.Toast.makeText(
+                                ctxToast,
+                                "课表还没同步，先点「立即同步」",
+                                android.widget.Toast.LENGTH_SHORT,
+                            ).show()
+                        } else {
+                            val cm =
+                                ctxToast.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                    as android.content.ClipboardManager
+                            cm.setPrimaryClip(
+                                android.content.ClipData.newPlainText("广中医口袋课表", exportToken),
+                            )
+                            val head = "已复制 %d 字符 · %d 门课".format(
+                                java.util.Locale.CHINA,
+                                exportToken.length,
+                                exportDoc.courses.size,
+                            )
+                            val warn = if (exportDoc.coverage.complete) {
+                                ""
+                            } else {
+                                "；只含 ${exportDoc.coverage.weeks.size}/" +
+                                    "${exportDoc.semester.totalWeeks} 周，建议先同步完整"
+                            }
+                            android.widget.Toast.makeText(
+                                ctxToast,
+                                head + warn,
+                                if (warn.isEmpty()) android.widget.Toast.LENGTH_SHORT
+                                else android.widget.Toast.LENGTH_LONG,
+                            ).show()
+                        }
+                    },
+                    onShareFile = {
+                        if (exportDoc == null) {
+                            android.widget.Toast.makeText(
+                                ctxToast,
+                                "课表还没同步，先点「立即同步」",
+                                android.widget.Toast.LENGTH_SHORT,
+                            ).show()
+                        } else {
+                            /*
+                             * 写 cache/exports/ → prune 只留这一份 → 抛系统分享面板。
+                             *
+                             * 整段包 runCatching：机型上「分享面板没有接收方」
+                             * 或 FileProvider 配置对不上都会抛，不能让 App 直接崩。
+                             */
+                            runCatching {
+                                val file = com.gzucm.pocket.core.TimetableExportFile
+                                    .write(ctxToast, exportDoc)
+                                com.gzucm.pocket.core.TimetableExportFile
+                                    .prune(ctxToast, keep = file)
+                                ctxToast.startActivity(
+                                    com.gzucm.pocket.core.TimetableExportFile
+                                        .shareIntent(ctxToast, file),
+                                )
+                            }.onFailure { e ->
+                                android.widget.Toast.makeText(
+                                    ctxToast,
+                                    "导出失败：${e.message}",
+                                    android.widget.Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                        }
+                    },
                 )
                 return@AdaptiveSheet
             }
@@ -869,6 +1028,14 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 semesterText = state.semester?.name ?: "—",
                 focusRelogin = focusRelogin,
                 hasUpdate = vm.hasUpdate,
+                /*
+                 * 「导出课表数据」只是入口：点它进子页面，具体两条路
+                 * （复制分享串 / 导出 JSON 文件）都在上面 showExport 分支里。
+                 *
+                 * 之前这里是「点了直接复制到剪贴板」，2026-11-18 晚致辉补了一句
+                 * 「太长就导出为 json，发文件就可以」—— 于是入口改成先让他选。
+                 */
+                onOpenExport = { showExport = true },
                 startTabIndex = prefs.startTab,
                 onStartTabChange = {
                     prefs.startTab = it
@@ -876,6 +1043,7 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                     tab = Tab.entries.getOrElse(it) { Tab.Today }
                 },
                 onDonate = { showDonate = true },
+                onOpenFeedback = { showFeedback = true },
                 onOpenAbout = { showAbout = true },
                 classReminder = vm.classReminderOn,
                 onClassReminderChange = { on ->
@@ -913,39 +1081,91 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
     }
 }
 
+/** 单测抓手：底栏当前整体 alpha（渐隐过程中在 0.15~1 之间过渡） */
+internal val FloatingBarAlphaKey = SemanticsPropertyKey<Float>("FloatingBarAlpha")
+internal var SemanticsPropertyReceiver.floatingBarAlpha by FloatingBarAlphaKey
+
 /**
  * 悬浮底栏。
  *
  * - 不贴屏幕底边，左右留边、大圆角，浮在内容之上；
  * - 用 haze 做 backdrop blur，后方滚动内容会以磨砂形式透出来；
- * - 胶囊用 `navigationBarsPadding` 避开手势小白条，下方的留白让它自然浮起。
+ * - 胶囊用 `navigationBarsPadding` 避开手势小白条，下方的留白让它自然浮起；
+ * - 只在课表页静置 3 秒后渐隐到 15%（见 [autoHide]）。
  */
 @Composable
 private fun FloatingBar(
     tab: Tab,
     onSelect: (Tab) -> Unit,
     campus: Campus,
+    /** 是否启用自动渐隐；只有课表页传 true */
+    autoHide: Boolean = true,
     modifier: Modifier = Modifier,
     hazeState: HazeState,
 ) {
     val tabs = tabsOf(campus)
     val scheme = MaterialTheme.colorScheme
-    val style = glassStyle()
+    val dark = ThemeState.isDark(isSystemInDarkTheme())
+    val style = glassStyle(alpha = floatingBarGlassAlpha(dark))
+
+    /*
+     * wakeTick 每碰一次底栏 +1，计时 effect 跟着重启：
+     * 立刻取消旧的延时、把 dimmed 拉回 false，再重新数 3 秒。
+     * 切到非课表页时 autoHide 变化也会重启 effect —— 那时不排延时，
+     * 底栏立刻全亮；切回课表页再重新数 3 秒。
+     */
+    var wakeTick by remember { mutableIntStateOf(0) }
+    var dimmed by remember { mutableStateOf(false) }
+    // 记下「按下那一刻是不是半透明」：半透明时的第一次点击只唤醒，不切页
+    var dimmedAtDown by remember { mutableStateOf(false) }
+    val currentDimmed by rememberUpdatedState(dimmed)
+    val currentAutoHide by rememberUpdatedState(autoHide)
+
+    LaunchedEffect(wakeTick, autoHide) {
+        dimmed = false
+        dimmedAtDown = false
+        if (autoHide) {
+            delay(FloatingBarIdleMs)
+            dimmed = true
+        }
+    }
+    val barAlpha by animateFloatAsState(
+        targetValue = if (autoHide && dimmed) FloatingBarDimAlpha else 1f,
+        animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing),
+        label = "floatingBarAlpha",
+    )
 
     Box(modifier = modifier.fillMaxWidth()) {
         Row(
             Modifier
                 .fillMaxWidth()
                 .windowInsetsPadding(WindowInsets.navigationBars)
+                /*
+                 * 触摸热区放在整个胶囊上，不是某个 tab 上 —— 用户点图标之间的空隙、
+                 * 点内边距也算「操作底栏」。awaitFirstDown 不 consume，
+                 * 下面各个 tab 的 clickable 照常收到点击。
+                 */
+                .pointerInput(autoHide) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        if (currentAutoHide) {
+                            dimmedAtDown = currentDimmed
+                            wakeTick++
+                        }
+                    }
+                }
+                .graphicsLayer { alpha = barAlpha }
+                .semantics { floatingBarAlpha = barAlpha }
+                .testTag("floating_bar")
                 .padding(start = 22.dp, end = 22.dp, top = 6.dp, bottom = FloatingBarBottomGap)
-                .clip(RoundedCornerShape(22.dp))
-                // 先模糊后方内容，再叠一层极淡的色调保证文字对比度
+                .clip(G3CornerShape(22.dp))
+                // 先模糊后方内容，再叠一层色调：底色用 surfaceVariant 和页面 background 拉开一档
                 .hazeChild(state = hazeState, style = style)
-                .background(scheme.surface.copy(alpha = 0.28f))
+                .background(scheme.surfaceVariant.copy(alpha = FloatingBarTintAlpha))
                 .border(
                     width = 0.8.dp,
                     color = scheme.outlineVariant.copy(alpha = 0.5f),
-                    shape = RoundedCornerShape(22.dp),
+                    shape = G3CornerShape(22.dp),
                 )
                 .padding(horizontal = 10.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
@@ -957,8 +1177,16 @@ private fun FloatingBar(
                     Modifier
                         .weight(1f)
                         .testTag("tab_${t.name}")
-                        .clip(RoundedCornerShape(16.dp))
-                        .clickable { onSelect(t) }
+                        .clip(G3CornerShape(16.dp))
+                        .clickable {
+                            /*
+                             * 半透明时第一次点击只唤醒，不切页：
+                             * 此时 alpha 0.15 的图标几乎看不清，点下去大概率是「想找底栏」
+                             * 而不是真要切页，直接切走容易误触。
+                             */
+                            if (!dimmedAtDown) onSelect(t)
+                            dimmedAtDown = false
+                        }
                         .padding(vertical = 5.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {

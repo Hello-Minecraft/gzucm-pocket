@@ -22,8 +22,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -43,6 +41,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.flow.first
+import com.gzucm.pocket.ui.components.G3CornerShape
+import com.gzucm.pocket.ui.components.micaPanel
+import com.gzucm.pocket.ui.components.micaSheetColor
+import com.gzucm.pocket.ui.components.micaSideShadow
+import com.gzucm.pocket.ui.components.isDarkSurface
+import com.gzucm.pocket.ui.icons.AppIcons
 
 /**
  * 当前面板是否渲染成「右侧侧栏」形态。
@@ -185,8 +189,15 @@ fun AdaptiveSheet(
                  * 绝不能在窗口/手势层面拦。
                  */
                 sheetState = sheetState,
-                containerColor = scheme.surface,
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(
+                /*
+                 * 底色走 micaSheetColor()，**不是** micaPanelColor()。
+                 * 后者是卡片色，Sheet 用它会让容器和卡片同色 —— 浅色下靠阴影还能分，
+                 * 深色下阴影是黑叠黑、只剩 3dp，整页塌成一块平板（2026-11-19 致辉报）。
+                 * 现在三层：页面 #0A0C0F < Sheet #101318 < 卡片 #171C23。
+                 */
+                containerColor = micaSheetColor(),
+                tonalElevation = 0.dp,
+                shape = G3CornerShape(
                     topStart = 24.dp, topEnd = 24.dp,
                 ),
             ) {
@@ -273,7 +284,20 @@ private fun RightSidePane(
                     .align(if (fromLeft) Alignment.CenterStart else Alignment.CenterEnd)
                     .width(width)
                     .fillMaxHeight()
-                    .background(scheme.surface)
+                    /*
+                     * 云母化：右侧滑出的面板向左投一圈柔和暗边。
+                     * 从左边滑出的（平板左侧导航栏那一侧）不投 —— 它贴着屏幕边缘，
+                     * 再画一层暗边等于凭空多一条黑缝。
+                     */
+                    .then(
+                        if (fromLeft) {
+                            Modifier
+                        } else {
+                            Modifier.micaSideShadow(alpha = if (isDarkSurface()) 0.50f else 0.22f)
+                        },
+                    )
+                    // 同 Sheet：容器用 micaSheetColor()，卡片才用 micaPanelColor()
+                    .background(micaSheetColor())
                     .statusBarsPadding(),
             ) {
                 // 顶栏：标题 + 关闭
@@ -301,7 +325,7 @@ private fun RightSidePane(
                     }
                     IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
                         Icon(
-                            Icons.Rounded.Close,
+                            AppIcons.Close,
                             contentDescription = "关闭",
                             tint = scheme.onSurfaceVariant,
                             modifier = Modifier.size(19.dp),

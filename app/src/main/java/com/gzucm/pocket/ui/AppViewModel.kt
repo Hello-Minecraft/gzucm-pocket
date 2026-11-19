@@ -12,6 +12,8 @@ import com.gzucm.pocket.core.Agenda
 import com.gzucm.pocket.core.AgendaLogic
 import com.gzucm.pocket.core.AgendaOccurrence
 import com.gzucm.pocket.core.AgendaStore
+import com.gzucm.pocket.core.Campus
+import com.gzucm.pocket.core.ClassReminder
 import com.gzucm.pocket.core.CourseGrade
 import com.gzucm.pocket.core.CourseSession
 import com.gzucm.pocket.core.EXAM_COLOR_INDEX
@@ -19,7 +21,6 @@ import com.gzucm.pocket.core.EXAM_PREFIX
 import com.gzucm.pocket.core.ExamItem
 import com.gzucm.pocket.core.FitnessGrade
 import com.gzucm.pocket.core.LevelGrade
-import com.gzucm.pocket.core.ClassReminder
 import com.gzucm.pocket.core.Net
 import com.gzucm.pocket.core.NetError
 import com.gzucm.pocket.core.PowerDaily
@@ -28,7 +29,6 @@ import com.gzucm.pocket.core.Semester
 import com.gzucm.pocket.data.Ecard
 import com.gzucm.pocket.data.Jw
 import com.gzucm.pocket.data.Yjs
-import com.gzucm.pocket.core.Campus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
@@ -168,6 +168,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
+     * 勾选 / 取消勾选一条截止任务。
+     *
+     * doneAt 存完成时刻（epoch millis），null = 未完成。不新增存储：任务也是 Agenda，
+     * 和日程共用同一个 agendaStore —— 致辉 2026-11-17 定的「混在一个列表」。
+     *
+     * 不做撤销票据（2026-11-17 当天改掉）：完成后卡片不消失，而是变淡沉底，
+     * 第二天自动不见 —— 想改回来直接再点一下那个勾就行，比 4.5 秒的撤销条好用。
+     */
+    fun setTaskDone(id: String, done: Boolean) {
+        val target = state.agenda.firstOrNull { it.id == id && it.isTask } ?: return
+        if ((target.doneAt != null) == done) return // 已经是目标状态，别重复写
+        val updated = target.copy(doneAt = if (done) System.currentTimeMillis() else null)
+        state = state.copy(agenda = agendaStore.upsert(updated))
+    }
+
+    /**
      * 日程变了就重排提醒（全量 cancel + 重新排）。
      *
      * 不做增量：改动可能是「改时间 / 改提前量 / 改日期 / 每周开关 / 删掉」，
@@ -191,6 +207,32 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun agendaOccurrences(semester: Semester?): List<AgendaOccurrence> =
         if (semester == null) emptyList() else AgendaLogic.expand(semester, state.agenda)
+
+    /**
+     * 首页要显示的截止任务 / 待办，按「未完成优先，已完成沉底」排序。
+     *
+     * 已完成的只留**今天勾掉的**（致辉 2026-11-17 定）：完成后不立刻消失，
+     * 卡片变淡沉到日程区最下方，第二天自动不见。隔天的已完成任务不再返回 ——
+     * 首页是「今天要做什么」，不是完成记录。
+     *
+     * 任务不进 [agendaOccurrences]（那是课表网格用的），单独一条路径传给首页。
+     */
+    fun todayTaskOccurrences(semester: Semester?): List<AgendaOccurrence> {
+        val now = System.currentTimeMillis()
+        val today = java.time.LocalDate.now()
+        val todayStart = today.atStartOfDay(java.time.ZoneId.systemDefault())
+            .toInstant().toEpochMilli()
+        return state.agenda
+            .filter { it.isTask }
+            // 已完成：只保留「今天完成的」；未完成：全留
+            .filter { it.doneAt == null || it.doneAt >= todayStart }
+            .sortedWith(
+                compareBy<Agenda> { com.gzucm.pocket.core.taskUrgency(it, now).ordinal }
+                    .thenBy { it.deadlineAt ?: Long.MAX_VALUE }
+                    .thenBy { it.title }
+            )
+            .map { com.gzucm.pocket.core.taskAsOccurrence(it, today, semester) }
+    }
 
     /**
      * 把考试也转成课表条目，跟日程一起画进周课表和日视图。

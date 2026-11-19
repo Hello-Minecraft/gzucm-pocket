@@ -18,15 +18,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import com.gzucm.pocket.ui.components.G3CornerShape
+import com.gzucm.pocket.ui.components.micaPanel
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material.icons.rounded.Favorite
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.Login
-import androidx.compose.material.icons.rounded.Logout
-import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -58,6 +52,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.gzucm.pocket.ui.icons.AppIcons
 
 @Composable
 fun SettingsScreen(
@@ -88,6 +83,10 @@ fun SettingsScreen(
     focusRelogin: Boolean = false,
     /** 有可用更新：「关于软件」那行右侧会显示提示 */
     hasUpdate: Boolean = false,
+    /** 打开「导出课表」子页面（复制分享串 / 导出 JSON 文件）。实际生成在 RootScreen */
+    onOpenExport: () -> Unit = {},
+    /** 打开「问题反馈」子页面（大字版本号 + 问卷入口）。 */
+    onOpenFeedback: () -> Unit = {},
 ) {
     val scheme = MaterialTheme.colorScheme
     val scrollState = rememberScrollState()
@@ -132,8 +131,7 @@ fun SettingsScreen(
         Column(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(scheme.surface),
+                .micaPanel(14.dp),
         ) {
             InfoRow("当前学期", semesterText.ifBlank { "—" })
             InfoRow("上次同步", lastSyncText.ifBlank { "—" })
@@ -145,8 +143,7 @@ fun SettingsScreen(
         Column(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(scheme.surface)
+                .micaPanel(14.dp)
                 .padding(14.dp),
         ) {
             Text("默认启动页", fontSize = 13.sp, color = scheme.onSurfaceVariant)
@@ -157,7 +154,7 @@ fun SettingsScreen(
                     Box(
                         Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(G3CornerShape(10.dp))
                             .background(
                                 if (on) scheme.primary.copy(alpha = 0.16f)
                                 else scheme.surfaceVariant.copy(alpha = 0.5f)
@@ -188,8 +185,8 @@ fun SettingsScreen(
         Column(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(scheme.surface),
+                // 含三档开关 + 两条步进器，是设置页最高的一张 → 降一档
+                .micaPanel(14.dp),
         ) {
             Row(
                 Modifier
@@ -314,10 +311,9 @@ fun SettingsScreen(
         Column(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(scheme.surface),
+                .micaPanel(14.dp),
         ) {
-            ActionRow("立即同步", Icons.Rounded.Refresh, onSync)
+            ActionRow("立即同步", AppIcons.Refresh, onSync)
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -339,8 +335,15 @@ fun SettingsScreen(
                             }
                         }
                     }
-                    .padding(horizontal = 4.dp)
-                    .clip(RoundedCornerShape(10.dp))
+                    /*
+                     * ⚠️ 这里不能再加 padding(horizontal = 4.dp)（2026-11-18 修）。
+                     *
+                     * 原来为了让抖动高亮块「留白好看」，在 Box 上加了一圈 4dp 内边距，
+                     * 结果把里面的 ActionRow 一起往里挤 —— 图标、文字、右边箭头
+                     * 比上面「立即同步」和下面「退出登录」各缩进 4dp，一眼就能看出错位。
+                     * 高亮块宁可齐着卡片宽度铺满，也不能牺牲行的对齐。
+                     */
+                    .clip(G3CornerShape(10.dp))
                     .background(
                         if (pulsing) {
                             val t = rememberInfiniteTransition(label = "relogin")
@@ -355,22 +358,58 @@ fun SettingsScreen(
                             )
                             scheme.primary.copy(alpha = a)
                         } else Color.Transparent
-                    )
-                    .padding(horizontal = 0.dp),
+                    ),
             ) {
-                ActionRow("重新登录", Icons.Rounded.Login, onRelogin)
+                ActionRow("重新登录", AppIcons.Login, onRelogin)
             }
-            ActionRow("退出登录", Icons.Rounded.Logout, onLogout, danger = true)
+            ActionRow("退出登录", AppIcons.Logout, onLogout, danger = true)
+            /*
+             * 导出课表（致辉 2026-11-18 要网页导入，2026-11-18 晚补文件通道）。
+             *
+             * 位置按致辉 01:35 的要求挪到「退出登录」下面，去掉原来的红点 + 「文本 / 文件」角标 ——
+             * 那是个低频入口，摆在显眼位置反而像广告。
+             *
+             * 点进来是子页面，不是直接复制 —— 两种形态各有用途：
+             *   · 分享串约 1750 字符，能塞进微信一条消息，适合发同学；
+             *   · JSON 文件带完整逐周内容，适合自己拿去喂网页。
+             * 「太长发不出去就发文件」这句提示也在子页面里。
+             */
+            ActionRow("导出课表数据", AppIcons.GridView, onOpenExport)
         }
+
+        /*
+         * 云母化（2026-11-19）：这张卡原来**紧贴**上面的操作卡，中间没有间距 ——
+         * 两张同色 surface 贴在一起，看起来像一张卡的下半部分。
+         * 现在每张卡都带阴影，紧贴会让两圈阴影在缝里叠成一条黑线，
+         * 所以补上跟别处一致的 16dp。
+         */
+        Spacer(Modifier.height(16.dp))
+
+        // ── 问题反馈 ──────────────────────────────────────────────
+        /*
+         * 放在打赏上面（致辉 2026-11-19 定）。
+         *
+         * 为什么挨着打赏：这两张卡是他的「软性入口」——一个给钱、一个给意见，
+         * 都靠用户主动点，不像同步/退出那样天天要用。摆在一起，
+         * 用户想「说点什么」的时候能一起看到。
+         */
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .micaPanel(14.dp),
+        ) {
+            ActionRow("问题反馈", AppIcons.ChatBubble, onOpenFeedback)
+        }
+
+        Spacer(Modifier.height(16.dp))
 
         // ── 打赏 ──────────────────────────────────────────────────
         Column(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(scheme.surface),
+                .micaPanel(14.dp),
         ) {
-            ActionRow("觉得软件做的不错？", Icons.Rounded.Favorite, onDonate)
+            ActionRow("觉得软件做的不错？", AppIcons.Favorite, onDonate)
         }
 
         Spacer(Modifier.height(16.dp))
@@ -379,11 +418,10 @@ fun SettingsScreen(
         Column(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(scheme.surface),
+                .micaPanel(14.dp),
         ) {
             ActionRow(
-                "关于软件", Icons.Rounded.Info, onOpenAbout,
+                "关于软件", AppIcons.Info, onOpenAbout,
                 badge = if (hasUpdate) "检测到新版本" else null,
             )
         }
@@ -485,7 +523,7 @@ private fun ActionRow(
             Spacer(Modifier.width(6.dp))
         }
         Icon(
-            Icons.Rounded.ChevronRight,
+            AppIcons.ChevronRight,
             contentDescription = null,
             modifier = Modifier.size(17.dp),
             tint = scheme.onSurfaceVariant.copy(alpha = 0.5f),
@@ -529,8 +567,7 @@ private fun ThemeCard() {
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(scheme.surface)
+            .micaPanel(14.dp)
             .padding(14.dp),
     ) {
         /*
@@ -631,7 +668,7 @@ private fun DarkModeRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(G3CornerShape(10.dp))
             .background(scheme.onSurfaceVariant.copy(alpha = 0.09f))
             .padding(3.dp),
         horizontalArrangement = Arrangement.spacedBy(3.dp),
@@ -641,7 +678,7 @@ private fun DarkModeRow(
             Box(
                 Modifier
                     .weight(1f)
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(G3CornerShape(8.dp))
                     .background(
                         if (on) scheme.primary.copy(alpha = 0.16f)
                         else androidx.compose.ui.graphics.Color.Transparent

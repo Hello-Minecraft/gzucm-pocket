@@ -17,8 +17,8 @@ android {
         targetSdk = 35
         // versionCode 由 versionName 推出：主*10000 + 次*100 + 修订
         // 1.2.5 → 10205。改版本名必须同步改 code，VersionTest 会校验。
-        versionCode = 10306
-        versionName = "1.3.6"
+        versionCode = 10400
+        versionName = "1.4.0"
         resourceConfigurations += listOf("zh", "en")
     }
 
@@ -115,7 +115,6 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")

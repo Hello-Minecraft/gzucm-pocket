@@ -20,7 +20,9 @@ import androidx.compose.foundation.layout.width
 
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
+import com.gzucm.pocket.ui.components.G3CornerShape
+import com.gzucm.pocket.ui.components.micaPanel
+import com.gzucm.pocket.ui.components.micaPanelColor
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -49,10 +51,10 @@ import kotlin.math.roundToInt
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.gzucm.pocket.core.CourseGrade
-import com.gzucm.pocket.ui.components.LocalFloatingBarInset
 import com.gzucm.pocket.core.FitnessGrade
 import com.gzucm.pocket.core.LevelGrade
 import com.gzucm.pocket.ui.components.Fmt
+import com.gzucm.pocket.ui.components.LocalFloatingBarInset
 
 internal enum class Tab(val label: String) {
     Course("课程成绩"), Level("考级"), Fitness("体测")
@@ -100,7 +102,7 @@ fun GradesScreen(
                 val active = tab == t
                 Box(
                     Modifier
-                        .clip(RoundedCornerShape(9.dp))
+                        .clip(G3CornerShape(9.dp))
                         .background(
                             if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
                             else Color.Transparent,
@@ -109,7 +111,7 @@ fun GradesScreen(
                             0.6.dp,
                             if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
                             else MaterialTheme.colorScheme.outlineVariant,
-                            RoundedCornerShape(9.dp),
+                            G3CornerShape(9.dp),
                         )
                         .clickable { tab = t }
                         .padding(horizontal = 13.dp, vertical = 7.dp),
@@ -137,7 +139,7 @@ fun GradesScreen(
             }
             Row(
                 Modifier
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(G3CornerShape(8.dp))
                     .clickable(enabled = !loading) { onRefresh() }
                     .padding(horizontal = 7.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -181,14 +183,14 @@ fun GradesScreen(
                                 Modifier
                                     .width(120.dp)
                                     .height(3.dp)
-                                    .clip(RoundedCornerShape(2.dp))
+                                    .clip(G3CornerShape(2.dp))
                                     .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f)),
                             ) {
                                 Box(
                                     Modifier
                                         .fillMaxWidth(progressDone.toFloat() / progressTotal)
                                         .height(3.dp)
-                                        .clip(RoundedCornerShape(2.dp))
+                                        .clip(G3CornerShape(2.dp))
                                         .background(MaterialTheme.colorScheme.primary),
                                 )
                             }
@@ -268,8 +270,8 @@ private fun CourseTab(
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 14.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            .padding(bottom = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         StatPill(
                             "加权绩点", Fmt.d2(weightedGpa), Modifier.weight(1f),
@@ -339,8 +341,8 @@ private fun CourseTab(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 14.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        .padding(bottom = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     StatPill(
                         "加权绩点", Fmt.d2(weightedGpa), Modifier.weight(1f),
@@ -450,8 +452,7 @@ private fun CategoryBreakdown(
         Modifier
             .fillMaxWidth()
             .padding(top = 6.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(scheme.surface)
+            .micaPanel(14.dp)
             .padding(horizontal = 16.dp, vertical = 15.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -495,14 +496,14 @@ private fun CategoryBreakdown(
                     Modifier
                         .fillMaxWidth()
                         .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp))
+                        .clip(G3CornerShape(2.dp))
                         .background(scheme.outlineVariant.copy(alpha = 0.5f)),
                 ) {
                     Box(
                         Modifier
                             .fillMaxWidth(ratio)
                             .height(4.dp)
-                            .clip(RoundedCornerShape(2.dp))
+                            .clip(G3CornerShape(2.dp))
                             .background(scheme.primary.copy(alpha = 0.75f)),
                     )
                 }
@@ -530,7 +531,7 @@ private fun ScopeChip(text: String, selected: Boolean, onClick: () -> Unit) {
         fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
         color = if (selected) scheme.primary else scheme.onSurfaceVariant,
         modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
+            .clip(G3CornerShape(8.dp))
             .background(if (selected) scheme.primary.copy(alpha = 0.13f) else Color.Transparent)
             .clickable(onClick = onClick)
             .padding(horizontal = 9.dp, vertical = 5.dp),
@@ -574,7 +575,7 @@ private fun GradeRow(g: CourseGrade) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(11.dp))
+            .clip(G3CornerShape(11.dp))
             .background(scheme.surface)
             .padding(horizontal = 13.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -655,9 +656,8 @@ private fun GpaTrendCard(grades: List<CourseGrade>) {
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(bottom = 14.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(scheme.surface)
+            .padding(bottom = 16.dp)
+            .micaPanel(14.dp)
             .padding(horizontal = 12.dp, vertical = 14.dp),
     ) {
         // 顶部读数
@@ -810,9 +810,8 @@ private fun ScoreBarCard(grades: List<CourseGrade>) {
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(bottom = 14.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(scheme.surface)
+            .padding(bottom = 16.dp)
+            .micaPanel(14.dp)
             .padding(horizontal = 12.dp, vertical = 14.dp),
     ) {
         Row(
@@ -933,23 +932,44 @@ private fun StatPill(
     val scheme = MaterialTheme.colorScheme
     val clickable = if (onClick != null) {
         Modifier
-            .clip(RoundedCornerShape(14.dp))
+            .clip(G3CornerShape(14.dp))
             .clickable(onClick = onClick)
     } else Modifier
 
     Column(
         modifier
-            .then(clickable)
-            .clip(RoundedCornerShape(14.dp))
-            .background(if (selected) scheme.primary.copy(alpha = 0.10f) else scheme.surface)
-            .border(
-                width = if (onClick != null) 0.9.dp else 0.dp,
-                color = when {
-                    onClick == null -> Color.Transparent
-                    selected -> scheme.primary.copy(alpha = 0.55f)
-                    else -> scheme.outlineVariant
+            /*
+             * ⚠️ 顺序：micaPanel 必须在 clickable **之前**。
+             *
+             * clickable 那一层自带 `clip(G3CornerShape(14.dp))`，而 clip 会裁剪
+             * 后续所有绘制 —— 把带阴影的 micaPanel 放在它后面，阴影会被整圈裁掉，
+             * 看起来就是"加了阴影但一点效果都没有"。阴影必须在裁剪层之外。
+             *
+             * 选中态用 lerp 把主色混进面板底色，而不是叠一层半透明 primary：
+             * 半透明底会把面板后面的背景透上来，深色下失去 Mica 的提亮。
+             *
+             * 未选中态**不画 outlineVariant 描边**（2026-11-19 云母化）：
+             * 边界交给阴影。选中态那 0.9dp 主色描边保留 —— 它是状态信号，不是装饰。
+             */
+            .micaPanel(
+                14.dp,
+                color = if (selected) {
+                    androidx.compose.ui.graphics.lerp(micaPanelColor(), scheme.primary, 0.10f)
+                } else {
+                    micaPanelColor()
                 },
-                shape = RoundedCornerShape(14.dp),
+            )
+            .then(clickable)
+            .then(
+                if (selected) {
+                    Modifier.border(
+                        width = 0.9.dp,
+                        color = scheme.primary.copy(alpha = 0.55f),
+                        shape = G3CornerShape(14.dp),
+                    )
+                } else {
+                    Modifier
+                },
             )
             .padding(vertical = 13.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -998,7 +1018,7 @@ private fun LevelTab(
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(13.dp))
+                    .clip(G3CornerShape(13.dp))
                     .background(MaterialTheme.colorScheme.surface)
                     .padding(horizontal = 14.dp, vertical = 13.dp),
             ) {
@@ -1064,7 +1084,7 @@ private fun FitnessTab(
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(13.dp))
+                    .clip(G3CornerShape(13.dp))
                     .background(MaterialTheme.colorScheme.surface)
                     .padding(horizontal = 14.dp, vertical = 13.dp),
             ) {
@@ -1087,7 +1107,7 @@ private fun FitnessTab(
                         Spacer(Modifier.width(7.dp))
                         Box(
                             Modifier
-                                .clip(RoundedCornerShape(6.dp))
+                                .clip(G3CornerShape(6.dp))
                                 .background(levelColor(f.level).copy(alpha = 0.18f))
                                 .padding(horizontal = 7.dp, vertical = 2.dp),
                         ) {
@@ -1183,7 +1203,7 @@ private fun EmptyBox(
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(9.dp))
+                        .clip(G3CornerShape(9.dp))
                         .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
                         .clickable(onClick = onOpenLogin)
                         .padding(horizontal = 16.dp, vertical = 7.dp),

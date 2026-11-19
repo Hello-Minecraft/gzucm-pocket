@@ -35,14 +35,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ChevronLeft
-import androidx.compose.material.icons.rounded.GridView
-import androidx.compose.material.icons.rounded.ViewAgenda
-import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material.icons.rounded.Wallpaper
-import androidx.compose.material.icons.rounded.EventNote
+import com.gzucm.pocket.ui.components.G3CornerShape
+import com.gzucm.pocket.ui.components.TodayFab
 import androidx.compose.material3.Icon
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
@@ -55,6 +49,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
@@ -75,12 +70,17 @@ import com.gzucm.pocket.core.AgendaGeometry
 import com.gzucm.pocket.core.AgendaLogic
 import com.gzucm.pocket.core.AgendaOccurrence
 import com.gzucm.pocket.core.CourseSession
+import com.gzucm.pocket.core.Semester
 import com.gzucm.pocket.core.SlotEndTimes
 import com.gzucm.pocket.core.SlotTimes
 import com.gzucm.pocket.ui.components.CourseBackground
 import com.gzucm.pocket.ui.components.LocalFloatingBarInset
 import com.gzucm.pocket.ui.components.frostedBackdrop
-import com.gzucm.pocket.core.Semester
+import com.gzucm.pocket.ui.components.BackdropInk
+import com.gzucm.pocket.ui.components.LocalBackdropInk
+import com.gzucm.pocket.ui.components.backdropInkColor
+import com.gzucm.pocket.ui.components.rememberBackdropInk
+import com.gzucm.pocket.ui.icons.AppIcons
 import com.gzucm.pocket.ui.theme.courseColor
 import java.time.LocalDate
 
@@ -232,6 +232,67 @@ fun ScheduleScreen(
     // 日程同样按周分组，但和 [byWeek] 完全分开，不混进课程列表
     val agendaByWeek = remember(agendaOccurrences) { agendaOccurrences.groupBy { it.week } }
 
+    /*
+     * 「周 → 星期」的第二层分组也在页面层一次算完（2026-11-17）。
+     *
+     * 原来这层画在页面内容里：课程是 `byWeek[week].groupBy{}`，
+     * 日程是 DayColumn 里逐天 `agendaForWeek.filter { it.weekday == wd }`。
+     * 翻页时 pagerState.currentPage 一变（拖过一半就会变），
+     * 整个 ScheduleScreen 重组，这些分组跟着重跑一遍 —— 正好压在
+     * 手指还在滑的那几帧上。搬到这里之后，翻页只剩布局和绘制。
+     */
+    val byWeekday = remember(byWeek) {
+        byWeek.mapValues { (_, list) -> list.groupBy { it.weekday } }
+    }
+    val agendaByWeekday = remember(agendaByWeek) {
+        agendaByWeek.mapValues { (_, list) -> list.groupBy { it.weekday } }
+    }
+
+    /*
+     * 轮换次数按周切好。
+     *
+     * 原来是 `rotations.filterKeys{...}.mapKeys{...}` 写在页面内容里，
+     * 每次重组都新建一个 Map、逐条比前缀。内容一样时 remember 的 key
+     * 按 equals 还能比过去，但分配和过滤是白做的，而且发生在拖动途中。
+     * 现在只在真的点过轮换（rotations 变了）时重建。
+     */
+    val rotationsByWeek = remember(rotations) {
+        val out = HashMap<Int, MutableMap<Int, Int>>()
+        rotations.forEach { (key, turns) ->
+            val w = key.substringBefore("-").toIntOrNull() ?: return@forEach
+            val cid = key.substringAfter("-").toIntOrNull() ?: return@forEach
+            out.getOrPut(w) { HashMap() }[cid] = turns
+        }
+        out
+    }
+
+    /*
+     * 今天是第几周、星期几：页面层算一次，往下传两个 Int。
+     *
+     * 原来把这件事包成 lambda 传进 WeekGrid（isTodayOf(semester, week, wd)），
+     * 每个格子各调一次 LocalDate.now()，一页 7 次；闭包还让 WeekGrid
+     * 每次重组都得重新执行一遍内容区。
+     */
+    val today = LocalDate.now()
+    val todayWeek = semester.weekOf(today)
+    val todayWeekday = today.dayOfWeek.value
+
+    /*
+     * 相邻页预排：**首帧画完之后**才打开（致辉 2026-11-17 定）。
+     *
+     * 一直开着 → 进课表页那一帧要组合三页，首屏变慢；
+     * 一直关着 → 翻页第一下按需组合，就是「第一下不跟手」。
+     *
+     * 折中：先用 0 把当前页画出来，两帧之后再补上左右相邻页。
+     * 两帧 ≈ 33ms，用户还在看首屏；等他抬手滑动时相邻页早就在树上了。
+     */
+    var prefetchNeighbors by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        withFrameNanos { } // 当前页的组合 + 测量已经跑完
+        withFrameNanos { } // 等这一帧真的提交给渲染，再排队组合相邻页
+        prefetchNeighbors = true
+    }
+
     val pagerState = rememberPagerState(
         initialPage = (viewingWeek - 1).coerceIn(0, totalWeeks - 1),
     ) { totalWeeks }
@@ -331,9 +392,16 @@ fun ScheduleScreen(
         androidx.compose.runtime.CompositionLocalProvider(
             com.gzucm.pocket.ui.components.LocalWallpaperBounds provides bgBounds,
             com.gzucm.pocket.ui.components.LocalBlurredWallpaper provides blurredBg,
+            com.gzucm.pocket.ui.components.LocalHasCustomBackdrop provides !bgPath.isNullOrBlank(),
             com.gzucm.pocket.ui.components.LocalCellOpacity provides cellOpacity,
             // 整屏已经糊了的话，逐格磨砂既看不出又白花性能，直接关掉
             com.gzucm.pocket.ui.components.LocalCellFrostEnabled provides (cellFrost && !bgBlur),
+            /*
+             * 压在壁纸上的文字按**壁纸亮度**取墨色（设计文档 §5.2）：
+             * 亮背景用深色字、暗背景用浅色字，与主题深浅无关。
+             * 不垫底板 —— 致辉 2026-11-18 看过实机后否掉了白方块方案。
+             */
+            LocalBackdropInk provides rememberBackdropInk(blurredBg),
         ) {
         Column(
             Modifier
@@ -387,50 +455,81 @@ fun ScheduleScreen(
                 modifier = Modifier.weight(1f),
             )
         } else {
-        Spacer(Modifier.height(8.dp))
-        WeekdayStrip(semester, shownWeek, currentWeek, wide = wide)
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            Column(Modifier.fillMaxSize()) {
+                Spacer(Modifier.height(8.dp))
+                WeekdayStrip(semester, shownWeek, todayWeek, todayWeekday, wide = wide)
 
-        Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(8.dp))
 
-        // 水平翻页：跟手拖动、松手按速度吸附、到边界回弹
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            key = { it },
-        ) { page ->
-            val week = page + 1
-            WeekGrid(
-                semester = semester,
-                week = week,
-                slots = slots,
-                byWeekday = remember(byWeek[week]) {
-                    byWeek[week].orEmpty()
-                        .groupBy { it.weekday }
+                // 水平翻页：跟手拖动、松手按速度吸附、到边界回弹
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    /*
+                     * 相邻页预排（2026-11-17，致辉报「翻页第一下不跟手」）。
+                     *
+                     * 默认值 0 = 下一页要等手指真的拖动起来才开始组合。一周网格里有
+                     * 39 个节次文本 + 二三十个课程块（每块两三个 Text）、还有每天的
+                     * 冲突排布，一页的组合不是免费的 —— 全压在手指开始拖的那一帧里做，
+                     * 看到的就是「第一下拖不动，后面几下反而顺」。
+                     *
+                     * 但常开 1 会让首屏多组合两页，所以延到首帧画完再开
+                     * （见上面的 prefetchNeighbors）：首屏速度不变，翻页时相邻页已在树上。
+                     *
+                     * 上限夹到 totalWeeks - 1：单周学期没有相邻页可排，别越界。
+                     */
+                    beyondViewportPageCount = if (prefetchNeighbors) {
+                        (totalWeeks - 1).coerceIn(0, 1)
+                    } else {
+                        0
+                    },
+                    key = { it },
+                ) { page ->
+                    val week = page + 1
+                    WeekGrid(
+                        semester = semester,
+                        week = week,
+                        todayWeek = todayWeek,
+                        todayWeekday = todayWeekday,
+                        slots = slots,
+                        byWeekday = byWeekday[week].orEmpty(),
+                        overlapMode = overlapMode,
+                        wide = wide,
+                        showGrid = gridLines,
+                        rotationSnapshot = rotationsByWeek[week].orEmpty(),
+                        onRotateCluster = { cid ->
+                            val key = "$week-$cid"
+                            rotations = rotations + (key to ((rotations[key] ?: 0) + 1))
+                        },
+                        onCourseClick = onCourseClick,
+                        agendaByDay = agendaByWeekday[week].orEmpty(),
+                        onAgendaClick = onAgendaClick,
+                        onLongPressBlank = { wd, minute ->
+                            // 长按空白格：日期取当前查看的这一周的这一天，时间由 y 反推
+                            val date = semester.dateOf(week, wd)
+                            if (AgendaLogic.inSemester(semester, date)) {
+                                onAddAgenda(date, minute)
+                            }
+                        },
+                        isLoading = loadedWeeks != null && week !in loadedWeeks,
+                    )
+                }
+            }
+            /*
+             * 回到今天（周视图）：只判断「当前翻到的周是不是今天那周」。
+             *
+             * 不动垂直滚动位置 —— 用户停在周三往下滚了一段，回来时还停在原处，
+             * 比强制滚到顶部更符合「我还在这一周」的预期。
+             */
+            TodayFab(
+                visible = shownWeek != todayWeek && todayWeek in 1..totalWeeks,
+                onClick = {
+                    pickScope.launch { pagerState.animateScrollToPage(todayWeek - 1) }
                 },
-                isTodayOf = { wd -> isTodayOf(semester, week, wd) },
-                overlapMode = overlapMode,
-                wide = wide,
-                showGrid = gridLines,
-                rotationSnapshot = rotations
-                    .filterKeys { it.startsWith("$week-") }
-                    .mapKeys { it.key.substringAfter("-").toIntOrNull() ?: -1 },
-                onRotateCluster = { cid ->
-                    val key = "$week-$cid"
-                    rotations = rotations + (key to ((rotations[key] ?: 0) + 1))
-                },
-                onCourseClick = onCourseClick,
-                agendaForWeek = agendaByWeek[week].orEmpty(),
-                onAgendaClick = onAgendaClick,
-                onLongPressBlank = { wd, minute ->
-                    // 长按空白格：日期取当前查看的这一周的这一天，时间由 y 反推
-                    val date = semester.dateOf(week, wd)
-                    if (AgendaLogic.inSemester(semester, date)) {
-                        onAddAgenda(date, minute)
-                    }
-                },
-                isLoading = loadedWeeks != null && week !in loadedWeeks,
+                modifier = Modifier.align(Alignment.BottomEnd),
             )
         }
         } // else (周视图)
@@ -500,9 +599,12 @@ fun ScheduleScreen(
 private fun WeekGrid(
     semester: Semester,
     week: Int,
+    /** 今天在第几周 / 星期几。不在学期里时 todayWeek 不在 1..totalWeeks，自然谁都不算今天 */
+    todayWeek: Int,
+    todayWeekday: Int,
     slots: List<Int>,
+    /** 这一周「星期几 → 课程」，页面层已经分好组 */
     byWeekday: Map<Int, List<CourseSession>>,
-    isTodayOf: (Int) -> Boolean,
     overlapMode: Boolean = true,
     /** 宽屏档位：节次列更宽、字号更大、重叠课改并排 */
     wide: Boolean = false,
@@ -512,8 +614,8 @@ private fun WeekGrid(
     rotationSnapshot: Map<Int, Int> = emptyMap(),
     onRotateCluster: (Int) -> Unit = {},
     onCourseClick: (CourseSession) -> Unit,
-    /** 这一周的日程实例（已按学期展开），和课程列表并列传入，不合并 */
-    agendaForWeek: List<AgendaOccurrence> = emptyList(),
+    /** 这一周「星期几 → 日程实例」，和课程并列，不合并 */
+    agendaByDay: Map<Int, List<AgendaOccurrence>> = emptyMap(),
     onAgendaClick: (AgendaOccurrence) -> Unit = {},
     /** 长按空白格：(星期 1..7, 反推出来的起始分钟) */
     onLongPressBlank: (Int, Int) -> Unit = { _, _ -> },
@@ -562,15 +664,21 @@ private fun WeekGrid(
                             weekday = wd,
                             slots = slots,
                             sessions = byWeekday[wd].orEmpty(),
-                            isToday = isTodayOf(wd),
+                            isToday = todayWeek == week && todayWeekday == wd,
                             overlapMode = overlapMode,
                             wide = wide,
                             rotationSnapshot = rotationSnapshot,
                             onRotateCluster = onRotateCluster,
                             onCourseClick = onCourseClick,
-                            agendaForDay = agendaForWeek.filter { it.weekday == wd },
+                            agendaForDay = agendaByDay[wd].orEmpty(),
                             onAgendaClick = onAgendaClick,
                             onLongPressBlank = { minute -> onLongPressBlank(wd, minute) },
+                            /*
+                             * tag 里带上周次：预排相邻页之后，同一时刻树上
+                             * 有三页的长按热区，只用 `-星期` 会撞重名
+                             * （AgendaLongPressTest 取节点时就会拿到 3 个）。
+                             */
+                            longPressTag = "week-grid-longpress-$week-$wd",
                         )
                     }
                 }
@@ -614,6 +722,8 @@ private fun SlotColumn(
     big: Boolean = false,
 ) {
     val scheme = MaterialTheme.colorScheme
+    val ink = LocalBackdropInk.current
+    val onImage = ink != BackdropInk.Unknown
     Column(Modifier.width(width)) {
         slots.forEach { unit ->
             Column(
@@ -626,21 +736,25 @@ private fun SlotColumn(
                 Text(
                     "$unit",
                     fontSize = if (big) 13.sp else 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = scheme.onSurfaceVariant,
+                    fontWeight = if (onImage) FontWeight.SemiBold else FontWeight.Medium,
+                    color = backdropInkColor(ink, 0) ?: scheme.onSurfaceVariant,
                 )
                 Text(
                     SlotTimes[unit] ?: "",
                     fontSize = if (big) 9.5.sp else 7.5.sp,
                     lineHeight = if (big) 11.sp else 9.sp,
-                    color = scheme.onSurfaceVariant.copy(alpha = 0.55f),
+                    fontWeight = if (onImage) FontWeight.Medium else FontWeight.Normal,
+                    color = backdropInkColor(ink, 1)
+                        ?: scheme.onSurfaceVariant.copy(alpha = 0.55f),
                 )
                 // 下课时间：比上课时间更淡，两行不至于抢注意力
                 Text(
                     SlotEndTimes[unit] ?: "",
                     fontSize = if (big) 9.sp else 7.sp,
                     lineHeight = if (big) 10.sp else 8.sp,
-                    color = scheme.onSurfaceVariant.copy(alpha = 0.35f),
+                    fontWeight = if (onImage) FontWeight.Medium else FontWeight.Normal,
+                    color = backdropInkColor(ink, 2)
+                        ?: scheme.onSurfaceVariant.copy(alpha = 0.35f),
                 )
             }
         }
@@ -724,11 +838,6 @@ private val cellHeight = 58.dp
 private val slotColumnPhone = 30.dp
 private val slotColumnWide = 56.dp
 
-private fun isTodayOf(semester: Semester, week: Int, weekday: Int): Boolean {
-    val today = LocalDate.now()
-    return semester.weekOf(today) == week && today.dayOfWeek.value == weekday
-}
-
 @Composable
 private fun WeekHeader(
     semester: Semester,
@@ -744,6 +853,8 @@ private fun WeekHeader(
     /** 已有几条日程，用来在图标上加个小角标 */
     agendaCount: Int = 0,
 ) {
+    val ink = LocalBackdropInk.current
+    val onImage = ink != BackdropInk.Unknown
     Row(
         Modifier
             .fillMaxWidth()
@@ -755,13 +866,16 @@ private fun WeekHeader(
                 Text(
                     "第 $viewingWeek 周",
                     style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Medium,
+                    // 压壁纸时加粗一档，颜色按壁纸亮度取深/浅（文档 §5.2）
+                    fontWeight = if (onImage) FontWeight.Bold else FontWeight.Medium,
+                    color = backdropInkColor(ink, 0)
+                        ?: androidx.compose.ui.graphics.Color.Unspecified,
                 )
                 Spacer(Modifier.width(8.dp))
                 if (viewingWeek == currentWeek) {
                     Box(
                         Modifier
-                            .clip(RoundedCornerShape(6.dp))
+                            .clip(G3CornerShape(6.dp))
                             .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f))
                             .padding(horizontal = 7.dp, vertical = 2.dp),
                     ) {
@@ -776,7 +890,7 @@ private fun WeekHeader(
                     // 翻到别的周了：给一条回得去的路，否则要一页页滑回来
                     Box(
                         Modifier
-                            .clip(RoundedCornerShape(6.dp))
+                            .clip(G3CornerShape(6.dp))
                             .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f))
                             .clickable(onClickLabel = "回到本周") { onWeekChange(currentWeek) }
                             .padding(horizontal = 8.dp, vertical = 2.dp),
@@ -795,7 +909,9 @@ private fun WeekHeader(
             Text(
                 days,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = if (onImage) FontWeight.Medium else FontWeight.Normal,
+                color = backdropInkColor(ink, 1)
+                    ?: MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         /*
@@ -812,7 +928,7 @@ private fun WeekHeader(
          */
         IconButton(onClick = onToggleDayView) {
             Icon(
-                if (dayView) Icons.Rounded.GridView else Icons.Rounded.ViewAgenda,
+                if (dayView) AppIcons.GridView else AppIcons.ViewAgenda,
                 contentDescription = if (dayView) "切换到周视图" else "切换到日视图",
                 tint = MaterialTheme.colorScheme.primary,
             )
@@ -827,7 +943,7 @@ private fun WeekHeader(
         IconButton(onClick = onOpenAgenda) {
             Box(contentAlignment = Alignment.TopEnd) {
                 Icon(
-                    Icons.Rounded.EventNote,
+                    AppIcons.EventNote,
                     contentDescription = "我的日程",
                     tint = MaterialTheme.colorScheme.primary,
                 )
@@ -845,7 +961,7 @@ private fun WeekHeader(
         // 背景设置入口，就放在课表页，不用去总设置里翻
         IconButton(onClick = onOpenBg) {
             Icon(
-                Icons.Rounded.Wallpaper,
+                AppIcons.Wallpaper,
                 contentDescription = "课表背景",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -871,38 +987,68 @@ private fun weekRangeText(semester: Semester, week: Int): String {
 private fun WeekdayStrip(
     semester: Semester,
     week: Int,
-    currentWeek: Int,
+    /** 今天在第几周 / 星期几，由页面层算好传进来，这里不再调 LocalDate.now() */
+    todayWeek: Int,
+    todayWeekday: Int,
     wide: Boolean = false,
 ) {
+    val ink = LocalBackdropInk.current
+    val onImage = ink != BackdropInk.Unknown
     Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp)) {
         // 与 SlotColumn 同宽，占位不画内容
         Box(Modifier.width(if (wide) slotColumnWide else slotColumnPhone))
         Row(Modifier.weight(1f)) {
             for (wd in 1..7) {
                 val date = semester.dateOf(week, wd)
-                val isToday = semester.weekOf(LocalDate.now()) == week &&
-                    LocalDate.now().dayOfWeek.value == wd
+                val isToday = todayWeek == week && todayWeekday == wd
                 Column(
                     // 与 DayColumn 完全同构：weight(1f) + 居中
                     Modifier
                         .weight(1f)
-                        .padding(horizontal = 1.5.dp),
+                        .padding(horizontal = 1.5.dp)
+                        /*
+                         * 今天：套一圈主色小框（致辉 2026-11-19 要的，和日视图同一套语言）。
+                         *
+                         * 只框星期条这一格，**不框整个课程列** —— 整列高约 700dp，
+                         * 细长一条框住会和课程块、长按热区互相压，视觉噪声大。
+                         * 网格里那条 5.5% 主色淡带保留，两者一个是「背景」一个是「标记」。
+                         *
+                         * vertical padding 给所有列都加：只有今天加的话，
+                         * 那一格的内容会被挤小、整行高度对不齐。
+                         */
+                        .then(
+                            if (isToday) {
+                                Modifier.border(
+                                    1.dp,
+                                    // 同「淡淡的」：alpha 0.5，跟顶部周条的选中框一个量级
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.50f),
+                                    G3CornerShape(8.dp),
+                                )
+                            } else {
+                                Modifier
+                            },
+                        )
+                        .padding(vertical = 4.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
                         WeekdayLabels[wd - 1],
                         fontSize = 10.5.sp,
                         color = if (isToday) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = if (isToday) FontWeight.Medium else FontWeight.Normal,
+                        else backdropInkColor(ink, 1)
+                            ?: MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = if (isToday || onImage) FontWeight.Medium
+                        else FontWeight.Normal,
                     )
                     Spacer(Modifier.height(1.dp))
                     Text(
                         "${date.dayOfMonth}",
                         fontSize = 11.sp,
                         color = if (isToday) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        fontWeight = if (isToday) FontWeight.Medium else FontWeight.Normal,
+                        else backdropInkColor(ink, 2)
+                            ?: MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        fontWeight = if (isToday || onImage) FontWeight.Medium
+                        else FontWeight.Normal,
                     )
                 }
             }
@@ -929,6 +1075,8 @@ private fun DayColumn(
     onAgendaClick: (AgendaOccurrence) -> Unit = {},
     /** 长按空白格：回传由 y 反推的起始分钟 */
     onLongPressBlank: (Int) -> Unit = {},
+    /** 长按热区的测试 tag。必须全局唯一：预排相邻页时天上有三页同名列 */
+    longPressTag: String = "week-grid-longpress-$weekday",
 ) {
     val slotIndex = remember(slots) { slots.withIndex().associate { it.value to it.index } }
     // 时间冲突的排布：默认错位叠压，可选并排分列
@@ -977,7 +1125,7 @@ private fun DayColumn(
                 Modifier
                     .fillMaxHeight()
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(G3CornerShape(8.dp))
                     .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.055f)),
             )
         }
@@ -997,7 +1145,7 @@ private fun DayColumn(
                 .fillMaxSize()
                 // 给测试一个抓手：长按热区本身是透明的，没有语义节点，
                 // 不加 tag 就只能靠坐标硬猜（AgendaLongPressTest 用）。
-                .testTag("week-grid-longpress-$weekday")
+                .testTag(longPressTag)
                 .pointerInput(placed, agendaForDay, slots) {
                     detectTapGestures(onLongPress = { offset ->
                         val row = with(density) { offset.y.toDp() }.value / cellHeight.value
@@ -1244,12 +1392,12 @@ private fun DayColumn(
                         Modifier
                             .size(13.dp)
                             .padding(end = 1.dp, bottom = 1.dp)
-                            .clip(RoundedCornerShape(3.5.dp))
+                            .clip(G3CornerShape(3.5.dp))
                             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f))
                             .border(
                                 0.7.dp,
                                 MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                RoundedCornerShape(3.5.dp),
+                                G3CornerShape(3.5.dp),
                             ),
                         contentAlignment = Alignment.Center,
                     ) {
@@ -1314,12 +1462,12 @@ private fun DayColumn(
                             Modifier
                                 .size(13.dp)
                                 .padding(end = 1.dp, bottom = 1.dp)
-                                .clip(RoundedCornerShape(3.5.dp))
+                                .clip(G3CornerShape(3.5.dp))
                                 .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f))
                                 .border(
                                     0.7.dp,
                                     MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                    RoundedCornerShape(3.5.dp),
+                                    G3CornerShape(3.5.dp),
                                 ),
                             contentAlignment = Alignment.Center,
                         ) {
@@ -1763,7 +1911,7 @@ private fun BoxScope.CourseBlock(
             // 高度也缩一圈：下层从下边露出来
             .height(cellHeight * span - 3.dp - animShrink)
             .padding(vertical = 1.5.dp)
-            .clip(RoundedCornerShape(corner))
+            .clip(G3CornerShape(corner))
             /*
              * 磨砂底：**画满不透明**，格子背后就只有糊掉的那份壁纸。
              *
@@ -1796,7 +1944,7 @@ private fun BoxScope.CourseBlock(
                         else -> 0.40f
                     }
                 ),
-                RoundedCornerShape(corner),
+                G3CornerShape(corner),
             )
             .clickable(onClick = onClick)
             // 右侧让出被压住的宽度 + 一点呼吸
@@ -1832,9 +1980,9 @@ private fun BoxScope.CourseBlock(
                     Modifier
                         .size(14.dp)
                         .padding(bottom = 3.dp, end = 3.dp)
-                        .clip(RoundedCornerShape(4.dp))
+                        .clip(G3CornerShape(4.dp))
                         .background(surfaceBase.copy(alpha = 0.96f))
-                        .border(0.7.dp, color.copy(alpha = 0.75f), RoundedCornerShape(4.dp)),
+                        .border(0.7.dp, color.copy(alpha = 0.75f), G3CornerShape(4.dp)),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text("⇄", fontSize = 9.sp, lineHeight = 10.sp, color = color)

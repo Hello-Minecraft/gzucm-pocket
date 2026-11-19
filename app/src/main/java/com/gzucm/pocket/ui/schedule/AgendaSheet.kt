@@ -26,11 +26,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import com.gzucm.pocket.ui.components.G3CornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -53,14 +51,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.gzucm.pocket.core.Agenda
-import com.gzucm.pocket.core.AgendaOccurrence
 import com.gzucm.pocket.core.AgendaLogic
+import com.gzucm.pocket.core.AgendaOccurrence
 import com.gzucm.pocket.core.AgendaReminder
 import com.gzucm.pocket.core.EXAM_COLOR_INDEX
 import com.gzucm.pocket.core.ExamItem
 import com.gzucm.pocket.core.Semester
+import com.gzucm.pocket.core.taskDueLabel
+import com.gzucm.pocket.core.taskUrgency
 import com.gzucm.pocket.ui.adaptive.AdaptiveSheet
 import com.gzucm.pocket.ui.adaptive.LocalIsWidePane
+import com.gzucm.pocket.ui.icons.AppIcons
 import com.gzucm.pocket.ui.theme.CoursePalette
 import com.gzucm.pocket.ui.theme.courseColor
 import java.time.LocalDate
@@ -161,6 +162,10 @@ private data class EditDraft(
     val endText: String,
     /** 提醒档位（分钟，0 = 准时）。空 = 不提醒。见 [com.gzucm.pocket.core.AgendaReminder.LEADS] */
     val remind: List<Int>,
+    /** false = 普通日程；true = 截止任务 / 待办 */
+    val isTask: Boolean,
+    /** 截止时刻 epoch millis 的字符串形式；空串 = 长期待办（无 DDL） */
+    val deadlineAtText: String,
 )
 
 /**
@@ -278,8 +283,60 @@ private fun buildDraft(
          * 反序列化后 `remindLeads` 是空列表 → 打开编辑显示「不提醒」，不会凭空多出通知。
          */
         remind = initial?.remindLeads ?: listOf(0),
+        isTask = initial?.isTask ?: false,
+        /*
+         * 截止时间种子：
+         *   · 编辑：严格沿用原值 —— deadlineAt=null 的长期待办必须保持空串，
+         *     否则「改个备注」就把长期任务变成今天截止的 DDL（踩过）。
+         *     用 initial != null 判断，不能用 Elvis（null 会被当成"没有"填默认值）。
+         *   · 新建：默认「那天 23:59」，用户选截止任务多半就是想设个 DDL；
+         *     表单里有「清除 = 长期待办」入口，留空是合法状态。
+         */
+        deadlineAtText = when {
+            initial != null -> initial.deadlineAt?.toString() ?: ""
+            else -> defaultDeadlineAtText(resolvedDate)
+        },
     )
 }
+
+/**
+ * 新建截止任务的默认截止时间：seed 日 23:59 的 epoch millis，转字符串存进草稿。
+ *
+ * 不直接用 [date] 而要夹到今天之后：用户在周课表翻到第 5 周（过去）点新建，
+ * draftDate 是那一周的周一 —— 拿它当截止时间是**过去**，一保存就显示「已逾期」。
+ * 任务的语义是「从现在起要完成的事」，默认值必须落在未来。
+ */
+private fun defaultDeadlineAtText(date: java.time.LocalDate): String {
+    val today = java.time.LocalDate.now()
+    val base = if (date.isBefore(today)) today else date
+    val dt = base.atTime(23, 59).atZone(java.time.ZoneId.systemDefault())
+    return dt.toInstant().toEpochMilli().toString()
+}
+
+/**
+ * 截止时间滚轮的范围：今天往前 3 天、往后 182 天（≈半年）。
+ *
+ * 不对称是刻意的：截止时间是「以后要交的事」，往前只为补录刚过期的，
+ * 往后要能排到学期末甚至假期；两边一样长的话，往前那 60 天永远是空转。
+ */
+private const val DeadlineDaysBefore = 3
+private const val DeadlineDaysAfter = 182
+
+/**
+ * 截止时间滚轮的日期文案。
+ *
+ * 近几天写相对说法（今天/明天/后天），远处写「M月D日」——
+ * 滚轮里「今天」比「11月17日」好认，而半年前的日期没人关心是周几。
+ */
+private fun deadlineDayLabel(today: java.time.LocalDate, d: java.time.LocalDate): String =
+    when (java.time.temporal.ChronoUnit.DAYS.between(today, d).toInt()) {
+        0 -> "今天"
+        1 -> "明天"
+        2 -> "后天"
+        -1 -> "昨天"
+        -2 -> "前天"
+        else -> "${d.monthValue}月${d.dayOfMonth}日"
+    }
 
 // ── 列表 ────────────────────────────────────────────────────────────────
 
@@ -322,15 +379,37 @@ fun AgendaListSheet(
     onSwitchEntry: (AgendaOccurrence) -> Unit = {},
     onAdd: (draftDate: LocalDate?, draftStartMinute: Int?) -> Unit,
     onEdit: (Agenda) -> Unit,
+    /** 勾选 / 取消勾选截止任务（已完成项会移入列表底部的「已完成」栏） */
+    onTaskCheck: (Agenda) -> Unit = {},
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
-    // 两趟稳定排序：先按开始分钟，再按日期 → 最终「日期优先、同日按时间」。
-    // ISO 日期零填充，字典序即时间序；sortedBy 是稳定排序，不用引 Comparator SAM。
-    val sorted = remember(rules) {
-        rules.sortedBy { it.startMinute }.sortedBy { it.date }
+    /*
+     * 列表分三段：
+     *   ① 未完成任务（按紧急度：逾期 → 临近 → 一般 → 长期）
+     *   ② 普通日程（日期优先、同日按时间）
+     *   ③ 已完成任务（单独一栏「已完成」，沉底）
+     *
+     * 已完成单独分栏（致辉 2026-11-17 要的「移入完成栏」）：
+     * 不删数据，点栏里的实心勾还能取消完成 —— 这是撤销条去掉后唯一的回退入口。
+     */
+    val grouped = remember(rules) {
+        val now = System.currentTimeMillis()
+        val pendingTasks = rules.filter { it.isTask && it.doneAt == null }.sortedWith(
+            compareBy<Agenda> { taskUrgency(it, now).ordinal }
+                .thenBy { it.deadlineAt ?: Long.MAX_VALUE }
+                .thenBy { it.title }
+        )
+        val events = rules.filterNot { it.isTask }
+            .sortedBy { it.startMinute }.sortedBy { it.date }
+        val doneTasks = rules.filter { it.isTask && it.doneAt != null }
+            .sortedByDescending { it.doneAt }
+        Triple(pendingTasks, events, doneTasks)
     }
+    val pendingTasks = grouped.first
+    val events = grouped.second
+    val doneTasks = grouped.third
 
     // 列表自己会滚动 → 必须关掉 AdaptiveSheet 的滚动，否则平板侧栏两层
     // verticalScroll 叠一起会抛 infinite maximum height constraints。
@@ -370,7 +449,7 @@ fun AgendaListSheet(
                         Spacer(Modifier.height(4.dp))
                     }
                     Text(
-                        "自己加的日程，和教务课表分开存",
+                        "日程、截止任务和待办，和教务课表分开存",
                         fontSize = 12.sp,
                         color = scheme.onSurfaceVariant,
                     )
@@ -398,7 +477,7 @@ fun AgendaListSheet(
                 }
             }
 
-            if (sorted.isEmpty()) {
+            if (rules.isEmpty()) {
                 item(key = "agenda_empty") {
                     Box(
                         Modifier
@@ -414,8 +493,49 @@ fun AgendaListSheet(
                     }
                 }
             } else {
-                items(sorted, key = { it.id }) { agenda ->
-                    AgendaRow(agenda = agenda, semester = semester, onEdit = onEdit)
+                // ① 未完成任务 + ② 普通日程
+                items(pendingTasks + events, key = { it.id }) { agenda ->
+                    AgendaRow(
+                        agenda = agenda,
+                        semester = semester,
+                        onEdit = onEdit,
+                        onTaskCheck = if (agenda.isTask) { { onTaskCheck(agenda) } } else null,
+                    )
+                }
+
+                /*
+                 * ③ 已完成栏：单独一个标题 + 已完成任务。
+                 * 默认全部展开（任务通常没几条）；取消完成点实心勾即可。
+                 */
+                if (doneTasks.isNotEmpty()) {
+                    item(key = "done_header") {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(top = 10.dp, bottom = 1.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "已完成",
+                                fontSize = 12.sp,
+                                color = scheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "${doneTasks.size}",
+                                fontSize = 11.sp,
+                                color = scheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            )
+                        }
+                    }
+                    items(doneTasks, key = { "done|" + it.id }) { agenda ->
+                        AgendaRow(
+                            agenda = agenda,
+                            semester = semester,
+                            onEdit = onEdit,
+                            onTaskCheck = { onTaskCheck(agenda) },
+                        )
+                    }
                 }
             }
 
@@ -483,7 +603,7 @@ private fun ExamRow(exam: ExamItem, onClick: () -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(G3CornerShape(12.dp))
             .background(scheme.surfaceVariant.copy(alpha = 0.5f))
             .clickable(onClickLabel = "查看考试详情 ${exam.course}", onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -546,6 +666,8 @@ private fun AgendaRow(
     agenda: Agenda,
     semester: Semester?,
     onEdit: (Agenda) -> Unit,
+    /** 非 null = 截止任务 / 待办（点它 toggle 完成状态）；普通日程传 null */
+    onTaskCheck: (() -> Unit)? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
     val date = parseIso(agenda.date)
@@ -554,7 +676,8 @@ private fun AgendaRow(
     } else {
         true
     }
-    val dim = if (inSemester) 1f else 0.45f
+    val done = agenda.doneAt != null
+    val dim = if (done) 0.5f else if (inSemester) 1f else 0.45f
 
     val weekPart = if (semester != null && date != null) {
         " · 第 ${semester.weekOf(date)} 周 · ${weekdayName(date.dayOfWeek.value)}"
@@ -568,73 +691,87 @@ private fun AgendaRow(
     } else {
         courseColor(agenda.title)
     }
+    val overdue = agenda.isTask && !done &&
+        agenda.deadlineAt?.let { it < System.currentTimeMillis() } == true
 
     Box(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(scheme.surfaceVariant.copy(alpha = 0.5f))
+            .clip(G3CornerShape(12.dp))
+            .background(scheme.surfaceVariant.copy(alpha = if (done) 0.25f else 0.5f))
             .clickable { onEdit(agenda) }
             .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
-        Column {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(color),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    agenda.title,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = scheme.onSurface.copy(alpha = dim),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                if (agenda.weekly) {
-                    Spacer(Modifier.width(6.dp))
-                    Tag("每周")
-                }
-                /*
-                 * 提醒标记：只有设了提醒才显示。
-                 * 用铃铛而不是「提醒」文字，是因为这一行已经有「每周 / 不在本学期」
-                 * 两个文字标签，再加一个会挤掉标题；图标 13dp 只占一点点。
-                 */
-                if (agenda.remindLeads.isNotEmpty()) {
-                    Spacer(Modifier.width(6.dp))
-                    androidx.compose.material3.Icon(
-                        Icons.Rounded.NotificationsActive,
-                        contentDescription = "已设提醒",
-                        tint = scheme.primary.copy(alpha = dim),
-                        modifier = Modifier.size(13.dp),
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(if (overdue) scheme.error else color.copy(alpha = dim)),
                     )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        agenda.title,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = scheme.onSurface.copy(alpha = dim),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textDecoration = if (done) androidx.compose.ui.text.style.TextDecoration.LineThrough
+                        else null,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (agenda.isTask) {
+                        Spacer(Modifier.width(6.dp))
+                        Tag(
+                            if (agenda.deadlineAt != null) "截止任务" else "待办",
+                            error = overdue,
+                        )
+                    }
+                    if (agenda.weekly) {
+                        Spacer(Modifier.width(6.dp))
+                        Tag("每周")
+                    }
+                    if (agenda.remindLeads.isNotEmpty()) {
+                        Spacer(Modifier.width(6.dp))
+                        androidx.compose.material3.Icon(
+                            AppIcons.NotificationsActive,
+                            contentDescription = "已设提醒",
+                            tint = scheme.primary.copy(alpha = dim),
+                            modifier = Modifier.size(13.dp),
+                        )
+                    }
+                    if (!inSemester && !agenda.isTask) {
+                        Spacer(Modifier.width(6.dp))
+                        Tag("不在本学期", error = true)
+                    }
                 }
-                if (!inSemester) {
-                    Spacer(Modifier.width(6.dp))
-                    Tag("不在本学期", error = true)
+                Spacer(Modifier.height(5.dp))
+                if (agenda.isTask) {
+                    Text(
+                        if (done) "已完成" else taskDueLabel(agenda.deadlineAt, System.currentTimeMillis()),
+                        fontSize = 11.5.sp,
+                        color = when {
+                            done -> scheme.onSurfaceVariant.copy(alpha = 0.6f)
+                            overdue -> scheme.error
+                            else -> scheme.onSurfaceVariant
+                        },
+                    )
+                } else {
+                    Text(dateLine, fontSize = 11.5.sp, color = scheme.onSurfaceVariant.copy(alpha = dim))
+                    Text(timeLine, fontSize = 11.5.sp, color = scheme.onSurfaceVariant.copy(alpha = dim))
+                    if (agenda.place.isNotBlank()) {
+                        Text("地点 · ${agenda.place}", fontSize = 11.5.sp,
+                            color = scheme.onSurfaceVariant.copy(alpha = dim))
+                    }
                 }
             }
-            Spacer(Modifier.height(5.dp))
-            Text(
-                dateLine,
-                fontSize = 11.5.sp,
-                color = scheme.onSurfaceVariant.copy(alpha = dim),
-            )
-            Text(
-                timeLine,
-                fontSize = 11.5.sp,
-                color = scheme.onSurfaceVariant.copy(alpha = dim),
-            )
-            if (agenda.place.isNotBlank()) {
-                Text(
-                    "地点 · ${agenda.place}",
-                    fontSize = 11.5.sp,
-                    color = scheme.onSurfaceVariant.copy(alpha = dim),
-                )
+            if (onTaskCheck != null) {
+                Spacer(Modifier.width(10.dp))
+                // 受控勾选圈：已完成显示实心勾，点一下取消完成（移回未完成栏）
+                TaskCheckCircle(isDone = done, onToggle = onTaskCheck)
             }
         }
     }
@@ -645,7 +782,7 @@ private fun Tag(text: String, error: Boolean = false) {
     val scheme = MaterialTheme.colorScheme
     Box(
         Modifier
-            .clip(RoundedCornerShape(6.dp))
+            .clip(G3CornerShape(6.dp))
             .background(
                 if (error) scheme.error.copy(alpha = 0.12f)
                 else scheme.primary.copy(alpha = 0.12f)
@@ -817,8 +954,21 @@ fun AgendaEditSheet(
         null
     }
 
-    // 红字提示按优先级给一条；有提示就禁用保存
+    // 解析截止时间：空串 = 长期待办（合法）；非空必须是能读的 epoch millis
+    val parsedDeadline: Long? = draft.deadlineAtText.trim().takeIf { it.isNotEmpty() }
+        ?.toLongOrNull()
+
+    /*
+     * 红字提示按优先级给一条；有提示就禁用保存。
+     * 截止任务 / 待办不看日期范围、不看起止时间、也不需要校历 ——
+     * 它是用户自己记的事，跟教务学期无关（致辉要的「长期任务」语义）。
+     */
     val errorText: String? = when {
+        draft.isTask -> when {
+            !titleOk -> "标题不能为空"
+            draft.deadlineAtText.isNotBlank() && parsedDeadline == null -> "截止时间格式不对"
+            else -> null
+        }
         !hasSemester -> "需要先登录并同步校历，才能添加日程"
         !titleOk -> "标题不能为空"
         timeError != null -> timeError
@@ -870,11 +1020,12 @@ fun AgendaEditSheet(
                 onSwitch = onSwitchEntry,
             )
 
-            if (!hasSemester) {
+            // 只有日程需要校历（要算第几周）；截止任务和待办不依赖校历，别误导用户
+            if (!hasSemester && !draft.isTask) {
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(G3CornerShape(12.dp))
                         .background(scheme.error.copy(alpha = 0.10f))
                         .padding(horizontal = 14.dp, vertical = 11.dp),
                 ) {
@@ -896,6 +1047,48 @@ fun AgendaEditSheet(
             )
             Spacer(Modifier.height(14.dp))
 
+            // 类型切换：日程 / 截止任务。样式抄下面「按节次 / 按时间」的胶囊条
+            Text("类型", fontSize = 12.sp, color = scheme.onSurfaceVariant)
+            Spacer(Modifier.height(6.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(G3CornerShape(10.dp))
+                    .background(scheme.onSurfaceVariant.copy(alpha = 0.09f))
+                    .padding(3.dp),
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                listOf(false to "日程", true to "截止任务").forEach { (task, label) ->
+                    val on = task == draft.isTask
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .clip(G3CornerShape(8.dp))
+                            .background(
+                                if (on) scheme.primary.copy(alpha = 0.16f)
+                                else Color.Transparent
+                            )
+                            .clickable { draft = draft.copy(isTask = task) }
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            label,
+                            fontSize = 12.5.sp,
+                            fontWeight = if (on) FontWeight.Medium else FontWeight.Normal,
+                            color = if (on) scheme.primary else scheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+
+            /*
+             * ── 日程专属字段 ────────────────────────────────────────
+             * 日期 / 时间 / 提醒 / 地点 / 每周重复只在「日程」模式出现；
+             * 截止任务是另一套语义，走下面的 else 分支。
+             */
+            if (!draft.isTask) {
             /*
              * 日期 / 时间：折叠行 + 展开式滚轮。
              *
@@ -960,7 +1153,7 @@ fun AgendaEditSheet(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(G3CornerShape(10.dp))
                     .background(scheme.onSurfaceVariant.copy(alpha = 0.09f))
                     .padding(3.dp),
                 horizontalArrangement = Arrangement.spacedBy(3.dp),
@@ -970,7 +1163,7 @@ fun AgendaEditSheet(
                     Box(
                         Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(G3CornerShape(8.dp))
                             .background(
                                 if (on) scheme.primary.copy(alpha = 0.16f)
                                 else Color.Transparent
@@ -1119,21 +1312,13 @@ fun AgendaEditSheet(
                 )
             }
 
-            // 地点 / 备注
+            // 地点（日程专属；截止任务不需要地点）
             Spacer(Modifier.height(16.dp))
             LabeledInput(
                 label = "地点",
                 value = draft.place,
                 onValueChange = { draft = draft.copy(place = it) },
                 hint = "可选，例如 图书馆",
-            )
-            Spacer(Modifier.height(14.dp))
-            LabeledInput(
-                label = "备注",
-                value = draft.note,
-                onValueChange = { draft = draft.copy(note = it) },
-                hint = "可选",
-                singleLine = false,
             )
 
             // 每周重复
@@ -1155,6 +1340,104 @@ fun AgendaEditSheet(
                     onCheckedChange = { draft = draft.copy(weekly = it) },
                 )
             }
+            } // end if (!draft.isTask)
+
+            /*
+             * ── 截止任务专属字段 ────────────────────────────────────
+             * 截止时间：可留空 = 长期待办。滚轮范围 = **前 3 天 ~ 后 182 天（半年）**，
+             * 不套学期范围 —— DDL 可能在假期（如开学要交的材料）。
+             *
+             * 为什么不再对称（致辉 2026-11-17 定）：截止时间的语义是「以后要交」，
+             * 往前只为补录刚过期的任务，3 天够了，再多全是空转；
+             * 往后给到半年，整个学期加寒暑假要交的材料都排得进去。
+             */
+            if (draft.isTask) {
+                Spacer(Modifier.height(4.dp))
+                FieldRow(
+                    label = "截止时间",
+                    value = parsedDeadline?.let { taskDueLabel(it, System.currentTimeMillis()) }
+                        ?: "长期待办（无截止时间）",
+                    expanded = openWheel == "deadline",
+                    onClick = { openWheel = if (openWheel == "deadline") null else "deadline" },
+                )
+                if (openWheel == "deadline") {
+                    val today = java.time.LocalDate.now()
+                    val seedDue = parsedDeadline?.let {
+                        java.time.Instant.ofEpochMilli(it)
+                            .atZone(java.time.ZoneId.systemDefault()).toLocalDateTime()
+                    } ?: today.atTime(23, 59)
+                    val startDate = today.minusDays(DeadlineDaysBefore.toLong())
+                    val total = DeadlineDaysBefore + DeadlineDaysAfter + 1
+                    val dayIdx = (java.time.temporal.ChronoUnit.DAYS.between(
+                        startDate, seedDue.toLocalDate(),
+                    )).toInt().coerceIn(0, total - 1)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        WheelColumn(
+                            count = total,
+                            initialIndex = dayIdx,
+                            label = { i -> deadlineDayLabel(today, startDate.plusDays(i.toLong())) },
+                            onSelect = { i ->
+                                val d = startDate.plusDays(i.toLong())
+                                val dt = d.atTime(seedDue.hour, seedDue.minute)
+                                    .atZone(java.time.ZoneId.systemDefault())
+                                draft = draft.copy(deadlineAtText = dt.toInstant().toEpochMilli().toString())
+                            },
+                            modifier = Modifier.weight(1.3f),
+                        )
+                        Text(":", fontSize = 16.sp, color = scheme.onSurfaceVariant,
+                            modifier = Modifier.align(Alignment.CenterVertically))
+                        WheelColumn(
+                            count = 24,
+                            initialIndex = seedDue.hour,
+                            label = { "%02d时".format(it) },
+                            onSelect = { h ->
+                                val dt = seedDue.withHour(h)
+                                    .atZone(java.time.ZoneId.systemDefault())
+                                draft = draft.copy(deadlineAtText = dt.toInstant().toEpochMilli().toString())
+                            },
+                            modifier = Modifier.weight(1f),
+                        )
+                        WheelColumn(
+                            count = 60,
+                            initialIndex = seedDue.minute,
+                            label = { "%02d分".format(it) },
+                            onSelect = { m ->
+                                val dt = seedDue.withMinute(m)
+                                    .atZone(java.time.ZoneId.systemDefault())
+                                draft = draft.copy(deadlineAtText = dt.toInstant().toEpochMilli().toString())
+                            },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "清除截止时间 → 变成长期待办",
+                        fontSize = 11.5.sp,
+                        color = scheme.primary,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { draft = draft.copy(deadlineAtText = "") }
+                            .padding(vertical = 5.dp),
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "任务会一直显示在首页，直到你勾选完成；过了截止时间会标红提醒",
+                    fontSize = 10.5.sp,
+                    lineHeight = 14.sp,
+                    color = scheme.onSurfaceVariant.copy(alpha = 0.75f),
+                )
+            }
+
+            // 备注：日程和截止任务共用的自用说明
+            Spacer(Modifier.height(14.dp))
+            LabeledInput(
+                label = "备注",
+                value = draft.note,
+                onValueChange = { draft = draft.copy(note = it) },
+                hint = "可选",
+                singleLine = false,
+            )
 
             // 颜色：-1 自动，其余对应 CoursePalette 下标
             Spacer(Modifier.height(18.dp))
@@ -1170,7 +1453,7 @@ fun AgendaEditSheet(
                 val auto = draft.colorIndex < 0
                 Box(
                     Modifier
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(G3CornerShape(10.dp))
                         .background(
                             if (auto) scheme.primary.copy(alpha = 0.16f)
                             else scheme.surfaceVariant.copy(alpha = 0.6f)
@@ -1229,33 +1512,41 @@ fun AgendaEditSheet(
                     enabled = canSave,
                     modifier = Modifier.weight(1f),
                     onClick = {
-                        val s = effStart
-                        val e = effEnd
-                        val d = parsedDate
-                        if (canSave && s != null && e != null && d != null) {
-                            // 存下来了，草稿使命结束
-                            AgendaDraftCache.clear(draftKey)
-                            onSave(
-                                Agenda(
-                                    id = initial?.id ?: UUID.randomUUID().toString(),
-                                    title = draft.title.trim(),
-                                    date = d.toString(),
-                                    startMinute = s,
-                                    endMinute = e,
-                                    place = draft.place.trim(),
-                                    note = draft.note.trim(),
-                                    colorIndex = draft.colorIndex,
-                                    weekly = draft.weekly,
-                                    unitStart = if (draft.byUnit) draft.unitStart else 0,
-                                    unitEnd = if (draft.byUnit) draft.unitEnd else 0,
-                                    /*
-                                     * 提醒：表单里选了什么就存什么（-1 = 不提醒）。
-                                     * 排程由 ViewModel 在保存后统一重排，这里只管落库。
-                                     */
-                                    remindLeads = draft.remind,
-                                )
+                        if (!canSave) return@ActionBtn
+                        /*
+                         * 任务不需要日期 / 时段，但 Agenda 模型的这两个字段非空 ——
+                         * 存默认值即可，它们不会被展开进课表（expand 跳过 isTask）。
+                         * 编辑已有任务时沿用原值，免得改一下备注就把锚点改了。
+                         */
+                        val s = effStart ?: 0
+                        val e = effEnd ?: (s + 60)
+                        val d = parsedDate ?: defaultDate
+                        // 存下来了，草稿使命结束
+                        AgendaDraftCache.clear(draftKey)
+                        onSave(
+                            Agenda(
+                                id = initial?.id ?: UUID.randomUUID().toString(),
+                                title = draft.title.trim(),
+                                date = d.toString(),
+                                startMinute = s,
+                                endMinute = e,
+                                place = if (draft.isTask) "" else draft.place.trim(),
+                                note = draft.note.trim(),
+                                colorIndex = draft.colorIndex,
+                                weekly = if (draft.isTask) false else draft.weekly,
+                                unitStart = if (!draft.isTask && draft.byUnit) draft.unitStart else 0,
+                                unitEnd = if (!draft.isTask && draft.byUnit) draft.unitEnd else 0,
+                                /*
+                                 * 提醒：任务不排闹钟，直接清空（即使草稿里留着日程模式的旧值）。
+                                 * 排程由 ViewModel 在保存后统一重排。
+                                 */
+                                remindLeads = if (draft.isTask) emptyList() else draft.remind,
+                                isTask = draft.isTask,
+                                deadlineAt = if (draft.isTask) parsedDeadline else null,
+                                // 编辑任务保留完成状态（改备注不该把它复活）
+                                doneAt = if (draft.isTask) initial?.doneAt else null,
                             )
-                        }
+                        )
                     },
                 )
             }
@@ -1288,7 +1579,7 @@ private fun LabeledInput(
         Box(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
+                .clip(G3CornerShape(12.dp))
                 .background(scheme.surfaceVariant.copy(alpha = 0.6f))
                 .padding(horizontal = 14.dp, vertical = 12.dp),
         ) {
@@ -1402,7 +1693,7 @@ private fun ActionBtn(
     }
     Box(
         modifier
-            .clip(RoundedCornerShape(12.dp))
+            .clip(G3CornerShape(12.dp))
             .background(
                 if (primary && enabled && !danger) scheme.primary.copy(alpha = 0.15f)
                 else scheme.surfaceVariant.copy(alpha = 0.6f)
@@ -1462,7 +1753,7 @@ private fun WheelColumn(
                 .align(Alignment.Center)
                 .fillMaxWidth()
                 .height(WheelItemHeight)
-                .clip(RoundedCornerShape(8.dp))
+                .clip(G3CornerShape(8.dp))
                 .background(scheme.primary.copy(alpha = 0.07f)),
         )
         LazyColumn(
@@ -1520,7 +1811,7 @@ private fun RemindChips(selected: List<Int>, onSelect: (List<Int>) -> Unit) {
             val sel = if (lead < 0) selected.isEmpty() else lead in selected
             Box(
                 Modifier
-                    .clip(RoundedCornerShape(9.dp))
+                    .clip(G3CornerShape(9.dp))
                     .background(
                         if (sel) scheme.primary.copy(alpha = 0.18f)
                         else scheme.surfaceVariant.copy(alpha = 0.40f),
@@ -1528,7 +1819,7 @@ private fun RemindChips(selected: List<Int>, onSelect: (List<Int>) -> Unit) {
                     .border(
                         if (sel) 1.dp else 0.dp,
                         if (sel) scheme.primary.copy(alpha = 0.75f) else Color.Transparent,
-                        RoundedCornerShape(9.dp),
+                        G3CornerShape(9.dp),
                     )
                     .clickable {
                         onSelect(
@@ -1563,7 +1854,7 @@ private fun hasNotifyPermission(ctx: android.content.Context): Boolean =
 /**
  * 一行「标签 + 当前值 + 展开箭头」，点一下展开/收起下面的滚轮。
  *
- * 用文字箭头而不是图标：项目里 `Icons.Rounded.KeyboardArrowDown` 之类
+ * 用文字箭头而不是图标：项目里 `AppIcons.KeyboardArrowDown` 之类
  * 要额外引依赖，一个 ▾ 足够表达，也不会在字体缩放时错位。
  */
 @Composable
@@ -1577,7 +1868,7 @@ private fun FieldRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(G3CornerShape(12.dp))
             .background(scheme.surfaceVariant.copy(alpha = 0.45f))
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -1645,7 +1936,7 @@ private fun ExamDetailContent(
                 fontSize = 12.5.sp,
                 color = scheme.primary,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(G3CornerShape(8.dp))
                     .clickable(onClick = onBack)
                     .padding(vertical = 6.dp),
             )
@@ -1667,7 +1958,7 @@ private fun ExamDetailContent(
                 Spacer(Modifier.height(6.dp))
                 Box(
                     Modifier
-                        .clip(RoundedCornerShape(6.dp))
+                        .clip(G3CornerShape(6.dp))
                         .background(scheme.error.copy(alpha = 0.12f))
                         .padding(horizontal = 8.dp, vertical = 3.dp),
                 ) {
@@ -1751,7 +2042,7 @@ private fun OverlapSwitcher(
             val cc = if (o.colorIndex == EXAM_COLOR_INDEX) scheme.error else agendaColor(o)
             Box(
                 Modifier
-                    .clip(RoundedCornerShape(9.dp))
+                    .clip(G3CornerShape(9.dp))
                     .background(
                         if (sel) cc.copy(alpha = 0.20f)
                         else scheme.surfaceVariant.copy(alpha = 0.40f),
@@ -1759,7 +2050,7 @@ private fun OverlapSwitcher(
                     .border(
                         if (sel) 1.dp else 0.dp,
                         if (sel) cc.copy(alpha = 0.75f) else Color.Transparent,
-                        RoundedCornerShape(9.dp),
+                        G3CornerShape(9.dp),
                     )
                     .clickable { onSwitch(o) }
                     .padding(horizontal = 11.dp, vertical = 7.dp),

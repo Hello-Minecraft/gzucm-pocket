@@ -55,7 +55,65 @@ data class Agenda(
      * 线上不可能有值；旧 JSON 里那个 key 会被 Net.json 的 ignoreUnknownKeys 丢掉。
      */
     val remindLeads: List<Int> = emptyList(),
+    /**
+     * 条目种类（v1.3.7）：false = 传统日程（某天某时段，会画进课表）；
+     * true = 截止任务 / 待办——只在首页和日程列表显示，不占课表格子。
+     *
+     * [deadlineAt] 只在 isTask 时有意义：非空 = 有截止时间的 DDL，
+     * 空 = 无 DDL 的长期待办。doneAt 非空表示已完成（epoch millis）。
+     *
+     * 放在最后带默认值：老 JSON 缺这些键时反序列化补默认，行为不变（全是普通日程）。
+     */
+    val isTask: Boolean = false,
+    val deadlineAt: Long? = null,
+    val doneAt: Long? = null,
 )
+
+/** 截止任务的展示档：逾期 / 临近 / 一般 / 长期待办 */
+enum class TaskUrgency { OVERDUE, SOON, NORMAL, NO_DEADLINE, DONE }
+
+/**
+ * 任务的紧急度。纯函数，供首页置顶排序和卡片着色共用。
+ *
+ * 阈值口径：今天（剩余 < 24h）算「临近」，逾期按 epoch 直接比。
+ * 已完成单独一档，永远排最后。
+ */
+fun taskUrgency(rule: Agenda, now: Long): TaskUrgency {
+    if (rule.doneAt != null) return TaskUrgency.DONE
+    val due = rule.deadlineAt ?: return TaskUrgency.NO_DEADLINE
+    return when {
+        due < now -> TaskUrgency.OVERDUE
+        due - now < 24 * 60 * 60_000L -> TaskUrgency.SOON
+        else -> TaskUrgency.NORMAL
+    }
+}
+
+/** 剩余时间文案：「今天 23:59」「明天 09:00」「11月20日」「已逾期 3 天」 */
+fun taskDueLabel(dueAt: Long?, now: Long): String {
+    if (dueAt == null) return "长期待办"
+    val due = java.time.Instant.ofEpochMilli(dueAt)
+        .atZone(java.time.ZoneId.systemDefault()).toLocalDateTime()
+    val today = java.time.Instant.ofEpochMilli(now)
+        .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+    val dDate = due.toLocalDate()
+    val days = java.time.temporal.ChronoUnit.DAYS.between(today, dDate)
+    val hm = "%02d:%02d".format(due.hour, due.minute)
+    return when {
+        /*
+         * 先按时刻判逾期，再看日期差。
+         *
+         * 只按 days 判会漏掉「今天 09:00 已过、现在 13:00」：
+         * days==0 走「今天 09:00 截止」，而卡片已经按 overdue 标红 —— 红字配
+         * 「今天截止」自相矛盾。这里用分钟级精度，和 taskUrgency 同一口径。
+         */
+        dueAt < now -> {
+            if (days < 0) "已逾期 ${-days} 天" else "今天 $hm 已过"
+        }
+        days == 0L -> "今天 $hm 截止"
+        days == 1L -> "明天 $hm 截止"
+        else -> "${due.monthValue}月${due.dayOfMonth}日 $hm 截止"
+    }
+}
 
 /** 一条日程在某一周某一天的实例（纯内存，不落盘） */
 data class AgendaOccurrence(
@@ -82,6 +140,10 @@ data class AgendaOccurrence(
      * 座位放第二行更容易被省略号吃掉。
      */
     val seat: String = "",
+    /** 转发自规则 [Agenda.isTask]，让卡片渲染能区分日程 / 截止任务 / 待办 */
+    val isTask: Boolean = false,
+    val deadlineAt: Long? = null,
+    val doneAt: Long? = null,
 )
 
 object AgendaLogic {
@@ -161,6 +223,11 @@ object AgendaLogic {
         val to = lastDay(semester)
 
         for (r in rules) {
+            /*
+             * 截止任务 / 待办不进课表：它没有「某天某时段」的语义，
+             * 画进网格会把课程块挤掉。它只在首页和日程列表里出现（见 taskAsOccurrence）。
+             */
+            if (r.isTask) continue
             // 手写 try/catch 而不是 runCatching{}.getOrElse{}：
             // break/continue 在 lambda 里（哪怕 inline）都不允许。
             val anchor = try {
@@ -209,8 +276,39 @@ object AgendaLogic {
         unitStart = r.unitStart,
         unitEnd = r.unitEnd,
         weekly = r.weekly,
+        isTask = r.isTask,
+        deadlineAt = r.deadlineAt,
+        doneAt = r.doneAt,
     )
-}
+} // end of AgendaLogic
+
+/**
+ * 首页用的任务条目：把一条截止任务规则伪装成「今天」的 occurrence，
+ * 好让首页沿用同一套卡片渲染。日期用 today 而非截止日 ——
+ * 任务在截止前**每天都显示**，不是只在截止那天出现。
+ *
+ * 排序不在这里做，交给调用方按 [taskUrgency] + 截止时间排（逾期置顶）。
+ */
+fun taskAsOccurrence(rule: Agenda, today: LocalDate, semester: Semester?): AgendaOccurrence =
+    AgendaOccurrence(
+        key = "task|" + rule.id,
+        sourceId = rule.id,
+        title = rule.title,
+        date = today,
+        week = if (semester != null && AgendaLogic.inSemester(semester, today)) semester.weekOf(today) else 0,
+        weekday = today.dayOfWeek.value,
+        startMinute = 0,
+        endMinute = 0,
+        place = rule.place,
+        note = rule.note,
+        colorIndex = rule.colorIndex,
+        unitStart = 0,
+        unitEnd = 0,
+        weekly = false,
+        isTask = true,
+        deadlineAt = rule.deadlineAt,
+        doneAt = rule.doneAt,
+    )
 
 /**
  * 真实分钟 ↔ 网格行号的互转。

@@ -46,7 +46,13 @@ class AgendaLongPressTest {
     @Test
     fun `长按空白列回传那一天的日期和分钟`() {
         val got = AtomicReference<Pair<LocalDate, Int>?>(null)
-        val tag = "week-grid-longpress-3"
+        /*
+         * tag 带周次（第 8 周周三）。
+         *
+         * 课表用了 beyondViewportPageCount = 1，同一时刻左右相邻两页也在组合树里，
+         * 只用「-星期」会在树上出现 3 个同名节点，取节点直接失败。
+         */
+        val tag = "week-grid-longpress-8-3"
 
         rule.setContent {
             GzucmTheme(darkTheme = true) {

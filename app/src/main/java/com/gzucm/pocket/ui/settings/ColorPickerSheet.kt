@@ -16,7 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import com.gzucm.pocket.ui.components.G3CornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import com.gzucm.pocket.ui.adaptive.AdaptiveSheet
@@ -116,7 +116,7 @@ fun ColorPickerSheet(
                 Modifier
                     .fillMaxWidth()
                     .height(26.dp)
-                    .clip(RoundedCornerShape(13.dp))
+                    .clip(G3CornerShape(13.dp))
                     .pointerInput(Unit) {
                         fun pick(x: Float) {
                             hue = (x / size.width).coerceIn(0f, 0.999f) * 360f
@@ -153,7 +153,7 @@ fun ColorPickerSheet(
                 Modifier
                     .fillMaxWidth()
                     .height(150.dp)
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(G3CornerShape(14.dp))
                     .pointerInput(Unit) {
                         fun pick(p: Offset) {
                             sat = (p.x / size.width).coerceIn(0f, 1f)
@@ -186,7 +186,7 @@ fun ColorPickerSheet(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(G3CornerShape(12.dp))
                     .background(scheme.primary)
                     .clickable {
                         // 存 ARGB 的低 32 位，读的时候 Color(long) 直接还原

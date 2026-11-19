@@ -39,6 +39,24 @@
             android:exported="false" />
 
         <!--
+          导出课表 JSON：把 cache/exports/ 下的文件以 content:// 交给系统分享。
+
+          为什么需要它：Android 7 起直接 `file://` 分享会抛
+          FileUriExposedException，必须换成 FileProvider 给的 content:// URI。
+          exported=false + grantUriPermissions=true 是标准组合 —— 只有拿到
+          FLAG_GRANT_READ_URI_PERMISSION 的接收方读得到，别的一概不行。
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!--
           时间类广播（TIME_SET / TIMEZONE_CHANGED / DATE_CHANGED）是系统豁免清单里的，
           targetSdk 26+ 依然能用清单静态注册收到，不需要常驻进程。
         -->

@@ -20,11 +20,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import com.gzucm.pocket.ui.components.G3CornerShape
+import com.gzucm.pocket.ui.components.micaPanel
+import com.gzucm.pocket.ui.components.micaPanelColor
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,11 +47,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.gzucm.pocket.core.AgendaOccurrence
 import com.gzucm.pocket.core.CourseSession
-import com.gzucm.pocket.ui.components.LocalFloatingBarInset
-import com.gzucm.pocket.ui.components.Fmt
 import com.gzucm.pocket.core.PowerDaily
 import com.gzucm.pocket.core.PowerInfo
 import com.gzucm.pocket.core.Semester
+import com.gzucm.pocket.ui.components.Fmt
+import com.gzucm.pocket.ui.components.LocalFloatingBarInset
+import com.gzucm.pocket.ui.icons.AppIcons
 import com.gzucm.pocket.ui.theme.courseColor
 import java.time.LocalDate
 import java.time.LocalTime
@@ -94,6 +95,13 @@ fun TodayScreen(
      */
     agendaOccurrences: List<AgendaOccurrence> = emptyList(),
     onAgendaClick: (AgendaOccurrence) -> Unit = {},
+    /**
+     * 截止任务 / 待办（已按紧急度排好，含已完成的沉底项）。
+     * 单独一路传，不受「显示明天」的日期过滤影响 —— 任务在截止前每天都显示。
+     */
+    taskCards: List<AgendaOccurrence> = emptyList(),
+    /** 勾选截止任务 / 待办（已完成）。任务卡在首页和日程页都有勾选圈 */
+    onTaskCheck: (AgendaOccurrence) -> Unit = {},
 ) {
     // today 也挂在同一个 tick 上：停在首页跨过 0 点后要切到新的一天，
     // 下面 remember(…, today) 那几处才会重算
@@ -224,7 +232,9 @@ fun TodayScreen(
                                 title = if (showingTomorrow) "明日课程" else "今日课程",
                                 sessions = if (showingTomorrow) tomorrowSessions else todaySessions,
                                 agenda = shownAgenda,
+                                taskCards = taskCards,
                                 onAgendaClick = onAgendaClick,
+                                onTaskCheck = onTaskCheck,
                                 syncing = syncing,
                                 allEmpty = sessions.isEmpty(),
                                 progressDone = progressDone,
@@ -273,7 +283,9 @@ fun TodayScreen(
                     title = if (showingTomorrow) "明日课程" else "今日课程",
                     sessions = if (showingTomorrow) tomorrowSessions else todaySessions,
                     agenda = shownAgenda,
+                    taskCards = taskCards,
                     onAgendaClick = onAgendaClick,
+                    onTaskCheck = onTaskCheck,
                     syncing = syncing,
                     allEmpty = sessions.isEmpty(),
                     progressDone = progressDone,
@@ -325,7 +337,7 @@ private fun TodayTitleBar(
                 Spacer(Modifier.width(8.dp))
                 Box(
                     Modifier
-                        .clip(RoundedCornerShape(6.dp))
+                        .clip(G3CornerShape(6.dp))
                         .background(scheme.primary.copy(alpha = 0.14f))
                         .padding(horizontal = 7.dp, vertical = 2.dp),
                 ) {
@@ -362,7 +374,7 @@ private fun TodayTitleBar(
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    Icons.Rounded.Refresh,
+                    AppIcons.Refresh,
                     contentDescription = "同步",
                     modifier = Modifier.size(17.dp),
                     tint = scheme.onSurfaceVariant,
@@ -379,7 +391,7 @@ private fun TodayTitleBar(
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                Icons.Rounded.Settings,
+                AppIcons.Settings,
                 contentDescription = "设置",
                 modifier = Modifier.size(17.dp),
                 tint = scheme.onSurfaceVariant,
@@ -406,7 +418,7 @@ private fun NoticeBar(notice: String, onOpenLogin: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(G3CornerShape(12.dp))
             .background(scheme.tertiary.copy(alpha = 0.13f))
             .padding(horizontal = 13.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -439,6 +451,9 @@ private fun CourseSection(
     sessions: List<CourseSession>,
     agenda: List<AgendaOccurrence>,
     onAgendaClick: (AgendaOccurrence) -> Unit,
+    /** 截止任务卡（含已完成沉底项），单独渲染在这里，不受日期过滤 */
+    taskCards: List<AgendaOccurrence> = emptyList(),
+    onTaskCheck: (AgendaOccurrence) -> Unit,
     syncing: Boolean,
     allEmpty: Boolean,
     progressDone: Int,
@@ -464,8 +479,7 @@ private fun CourseSection(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(scheme.surface)
+                    .micaPanel(14.dp)
                     .padding(vertical = if (syncing && allEmpty) 26.dp else 30.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -487,28 +501,57 @@ private fun CourseSection(
         Timeline(sessions = sessions, onCourseClick = onCourseClick)
     }
 
-    if (agenda.isNotEmpty()) {
+    if (taskCards.isNotEmpty() || agenda.isNotEmpty()) {
         if (sessions.isNotEmpty()) Spacer(Modifier.height(14.dp))
         /*
-         * 标题按内容写。考试是教务推的、不是用户加的，
-         * 混排之后还写「我的日程」就不准了 —— 一天里有考试就叫「日程与考试」。
+         * 标题按内容写：有截止任务 / 待办就叫「待办与日程」（任务排在前面），
+         * 否则有考试叫「日程与考试」，都没有才是「我的日程」。
          */
+        val hasPendingTask = taskCards.any { it.doneAt == null }
         Text(
-            if (agenda.any { it.colorIndex == com.gzucm.pocket.core.EXAM_COLOR_INDEX }) {
-                "日程与考试"
-            } else {
-                "我的日程"
+            when {
+                hasPendingTask -> "待办与日程"
+                agenda.any { it.colorIndex == com.gzucm.pocket.core.EXAM_COLOR_INDEX } -> "日程与考试"
+                else -> "我的日程"
             },
             fontSize = 12.sp,
             color = scheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(6.dp))
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            /*
+             * 顺序：未完成任务 → 日程 → 已完成任务（变淡沉底）。
+             *
+             * 完成后**不立刻消失**（致辉 2026-11-17 拍板）：卡片降到半透明留在最下方，
+             * 第二天才不见（过滤在 ViewModel 的 todayTaskOccurrences 里）。
+             * 想改回来直接再点一下勾 —— 比一闪而过的撤销条好用。
+             * key 仍然保留：已完成项还在列表里、位置会变，没 key 会串状态。
+             */
+            taskCards.filter { it.doneAt == null }.forEach { o ->
+                key("task|" + o.key) {
+                    com.gzucm.pocket.ui.schedule.AgendaDayCard(
+                        occurrence = o,
+                        onClick = { onAgendaClick(o) },
+                        onTaskCheck = { onTaskCheck(o) },
+                    )
+                }
+            }
             agenda.forEach { o ->
-                com.gzucm.pocket.ui.schedule.AgendaDayCard(
-                    occurrence = o,
-                    onClick = { onAgendaClick(o) },
-                )
+                key("agenda|" + o.key) {
+                    com.gzucm.pocket.ui.schedule.AgendaDayCard(
+                        occurrence = o,
+                        onClick = { onAgendaClick(o) },
+                    )
+                }
+            }
+            taskCards.filter { it.doneAt != null }.forEach { o ->
+                key("done|" + o.key) {
+                    com.gzucm.pocket.ui.schedule.AgendaDayCard(
+                        occurrence = o,
+                        onClick = { onAgendaClick(o) },
+                        onTaskCheck = { onTaskCheck(o) },
+                    )
+                }
             }
         }
     }
@@ -534,8 +577,8 @@ private fun WeekOverview(sessions: List<CourseSession>, currentWeek: Int) {
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(scheme.surface)
+            // 阴影用系统原生 elevation，不再按高度分档（见 MicaPanel.kt）
+            .micaPanel(16.dp)
             .padding(horizontal = 16.dp, vertical = 15.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -577,7 +620,7 @@ private fun WeekOverview(sessions: List<CourseSession>, currentWeek: Int) {
                             .fillMaxWidth()
                             .padding(horizontal = 3.dp)
                             .height((30 * ratio).dp.coerceAtLeast(if (n > 0) 4.dp else 2.dp))
-                            .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                            .clip(G3CornerShape(topStart = 4.dp, topEnd = 4.dp, bottomEnd = 0.dp, bottomStart = 0.dp))
                             .background(
                                 when {
                                     n == 0 -> scheme.outlineVariant.copy(alpha = 0.4f)
@@ -617,7 +660,7 @@ private fun WeekOverview(sessions: List<CourseSession>, currentWeek: Int) {
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(G3CornerShape(10.dp))
                     .background(scheme.primary.copy(alpha = 0.07f))
                     .padding(horizontal = 12.dp, vertical = 9.dp),
             ) {
@@ -739,7 +782,7 @@ private fun Timeline(sessions: List<CourseSession>, onCourseClick: (CourseSessio
                     Modifier
                         .weight(1f)
                         .padding(bottom = if (i == sessions.lastIndex) 0.dp else 12.dp)
-                        .clip(RoundedCornerShape(13.dp))
+                        .clip(G3CornerShape(13.dp))
                         .background(
                             if (isOngoing) color.copy(alpha = 0.14f)
                             else MaterialTheme.colorScheme.surface,
@@ -748,7 +791,7 @@ private fun Timeline(sessions: List<CourseSession>, onCourseClick: (CourseSessio
                             width = if (isOngoing) 1.dp else 0.5.dp,
                             color = if (isOngoing) color.copy(alpha = 0.5f)
                             else MaterialTheme.colorScheme.outlineVariant,
-                            shape = RoundedCornerShape(13.dp),
+                            shape = G3CornerShape(13.dp),
                         )
                         .clickable { onCourseClick(s) }
                         .padding(horizontal = 13.dp, vertical = 11.dp),
@@ -768,7 +811,7 @@ private fun Timeline(sessions: List<CourseSession>, onCourseClick: (CourseSessio
                             if (isOngoing) {
                                 Box(
                                     Modifier
-                                        .clip(RoundedCornerShape(5.dp))
+                                        .clip(G3CornerShape(5.dp))
                                         .background(color.copy(alpha = 0.2f))
                                         .padding(horizontal = 6.dp, vertical = 1.dp),
                                 ) {
@@ -853,16 +896,13 @@ private fun PowerCard(
     Box(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(
-                Brush.linearGradient(
-                    listOf(
-                        scheme.surface,
-                        scheme.surface.copy(alpha = 0.92f),
-                    ),
-                ),
-            )
-            .border(0.6.dp, scheme.outlineVariant, RoundedCornerShape(18.dp))
+            /*
+             * 去掉了原来那圈 0.6dp 的 outlineVariant 描边（2026-11-19 云母化）。
+             *
+             * 渐变不再手写 —— [micaPanel] 的默认底就是这道 3% 斜向微渐变，
+             * 这张卡是它的样板（2026-11-19 第二轮：所有面板对齐到这里）。
+             */
+            .micaPanel(18.dp)
             .clickable(onClick = onClick)
             .padding(horizontal = 17.dp, vertical = 15.dp),
     ) {
@@ -962,7 +1002,7 @@ private fun MiniSparkline(points: List<PowerDaily>, color: Color) {
                 Modifier
                     .weight(1f)
                     .height((30 * ratio).dp)
-                    .clip(RoundedCornerShape(2.dp))
+                    .clip(G3CornerShape(2.dp))
                     .background(color.copy(alpha = 0.25f + 0.5f * ratio)),
             )
         }

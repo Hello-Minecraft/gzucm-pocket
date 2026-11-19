@@ -10,9 +10,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -36,6 +37,22 @@ val LocalWallpaperBounds = compositionLocalOf<Rect?> { null }
 
 /** 预先糊好的壁纸位图。全页只算一次，格子只做取样 */
 val LocalBlurredWallpaper = compositionLocalOf<ImageBitmap?> { null }
+
+/**
+ * 当前课表页有没有自定义壁纸。
+ *
+ * 没有壁纸时 [CourseBackground] 在 `bmp ?: return` 那行直接返回，不画任何东西，
+ * 格子自然也没有磨砂层 —— 卡片只剩半透明的课程色，这时候得靠**不透明衬底**
+ * 把它变成实心云母面板，否则 elevation 阴影会从卡底下透出来。
+ *
+ * ## 为什么用显式标记，而不是判断「壁纸 bounds 非空」
+ *
+ * [LocalWallpaperBounds] 有两个不可靠的时候：
+ *   · 换/删壁纸后 `onGloballyPositioned` 不再回调，旧值会留着；
+ *   · 布局完成前它是 null，但壁纸其实是有的是。
+ * 两头都不准。这里只关心「用户有没有设壁纸」这一个事实，就用一个专门的值。
+ */
+val LocalHasCustomBackdrop = compositionLocalOf { false }
 
 /**
  * 格子底色不透明度（0.10~1.00）。
@@ -319,96 +336,167 @@ private class FrostedBackdropNode(
     /** 上次实际用来抠图的位置；和当前位置不同才需要重画 */
     var lastDrawn: Rect? = null
 
+    /*
+     * 缓存的 BitmapShader：位图不换就一直复用，每帧只更新 localMatrix。
+     *
+     * 为什么用 shader 而不是 drawImage(抠一块)——2026-11-19 第二次修「横滑拉伸」：
+     *
+     * drawImage 要自己算「源矩形」和「目标矩形」，两者宽高比稍有偏差（取整、
+     * 或者某一边被边界裁了）就是拉伸。上一版按交集把两边同比例缩，纯函数测下来
+     * 是对的，真机上仍然看得见 —— 说明还有别的东西在破坏这个比例。
+     *
+     * BitmapShader 是**一次固定比例的仿射变换**：矩阵里只有 scale 和 translate，
+     * 没有任何"目标尺寸"参与，物理上不可能被拉长。越界部分由 CLAMP 用边缘像素延拓，
+     * 也不会出现"半张卡没磨砂"。
+     */
+    private var shader: android.graphics.BitmapShader? = null
+    private var shaderOwnedBy: ImageBitmap? = null
+    private var brush: androidx.compose.ui.graphics.ShaderBrush? = null
+    private val matrix = android.graphics.Matrix()
+
     override fun onPlaced(coordinates: androidx.compose.ui.layout.LayoutCoordinates) {
         coords = coordinates
-        val now = runCatching { coordinates.boundsInRoot() }.getOrNull() ?: return
+        val now = runCatching { coordinates.unclippedBoundsInRoot() }.getOrNull() ?: return
         if (now != lastDrawn) invalidateDraw()
     }
 
     override fun androidx.compose.ui.graphics.drawscope.ContentDrawScope.draw() {
         val c = coords
         if (c != null && c.isAttached) {
-            val r = c.boundsInRoot()
+            val r = c.unclippedBoundsInRoot()
             lastDrawn = r
-            drawFrostedRegion(bitmap, wall, r, alpha)
+            drawFrostedWallpaper(bitmap, wall, r, alpha)
             if (veil > 0f) {
                 drawRect(color = veilColor, alpha = veil.coerceIn(0f, 1f))
             }
         }
         drawContent()
     }
-}
 
-private fun DrawScope.drawFrostedRegion(
-    bmp: ImageBitmap,
-    wall: Rect,
-    self: Rect,
-    alpha: Float,
-) {
-    if (wall.width <= 0f || wall.height <= 0f) return
+    /**
+     * 把「格子正后方那块壁纸」按固定比例贴到格子上。
+     *
+     * 矩阵只做两件事：放大 [scale] 倍、平移到位图原点相对格子左上角的位置。
+     * 没有任何目标尺寸参与，所以不管格子宽高多少、有没有越界，比例都不会变。
+     */
+    private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawFrostedWallpaper(
+        bmp: ImageBitmap,
+        wall: Rect,
+        self: Rect,
+        alpha: Float,
+    ) {
+        if (wall.width <= 0f || wall.height <= 0f) return
+        if (bmp.width <= 0 || bmp.height <= 0) return
 
-    val r = frostSrcRect(
-        bmpW = bmp.width,
-        bmpH = bmp.height,
-        wallW = wall.width,
-        wallH = wall.height,
-        relX = self.left - wall.left,
-        relY = self.top - wall.top,
-        cellW = self.width,
-        cellH = self.height,
-    )
+        val sh = obtainShader(bmp) ?: return
+        val br = obtainBrush(sh) ?: return
 
-    drawImage(
-        image = bmp,
-        srcOffset = IntOffset(r.left, r.top),
-        srcSize = IntSize(r.width, r.height),
-        dstOffset = IntOffset.Zero,
-        dstSize = IntSize(size.width.toInt().coerceAtLeast(1), size.height.toInt().coerceAtLeast(1)),
-        alpha = alpha.coerceIn(0f, 1f),
-        // 源图很小、放大倍数大，Low 就够（本身是糊的，再精细也看不出来）
-        filterQuality = FilterQuality.Low,
-    )
+        val tf = frostTransform(
+            bmpW = bmp.width,
+            bmpH = bmp.height,
+            wallW = wall.width,
+            wallH = wall.height,
+            relX = self.left - wall.left,
+            relY = self.top - wall.top,
+        ) ?: return
+
+        // 位图像素 → 格子局部坐标：先缩放，再平移到「位图原点相对格子左上角」的位置
+        matrix.setScale(tf.scale, tf.scale)
+        matrix.postTranslate(tf.dx, tf.dy)
+        sh.setLocalMatrix(matrix)
+
+        drawRect(brush = br, alpha = alpha.coerceIn(0f, 1f))
+    }
+
+    private fun obtainShader(bmp: ImageBitmap): android.graphics.BitmapShader? {
+        val cur = shader
+        if (cur != null && shaderOwnedBy === bmp) return cur
+        val s = runCatching {
+            android.graphics.BitmapShader(
+                bmp.asAndroidBitmap(),
+                android.graphics.Shader.TileMode.CLAMP,
+                android.graphics.Shader.TileMode.CLAMP,
+            )
+        }.getOrNull() ?: return null
+        shader = s
+        shaderOwnedBy = bmp
+        brush = null // 旧 brush 绑的是旧 shader
+        return s
+    }
+
+    private fun obtainBrush(sh: android.graphics.BitmapShader): androidx.compose.ui.graphics.ShaderBrush? {
+        val cur = brush
+        if (cur != null) return cur
+        val b = androidx.compose.ui.graphics.ShaderBrush(sh)
+        brush = b
+        return b
+    }
 }
 
 /**
- * 算出「格子在模糊位图上对应的那块区域」。
+ * 磨砂的「位图像素 → 格子局部坐标」变换。
  *
- * 纯函数，抽出来是为了能单测 —— 这段是 ContentScale.Crop 的逆运算，
- * 写错的表现很隐蔽：磨砂块整体偏移几像素，肉眼只觉得「有点脏」，
- * 但说不出哪里不对，很难靠截图发现。
+ * 只有 scale 和 translate 两个量，**没有任何目标尺寸参与** ——
+ * 这正是「不会拉伸」的数学保证：同一张位图在同一块壁纸区上，
+ * 不管格子多宽多高、有没有滑出屏幕，scale 都是同一个常数。
+ *
+ * 用法：`canvasX = bitmapX * scale + dx`
+ *
+ * @param scale 1 个位图像素占多少屏幕像素（Crop 规则：取较大的那个比例）
+ * @param dx/dy 位图原点（左上角）在格子局部坐标里的位置；越界时是负的，交给 CLAMP 延拓
+ */
+internal data class FrostTransform(val scale: Float, val dx: Float, val dy: Float)
+
+/**
+ * 纯函数，抽出来是为了能单测 —— 这段是 `ContentScale.Crop` 的逆运算。
  *
  * Crop 的规则：等比放大到**盖满**壁纸区（取较大的比例），然后居中裁掉多余部分。
- * 已知格子相对壁纸左上角的偏移 (relX, relY)，反推它在原图上的坐标。
+ * 已知格子相对壁纸左上角的偏移 (relX, relY)，反推位图原点该落在哪。
  *
- * @param bmpW/bmpH 模糊位图尺寸（px）
- * @param wallW/wallH 壁纸在屏幕上占的区域（px）
- * @param relX/relY 格子左上角相对壁纸左上角的偏移（px）
- * @param cellW/cellH 格子尺寸（px）
+ * @return null 表示尺寸非法
  */
-internal fun frostSrcRect(
+internal fun frostTransform(
     bmpW: Int,
     bmpH: Int,
     wallW: Float,
     wallH: Float,
     relX: Float,
     relY: Float,
-    cellW: Float,
-    cellH: Float,
-): IntRect {
-    if (bmpW <= 0 || bmpH <= 0) return IntRect(0, 0, 1, 1)
-
+): FrostTransform? {
+    if (bmpW <= 0 || bmpH <= 0 || wallW <= 0f || wallH <= 0f) return null
     val scale = maxOf(wallW / bmpW, wallH / bmpH).coerceAtLeast(0.0001f)
-    val drawnW = bmpW * scale
-    val drawnH = bmpH * scale
-    val ox = (wallW - drawnW) / 2f
-    val oy = (wallH - drawnH) / 2f
-
-    val x = ((relX - ox) / scale).toInt().coerceIn(0, bmpW - 1)
-    val y = ((relY - oy) / scale).toInt().coerceIn(0, bmpH - 1)
-    val w = (cellW / scale).toInt().coerceIn(1, (bmpW - x).coerceAtLeast(1))
-    val h = (cellH / scale).toInt().coerceIn(1, (bmpH - y).coerceAtLeast(1))
-    return IntRect(x, y, w, h)
+    val ox = (wallW - bmpW * scale) / 2f
+    val oy = (wallH - bmpH * scale) / 2f
+    return FrostTransform(scale = scale, dx = ox - relX, dy = oy - relY)
 }
 
-/** 极简矩形，避免为主函数引入 Compose 的 Rect 依赖 */
-internal data class IntRect(val left: Int, val top: Int, val width: Int, val height: Int)
+/**
+ * 节点在窗口里的**完整**边界，**不裁剪**。
+ *
+ * ## 为什么必须自己算，不能用 `boundsInRoot()`
+ *
+ * `boundsInRoot()` 的实际实现是
+ * `findRootCoordinates().localBoundingBoxOf(this, clipBounds = true)` ——
+ * **默认把矩形裁到所有父容器的裁剪区内**。
+ *
+ * 磨砂要的恰恰是「卡片真实位置」，哪怕它有一半在屏幕外：
+ *
+ * ```
+ * 卡片真实 x ∈ [-304, 486]  →  boundsInRoot() 返回 [0, 486]（left 被钳到 0）
+ * ```
+ *
+ * 后果是采样点从 -304 变成 0，偏了 304px —— 卡片里贴的是屏幕左边缘那块壁纸，
+ * 而不是它正后方那块。表现就是「磨砂有，但位置是错的」。
+ *
+ * ## 为什么只有相邻页出问题、当前页一直是对的
+ *
+ * 卡片完整落在屏幕内时，裁剪不改变任何数字 —— 当前页永远正确。
+ * 只有当它被 Pager 拖出屏幕、露出一半时才会被钳，所以「前一天滑进来」必错，
+ * 「当前页」永远对。致辉 2026-11-19 的原话：
+ * 「后一天的模糊就是实时的……前一天的模糊位置在动画完成时的位置」。
+ *
+ * `clipBounds = false` 关掉裁剪就拿到真实矩形。节点没有缩放/旋转，
+ * 所以 `localBoundingBoxOf` 直接给出 左上角 + 自身宽高。
+ */
+private fun androidx.compose.ui.layout.LayoutCoordinates.unclippedBoundsInRoot(): Rect =
+    findRootCoordinates().localBoundingBoxOf(this, clipBounds = false)

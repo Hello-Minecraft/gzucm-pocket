@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import com.gzucm.pocket.ui.components.G3CornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -153,7 +153,7 @@ internal fun SessionDetailContent(
                     val cc = courseColor(c.name)
                     Box(
                         Modifier
-                            .clip(RoundedCornerShape(9.dp))
+                            .clip(G3CornerShape(9.dp))
                             .background(
                                 if (sel) cc.copy(alpha = 0.20f)
                                 else scheme.surfaceVariant.copy(alpha = 0.40f)
@@ -162,7 +162,7 @@ internal fun SessionDetailContent(
                                 if (sel) 1.dp else 0.dp,
                                 if (sel) cc.copy(alpha = 0.75f)
                                 else androidx.compose.ui.graphics.Color.Transparent,
-                                RoundedCornerShape(9.dp),
+                                G3CornerShape(9.dp),
                             )
                             .clickable { onCurrentChange(c) }
                             .padding(horizontal = 11.dp, vertical = 7.dp),
@@ -194,7 +194,7 @@ internal fun SessionDetailContent(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(G3CornerShape(12.dp))
                     .background(color.copy(alpha = 0.10f))
                     .padding(horizontal = 14.dp, vertical = 11.dp),
             ) {
@@ -235,7 +235,7 @@ internal fun SessionDetailContent(
         Row(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
+                .clip(G3CornerShape(12.dp))
                 .background(color.copy(alpha = 0.1f))
                 .padding(horizontal = 14.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically,

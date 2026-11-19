@@ -89,14 +89,17 @@ class AgendaReminderScheduleTest {
         val multi = Agenda(
             id = "r1",
             title = "交材料",
-            date = tomorrow.toString(),
+            // 用 3 天后而非明天：提前 1 天那条会落在明天，任何时刻跑测试都不会「已经过了」。
+            // 原来写明天，凌晨跑没事，白天跑时「今天 09:00」已过 → 提前 1 天那条被过滤，
+            // 从 3 个变 2 个（这个测试对当前时间敏感，2026-11-17 白天暴露）。
+            date = LocalDate.now().plusDays(3).toString(),
             startMinute = 9 * 60,
             endMinute = 10 * 60,
             remindLeads = listOf(24 * 60, 30, 0),
         )
         AgendaReminder.scheduleAll(ctx, semester, listOf(multi))
 
-        // 提前一天那条落在今天 09:00（今天还没到）→ 三条都该排上
+        // 三档全部落在未来 → 三条都该排上
         assertEquals("三个档位三个闹钟", 3, alarms().size)
         assertEquals("三条都记进 code 表", 3, AgendaReminder.loadCodes(ctx).size)
     }

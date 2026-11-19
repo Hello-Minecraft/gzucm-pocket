@@ -19,12 +19,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import com.gzucm.pocket.ui.components.G3CornerShape
+import com.gzucm.pocket.ui.components.micaPanel
+import com.gzucm.pocket.ui.components.micaShadow
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.derivedStateOf
@@ -38,24 +42,41 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.gzucm.pocket.core.AgendaOccurrence
 import com.gzucm.pocket.core.CourseSession
 import com.gzucm.pocket.core.ScheduleEntry
 import com.gzucm.pocket.core.Semester
-import com.gzucm.pocket.core.mergeForDay
+import com.gzucm.pocket.core.SessionPhase
 import com.gzucm.pocket.core.SlotEndTimes
 import com.gzucm.pocket.core.SlotTimes
+import com.gzucm.pocket.core.mergeForDay
 import com.gzucm.pocket.core.phaseOf
-import com.gzucm.pocket.core.SessionPhase
 import com.gzucm.pocket.ui.components.LocalFloatingBarInset
 import com.gzucm.pocket.ui.components.frostedBackdrop
+import com.gzucm.pocket.ui.components.BackdropInk
+import com.gzucm.pocket.ui.components.LocalBackdropInk
+import com.gzucm.pocket.ui.components.TodayFab
+import com.gzucm.pocket.ui.components.backdropInkColor
+import com.gzucm.pocket.ui.components.cardTextColor
+import com.gzucm.pocket.ui.components.rememberCardInk
 import com.gzucm.pocket.ui.theme.courseColor
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import java.time.LocalTime
 import java.time.LocalDate
+
+/**
+ * 「正在上」那层主色底的强度系数。
+ *
+ * 最终 alpha = 格子不透明度 × 0.85 × 本系数。
+ * 取 0.30 是为了在滑块 40% 时刚好等于改版前写死的 0.10 —— 观感不变，
+ * 但它现在会跟着滑块走（致辉 2026-11-19 要求「整体受滑块控制」）。
+ */
+private const val OngoingTintRatio = 0.30f
+
 
 /**
  * 日视图：一次只看一天，卡片堆叠。
@@ -116,6 +137,14 @@ internal fun DayScheduleView(
         }
     }
     val todayWeekday = today.dayOfWeek.value
+    /*
+     * 「今天在第几周」自己算，不用外面传的 currentWeek。
+     *
+     * 两者平时相等，但跨 0 点、或者 App 搁置几天后 currentWeek 还是上次的值时，
+     * 用外部值会把**错误的一天**标成今天（连带「正在上」也标错）。
+     * semester.weekOf 是纯函数，自己算一遍最省心。
+     */
+    val todayWeek = semester.weekOf(today)
 
     /*
      * Pager 以「整学期的第几天」为索引，而不是「这周的第几天」。
@@ -232,97 +261,123 @@ internal fun DayScheduleView(
     val shownWeek = shownPage / 7 + 1
     val shownWeekday = shownPage % 7 + 1
 
-    Column(modifier.fillMaxSize()) {
-        // ── 星期条 ──────────────────────────────────────────
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            for (wd in 1..7) {
-                val date = semester.dateOf(shownWeek, wd)
-                val selected = shownWeekday == wd
-                val isToday = shownWeek == currentWeek && todayWeekday == wd
-                DayTab(
-                    label = WeekdayLabels[wd - 1],
-                    // 日期只用「月-日」，不带年份，格子窄放不下
-                    date = "%02d-%02d".format(date.monthValue, date.dayOfMonth),
-                    selected = selected,
-                    isToday = isToday,
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        // 点星期条 = 直接跳到「同一周的那一天」，不跨周
-                        val target = pageOf(shownWeek, wd)
-                        scope.launch { pagerState.animateScrollToPage(target) }
-                    },
-                )
+    Box(modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
+            // ── 星期条 ──────────────────────────────────────────
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                for (wd in 1..7) {
+                    val date = semester.dateOf(shownWeek, wd)
+                    val selected = shownWeekday == wd
+                    val isToday = shownWeek == currentWeek && todayWeekday == wd
+                    DayTab(
+                        label = WeekdayLabels[wd - 1],
+                        // 日期只用「月-日」，不带年份，格子窄放不下
+                        date = "%02d-%02d".format(date.monthValue, date.dayOfMonth),
+                        selected = selected,
+                        isToday = isToday,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            // 点星期条 = 直接跳到「同一周的那一天」，不跨周
+                            val target = pageOf(shownWeek, wd)
+                            scope.launch { pagerState.animateScrollToPage(target) }
+                        },
+                    )
+                }
             }
-        }
 
-        // ── 当天的课 ────────────────────────────────────────
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier.fillMaxSize(),
-            // 多留两页：相邻周的页面也能立刻渲染，跨周滑动不白屏
-            beyondViewportPageCount = 2,
-        ) { page ->
-            val w = page / 7 + 1
-            val weekday = page % 7 + 1
-            val date = firstMonday.plusDays(page.toLong())
+            // ── 当天的课 ────────────────────────────────────────
             /*
-             * 课程和日程按真实开始分钟混排。
-             *
-             * 用联合类型而不是把日程伪装成 CourseSession：后者会让
-             * 同名同节次撞 key 崩溃，也会把日程混进上课提醒排程。
+             * 卡片墨色：按**卡片实际底色**判定（磨砂壁纸 + 30% 雾面），不是壁纸原亮度。
+             * 纯黑壁纸上会取白字、纯白壁纸上会取黑字 —— 见 rememberCardInk 的说明。
+             * 整页算一次就够，所有卡片共用（同屏底色一致）。
              */
-            val entries = mergeForDay(
-                sessions = byDay[w to weekday].orEmpty(),
-                occurrences = agendaOccurrences,
-                week = w,
-                weekday = weekday,
-            )
-            val isTodayPage = w == currentWeek && todayWeekday == weekday
+            val cardInk = rememberCardInk(com.gzucm.pocket.ui.components.LocalBlurredWallpaper.current)
 
-            if (entries.isEmpty()) {
-                EmptyDay(
-                    isToday = isTodayPage,
-                    date = date,
-                    onAddAgenda = { onAddAgenda(date, null) },
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag("day-pager"),
+                // 多留两页：相邻周的页面也能立刻渲染，跨周滑动不白屏
+                beyondViewportPageCount = 2,
+            ) { page ->
+                val w = page / 7 + 1
+                val weekday = page % 7 + 1
+                val date = firstMonday.plusDays(page.toLong())
+                /*
+                 * 课程和日程按真实开始分钟混排。
+                 *
+                 * 用联合类型而不是把日程伪装成 CourseSession：后者会让
+                 * 同名同节次撞 key 崩溃，也会把日程混进上课提醒排程。
+                 */
+                val entries = mergeForDay(
+                    sessions = byDay[w to weekday].orEmpty(),
+                    occurrences = agendaOccurrences,
+                    week = w,
+                    weekday = weekday,
                 )
-            } else {
-                LazyColumn(
-                    Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(
-                        start = 14.dp, end = 14.dp, top = 4.dp,
-                        bottom = LocalFloatingBarInset.current + 16.dp,
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    items(entries, key = { it.stableKey }) { entry ->
-                        when (entry) {
-                            is ScheduleEntry.Course -> {
-                                val s = entry.session
-                                DayCourseCard(
-                                    session = s,
-                                    /*
-                                     * 只有「正在看的这天就是今天」时才算现在时刻。
-                                     * 别的时候传 -1：phaseOf 会判成 UPCOMING，
-                                     * 翻到上周三时那天的课不会被标成「正在上」。
-                                     */
-                                    nowMinutes = if (isTodayPage) nowMinutes else -1,
-                                    onClick = { onCourseClick(s) },
+                val isTodayPage = w == todayWeek && todayWeekday == weekday
+
+                if (entries.isEmpty()) {
+                    EmptyDay(
+                        isToday = isTodayPage,
+                        date = date,
+                        onAddAgenda = { onAddAgenda(date, null) },
+                    )
+                } else {
+                    LazyColumn(
+                        Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            start = 14.dp, end = 14.dp, top = 4.dp,
+                            bottom = LocalFloatingBarInset.current + 16.dp,
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(entries, key = { it.stableKey }) { entry ->
+                            when (entry) {
+                                is ScheduleEntry.Course -> {
+                                    val s = entry.session
+                                    DayCourseCard(
+                                        session = s,
+                                        /*
+                                         * 只有「正在看的这天就是今天」时才算现在时刻。
+                                         * 别的时候传 -1：phaseOf 会判成 UPCOMING，
+                                         * 翻到上周三时那天的课不会被标成「正在上」。
+                                         */
+                                        nowMinutes = if (isTodayPage) nowMinutes else -1,
+                                        onClick = { onCourseClick(s) },
+                                        ink = cardInk,
+                                    )
+                                }
+                                is ScheduleEntry.Custom -> AgendaDayCard(
+                                    occurrence = entry.occurrence,
+                                    onClick = { onAgendaClick(entry.occurrence) },
                                 )
                             }
-                            is ScheduleEntry.Custom -> AgendaDayCard(
-                                occurrence = entry.occurrence,
-                                onClick = { onAgendaClick(entry.occurrence) },
-                            )
                         }
                     }
                 }
             }
         }
+        /*
+         * 回到今天。
+         *
+         * todayPage 用 currentWeek（今天所在的那一周）+ todayWeekday 算，
+         * 不用外面传的 week —— 用户翻到别的周时，week 已经不是今天了，
+         * 那样算出来的「今天」会跟着跑。
+         */
+        val todayPage = pageOf(todayWeek, todayWeekday)
+        TodayFab(
+            // todayWeek 可能落在学期外（假期），那时没有「今天」可回
+            visible = shownPage != todayPage && todayWeek in 1..semester.totalWeeks,
+            onClick = { scope.launch { pagerState.animateScrollToPage(todayPage) } },
+            modifier = Modifier.align(Alignment.BottomEnd),
+        )
     }
 }
 
@@ -337,6 +392,7 @@ private fun DayTab(
     onClick: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
+    val ink = LocalBackdropInk.current
     val bg = when {
         selected -> scheme.primary
         else -> androidx.compose.ui.graphics.Color.Transparent
@@ -344,12 +400,41 @@ private fun DayTab(
     val fg = when {
         selected -> scheme.onPrimary
         isToday -> scheme.primary
-        else -> scheme.onSurfaceVariant
+        // 压壁纸时按壁纸亮度取深/浅墨色（文档 §5.2），不垫底板
+        else -> backdropInkColor(ink, 1) ?: scheme.onSurfaceVariant
     }
+    /*
+     * 今天那一格的描边颜色。
+     *
+     * 两套配色，因为底色不同：
+     *   · 今天没被选中（透明底）→ 淡主色
+     *   · 今天正好选中（主色实心）→ 淡「onPrimary」，也就是绿块上一圈淡白线
+     *
+     * alpha 压到 0.5 左右 —— 致辉 2026-11-19 的原话是「类似第 x 周那种淡淡的就行」。
+     * 用实心 primary 会变成一圈亮绿粗框，跟顶部周条的选中框不是一个语言。
+     */
+    val todayLine = if (selected) {
+        scheme.onPrimary.copy(alpha = 0.55f)
+    } else {
+        scheme.primary.copy(alpha = 0.50f)
+    }
+
     Column(
         modifier
-            .clip(RoundedCornerShape(8.dp))
+            .clip(G3CornerShape(8.dp))
             .background(bg)
+            /*
+             * 描边必须画在格子**边界内**，且**不能补 padding**。
+             *
+             * 第一版为了让「环」和「填充块」分开，写成了 border + padding(3dp)，
+             * 结果今天那格比相邻格高出 6dp —— 一行七格，一眼就看出来没对齐
+             * （致辉 2026-11-19 报的）。border 本身不占布局空间，撑大的是那个 padding。
+             *
+             * 现在不加 padding，描边直接压在格子边缘，七格严格等高。
+             */
+            .then(
+                if (isToday) Modifier.border(1.dp, todayLine, G3CornerShape(8.dp)) else Modifier,
+            )
             .clickable(onClickLabel = "查看$label") { onClick() }
             .padding(vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -357,14 +442,20 @@ private fun DayTab(
         Text(
             label,
             fontSize = 11.sp,
-            fontWeight = if (selected || isToday) FontWeight.Medium else FontWeight.Normal,
+            fontWeight = if (selected || isToday || ink != BackdropInk.Unknown) {
+                FontWeight.Medium
+            } else {
+                FontWeight.Normal
+            },
             color = fg,
         )
         Spacer(Modifier.height(2.dp))
         Text(
             date,
             fontSize = 9.5.sp,
+            fontWeight = if (ink != BackdropInk.Unknown) FontWeight.Medium else FontWeight.Normal,
             color = if (selected) fg.copy(alpha = 0.85f)
+            else if (ink != BackdropInk.Unknown) fg.copy(alpha = 0.8f)
             else fg.copy(alpha = 0.65f),
         )
     }
@@ -398,6 +489,8 @@ private fun DayCourseCard(
     /** 当天第几分钟。传 -1 表示「不是今天」，不做状态判断 */
     nowMinutes: Int,
     onClick: () -> Unit,
+    /** 卡片实际底色对应的墨色（见 rememberCardInk）。Unknown 时回退主题色 */
+    ink: BackdropInk = BackdropInk.Unknown,
 ) {
     val scheme = MaterialTheme.colorScheme
     val color = courseColor(session.name)
@@ -406,16 +499,67 @@ private fun DayCourseCard(
     val past = phase == SessionPhase.PAST
 
     /*
-     * 已下课的整卡降透明度（0.55），但「正在上」不受影响。
+     * 三档状态系数（致辉 2026-11-19 定）：正在上最实、未上居中、已上过最透。
      *
-     * 不降到更低：用户可能想回看上午上过什么，降太狠就看不见了。
+     * 改之前只有两档（past 0.55 / 其余 1.0），「正在上」和「未上」完全一样，
+     * 扫一眼分不出哪节已经上过了。
      */
-    val dim = if (past) 0.55f else 1f
+    val stateDim = when {
+        ongoing -> 1.00f
+        past -> 0.45f
+        else -> 0.75f
+    }
+
+    /*
+     * 文字的淡出**不跟着底色等比走**：底色 0.45 已经够透，文字再乘 0.45
+     * 会让上午上过的课整张消失，回看时找不到。所以收得慢一档。
+     */
+    val textDim = when {
+        ongoing -> 1.00f
+        past -> 0.55f
+        else -> 0.85f
+    }
+
+    /*
+     * 三种背景状态、三种画法（致辉 2026-11-19 定）。
+     *
+     * | 场景 | 磨砂 | 阴影 | 衬底 | 描边 |
+     * |---|---|---|---|---|
+     * | 默认壁纸 | 无 | **有** | **有**（实心云母面板） | 无 |
+     * | 自定义 + 模糊开 | 有 | 有 | 无（磨砂本身不透明） | 无 |
+     * | 自定义 + 模糊关 | 无 | **无** | 无 | **有**（0.8dp 灰白） |
+     *
+     * 三处判断的理由：
+     *
+     * · **默认壁纸要衬底，不能只靠阴影**。没壁纸时卡片是页面主体，应该长成实心云母
+     *   面板（浅色纯白、深色 #171C23），压在白底/黑底上都立得住；只给阴影而不衬底，
+     *   它就是一块半透明色片，跟背景糊在一起。
+     * · **模糊关掉时不挂阴影、改描边**。底半透明 + elevation = 阴影从卡底下透出来，
+     *   在卡片内侧显出一圈暗边（穿帮）；去掉阴影后卡片边缘只剩明度差撑着，
+     *   壁纸颜色接近时会"化"进背景，所以补一圈 0.8dp 灰白边把轮廓勾出来。
+     * · **模糊开着时什么都不用补**。磨砂层画满不透明，阴影不会透，轮廓也清楚。
+     */
+    val hasCustomBg = com.gzucm.pocket.ui.components.LocalHasCustomBackdrop.current
+    val frostOn = hasCustomBg &&
+        com.gzucm.pocket.ui.components.LocalCellFrostEnabled.current &&
+        com.gzucm.pocket.ui.components.LocalBlurredWallpaper.current != null &&
+        com.gzucm.pocket.ui.components.LocalWallpaperBounds.current != null
+
+    val needsScrim = !hasCustomBg
+    val needsShadow = !hasCustomBg || frostOn
+    // 深色主题用白边、浅色主题用黑边，保证任何配色下都是"灰白"而不是隐形
+    val edgeLine = if (scheme.surface.luminance() < 0.5f) {
+        androidx.compose.ui.graphics.Color.White.copy(alpha = 0.22f)
+    } else {
+        androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.10f)
+    }
 
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            // 云母化（2026-11-19 致辉定）：轻一档阴影，一天十几张叠起来不会发灰
+            .then(if (needsShadow) Modifier.micaShadow(12.dp) else Modifier)
+            .clip(G3CornerShape(12.dp))
             /*
              * 磨砂底画满（理由同周视图：乘透明度会让背后清晰的壁纸透上来），
              * 用户调的那个浓度只作用在下一层的课程/中性色上。
@@ -423,42 +567,58 @@ private fun DayCourseCard(
             .frostedBackdrop(
                 bitmap = com.gzucm.pocket.ui.components.LocalBlurredWallpaper.current,
             )
-            .background(
-                if (ongoing) scheme.primary.copy(alpha = 0.10f)
-                else scheme.surfaceVariant.copy(
-                    alpha = (com.gzucm.pocket.ui.components.LocalCellOpacity.current * 0.85f * dim)
-                        .coerceIn(0.05f, 1f),
-                ),
-            )
+            /*
+             * 默认壁纸的不透明衬底。必须画在磨砂**之后**、课程色**之前**：
+             * 磨砂先铺（有壁纸时才有），衬底再盖（只在没壁纸时），最后叠课程色。
+             * 两者互斥，所以不会互相盖死。
+             */
             .then(
+                if (needsScrim) {
+                    Modifier.background(com.gzucm.pocket.ui.components.micaPanelColor())
+                } else {
+                    Modifier
+                },
+            )
+            .background(
+                /*
+                 * 三档底色全部受滑块控制（2026-11-19 改）。
+                 *
+                 * 「正在上」原来是一个写死的 0.10 主色底，滑块对它完全无效 ——
+                 * 致辉要求「整体不透明度都受滑块控制」。现在主色底也乘滑块值，
+                 * 系数 0.30 是为了在滑块 40% 时刚好落在原来那个 0.10（观感不变）。
+                 */
                 if (ongoing) {
-                    // 正在上：主色细边框，和角落标签、加粗色条一起做「当前」的信号
-                    Modifier.border(
-                        width = 1.dp,
-                        color = scheme.primary.copy(alpha = 0.45f),
-                        shape = RoundedCornerShape(12.dp),
+                    scheme.primary.copy(
+                        alpha = (com.gzucm.pocket.ui.components.LocalCellOpacity.current *
+                            0.85f * OngoingTintRatio).coerceIn(0f, 1f),
                     )
                 } else {
-                    /*
-                     * 普通卡片：一圈很细的灰白描边（2026-11-03 致辉要的）。
-                     *
-                     * 为什么需要：卡片底色是磨砂 + 半透明课程色，叠在壁纸上时
-                     * 边缘完全靠明度差撑着 —— 壁纸那块颜色接近时，卡片就「化」进背景了。
-                     * 描边给一条硬边界，等于替眼睛把轮廓画出来，可读性立刻上来。
-                     *
-                     * 只描 0.8dp：再粗就成卡片框了，会跟「正在上」的主色边框抢注意力。
-                     * 深浅色分别用白/黑，保证任何主题下都是「灰白」而不是隐形。
-                     */
-                    val line = if (scheme.surface.luminance() < 0.5f) {
-                        androidx.compose.ui.graphics.Color.White.copy(alpha = 0.22f)
-                    } else {
-                        androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.10f)
-                    }
-                    Modifier.border(
-                        width = 0.8.dp,
-                        color = line,
-                        shape = RoundedCornerShape(12.dp),
+                    scheme.surfaceVariant.copy(
+                        alpha = (com.gzucm.pocket.ui.components.LocalCellOpacity.current *
+                            0.85f * stateDim).coerceIn(0f, 1f),
                     )
+                },
+            )
+            /*
+             * 描边只在需要的时候出现（2026-11-19 第三版）：
+             *
+             * · 「正在上」的 1dp 主色边 —— 状态信号，跟角标、加粗色条同一套语言，优先级最高
+             * · 自定义壁纸 + 模糊关 —— 没有阴影了，靠这圈灰白边勾轮廓
+             * · 其余情况不描边，边界交给阴影或磨砂
+             */
+            .then(
+                when {
+                    ongoing -> Modifier.border(
+                        width = 1.dp,
+                        color = scheme.primary.copy(alpha = 0.45f),
+                        shape = G3CornerShape(12.dp),
+                    )
+                    hasCustomBg && !frostOn -> Modifier.border(
+                        width = 0.8.dp,
+                        color = edgeLine,
+                        shape = G3CornerShape(12.dp),
+                    )
+                    else -> Modifier
                 },
             )
             .clickable(onClick = onClick)
@@ -470,8 +630,8 @@ private fun DayCourseCard(
             Modifier
                 .width(if (ongoing) 4.dp else 3.dp)
                 .height(if (ongoing) 44.dp else 38.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(color.copy(alpha = dim)),
+                .clip(G3CornerShape(2.dp))
+                .background(color.copy(alpha = stateDim)),
         )
         Spacer(Modifier.width(12.dp))
 
@@ -483,7 +643,8 @@ private fun DayCourseCard(
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Medium,
                     lineHeight = 20.sp,
-                    color = scheme.onSurface.copy(alpha = dim),
+                    // 按卡片实际底色取墨色：纯黑壁纸用白字、纯白壁纸用黑字
+                    color = cardTextColor(ink, 0, scheme.onSurface, textDim),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -491,7 +652,7 @@ private fun DayCourseCard(
                     Spacer(Modifier.width(6.dp))
                     Box(
                         Modifier
-                            .clip(RoundedCornerShape(5.dp))
+                            .clip(G3CornerShape(5.dp))
                             .background(scheme.primary.copy(alpha = 0.2f))
                             .padding(horizontal = 6.dp, vertical = 1.dp),
                     ) {
@@ -510,7 +671,7 @@ private fun DayCourseCard(
                 if (session.startUnit == session.endUnit) "第 ${session.startUnit} 节"
                 else "第 ${session.startUnit}-${session.endUnit} 节",
                 fontSize = 10.5.sp,
-                color = scheme.onSurfaceVariant.copy(alpha = 0.75f * dim),
+                color = cardTextColor(ink, 2, scheme.onSurfaceVariant, 0.75f * textDim),
                 modifier = Modifier.padding(top = 2.dp),
             )
 
@@ -519,7 +680,7 @@ private fun DayCourseCard(
                 Text(
                     session.teachers,
                     fontSize = 12.sp,
-                    color = scheme.onSurfaceVariant.copy(alpha = dim),
+                    color = cardTextColor(ink, 1, scheme.onSurfaceVariant, textDim),
                 )
             }
             if (session.room.isNotBlank()) {
@@ -527,7 +688,7 @@ private fun DayCourseCard(
                 Text(
                     session.room,
                     fontSize = 12.sp,
-                    color = scheme.onSurfaceVariant.copy(alpha = 0.8f * dim),
+                    color = cardTextColor(ink, 2, scheme.onSurfaceVariant, 0.8f * textDim),
                 )
             }
         }
@@ -535,7 +696,13 @@ private fun DayCourseCard(
         Spacer(Modifier.width(10.dp))
 
         // ── 右侧：上下课时间竖排 ──────────────────────────
-        TimeColumn(session = session, ongoing = ongoing, dim = dim, color = color)
+        TimeColumn(
+            session = session,
+            ongoing = ongoing,
+            dim = textDim,
+            color = color,
+            ink = ink,
+        )
     }
 }
 
@@ -551,6 +718,8 @@ private fun TimeColumn(
     ongoing: Boolean,
     dim: Float,
     color: androidx.compose.ui.graphics.Color,
+    /** 卡片实际底色对应的墨色，用来压/提课程色的明度 */
+    ink: BackdropInk = BackdropInk.Unknown,
 ) {
     val scheme = MaterialTheme.colorScheme
     val start = session.startTime.ifBlank { SlotTimes[session.startUnit].orEmpty() }
@@ -572,8 +741,12 @@ private fun TimeColumn(
             lineHeight = 17.sp,
             color = when {
                 ongoing -> scheme.primary
-                // 平时用课程色：同一天的课颜色不同，扫一眼能分块
-                else -> color.copy(alpha = dim)
+                /*
+                 * 平时用课程色：同一天的课颜色不同，扫一眼能分块。
+                 * 但纯白壁纸 + 低不透明度时，浅色课程色会糊在浅底上 ——
+                 * 亮底（BackdropInk.Dark）时压暗三成，暗底保持原色。
+                 */
+                else -> courseTimeColor(color, ink, dim)
             },
             style = androidx.compose.ui.text.TextStyle(
                 fontFeatureSettings = "tnum",
@@ -585,12 +758,33 @@ private fun TimeColumn(
             end.ifBlank { "—" },
             fontSize = 12.sp,
             lineHeight = 14.sp,
-            color = scheme.onSurfaceVariant.copy(alpha = 0.7f * dim),
+            color = cardTextColor(ink, 2, scheme.onSurfaceVariant, 0.7f * dim),
             style = androidx.compose.ui.text.TextStyle(
                 fontFeatureSettings = "tnum",
             ),
         )
     }
+}
+
+/**
+ * 上课时间那串数字的颜色。
+ *
+ * 课程色是识别码（同一天的课颜色不同，扫一眼能分块），所以不换成墨色，
+ * 只按底色调整明度：亮底压暗 35%，暗底保持 —— 浅色课程色（黄、浅绿）
+ * 压在纯白壁纸的磨砂上时，原色对比度只有 1.5 左右，压暗后能到 4 以上。
+ */
+private fun courseTimeColor(
+    base: androidx.compose.ui.graphics.Color,
+    ink: BackdropInk,
+    alphaMul: Float,
+): androidx.compose.ui.graphics.Color {
+    val c = if (ink == BackdropInk.Dark) {
+        androidx.compose.ui.graphics.lerp(base, androidx.compose.ui.graphics.Color.Black, 0.35f)
+    } else {
+        base
+    }
+    return if (alphaMul >= 1f) c
+    else c.copy(alpha = (c.alpha * alphaMul).coerceIn(0f, 1f))
 }
 
 /**
@@ -611,17 +805,23 @@ private fun EmptyDay(
             .padding(bottom = LocalFloatingBarInset.current),
         contentAlignment = Alignment.Center,
     ) {
+        val ink = LocalBackdropInk.current
+        val onImage = ink != BackdropInk.Unknown
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 if (isToday) "今天没课，想去哪玩去哪玩" else "这天没课",
                 fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = if (onImage) FontWeight.Medium else FontWeight.Normal,
+                color = backdropInkColor(ink, 1)
+                    ?: MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(4.dp))
             Text(
                 "${date.monthValue} 月 ${date.dayOfMonth} 日",
                 fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                fontWeight = if (onImage) FontWeight.Medium else FontWeight.Normal,
+                color = backdropInkColor(ink, 2)
+                    ?: MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
             )
             Spacer(Modifier.height(14.dp))
             Text(
@@ -629,7 +829,7 @@ private fun EmptyDay(
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(G3CornerShape(10.dp))
                     .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
                     .clickable(onClickLabel = "添加日程", onClick = onAddAgenda)
                     .padding(horizontal = 14.dp, vertical = 7.dp),

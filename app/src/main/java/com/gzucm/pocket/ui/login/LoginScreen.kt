@@ -23,9 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Refresh
+import com.gzucm.pocket.ui.components.G3CornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,6 +44,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.gzucm.pocket.core.Campus
 import com.gzucm.pocket.data.Yjs
+import com.gzucm.pocket.ui.icons.AppIcons
 
 private enum class Stage { Jw, Ecard, Graduate }
 
@@ -257,7 +256,7 @@ fun LoginScreen(
                         color = if (on) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(G3CornerShape(8.dp))
                             .background(
                                 if (on) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
                                 else MaterialTheme.colorScheme.surface,
@@ -350,7 +349,7 @@ fun LoginScreen(
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(G3CornerShape(8.dp))
                         .clickable {
                             val on = !qrMode.value
                             qrMode.value = on
@@ -369,7 +368,7 @@ fun LoginScreen(
                 )
                 IconButton(onClick = { webRef?.reload() }) {
                     Icon(
-                        Icons.Rounded.Refresh,
+                        AppIcons.Refresh,
                         contentDescription = "刷新",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -400,10 +399,10 @@ fun LoginScreen(
                     .weight(1f)
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp)
-                    .clip(RoundedCornerShape(18.dp))
+                    .clip(G3CornerShape(18.dp))
                     .background(
                         MaterialTheme.colorScheme.surface,
-                        RoundedCornerShape(18.dp),
+                        G3CornerShape(18.dp),
                     ),
             ) {
                 // 扫码提示：微信不认「从相册选」的截图，必须另一台设备扫
@@ -412,7 +411,7 @@ fun LoginScreen(
                         Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 14.dp, vertical = 8.dp)
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(G3CornerShape(10.dp))
                             .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.09f))
                             .padding(horizontal = 12.dp, vertical = 9.dp),
                     ) {

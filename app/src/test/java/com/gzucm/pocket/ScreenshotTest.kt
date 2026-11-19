@@ -1,9 +1,12 @@
 package com.gzucm.pocket
 
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
@@ -25,6 +28,7 @@ import com.gzucm.pocket.core.LevelGrade
 import com.gzucm.pocket.core.PowerDaily
 import com.gzucm.pocket.core.PowerInfo
 import com.gzucm.pocket.core.Semester
+import com.gzucm.pocket.ui.components.micaSheetColor
 import com.gzucm.pocket.ui.grades.GradesScreen
 import com.gzucm.pocket.ui.power.PowerScreen
 import com.gzucm.pocket.ui.schedule.ScheduleScreen
@@ -32,6 +36,8 @@ import com.gzucm.pocket.ui.theme.GzucmTheme
 import com.gzucm.pocket.ui.today.TodayScreen
 import org.junit.Rule
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.ui.unit.dp
@@ -174,8 +180,19 @@ class ScreenshotTest {
         dark: Boolean = true,
         /** 额外推进主线程时钟的毫秒数：用于等 LaunchedEffect 里的 delay/动画 */
         settleMs: Long = 0L,
+        /**
+         * 推进 Compose 测试时钟的毫秒数。`LaunchedEffect` 里的 `delay` 走的是
+         * Compose 自己的 MonotonicFrameClock，推 Android Looper 对它没用
+         * （底栏 3 秒渐隐就是这种）。
+         */
+        frameMs: Long = 0L,
         /** 按下并保持，用来拍 ripple / 触摸反馈的静态形态（传 testTag） */
         pressTag: String? = null,
+        /**
+         * 真实等待毫秒数。壁纸解码跑在 Dispatchers.IO，ShadowLooper / mainClock
+         * 都推不动它；不等就会拍到「壁纸还没出来」或「墨色还没判定」的那一帧。
+         */
+        realWaitMs: Long = 0L,
         /** 截图前的额外交互，比如点一下切换开关 */
         prepare: (() -> Unit)? = null,
         block: @androidx.compose.runtime.Composable () -> Unit,
@@ -209,6 +226,26 @@ class ScreenshotTest {
             org.robolectric.shadows.ShadowLooper.idleMainLooper(
                 settleMs, java.util.concurrent.TimeUnit.MILLISECONDS,
             )
+            rule.waitForIdle()
+        }
+
+        if (realWaitMs > 0L) {
+            /*
+             * 只 sleep 不行：Robolectric 的 Looper 默认是 PAUSED，
+             * IO 线程完成后 post 到主线程的回调不会自己执行。
+             * 每一小段都要 idle 一次，让 state 更新 → 重组 → 再绘制。
+             */
+            var waited = 0L
+            while (waited < realWaitMs) {
+                Thread.sleep(100L)
+                org.robolectric.shadows.ShadowLooper.idleMainLooper()
+                rule.waitForIdle()
+                waited += 100L
+            }
+        }
+
+        if (frameMs > 0L) {
+            rule.mainClock.advanceTimeBy(frameMs)
             rule.waitForIdle()
         }
 
@@ -254,13 +291,16 @@ class ScreenshotTest {
      * 磨砂效果只有在壁纸本身颜色丰富、边界明确时才看得出来；
      * 用纯色壁纸拍出来跟没开一样，等于白测。
      */
-    private fun makeTestWallpaper(): File {
+    private fun makeTestWallpaper(light: Boolean = false): File {
         val ctx = androidx.test.core.app.ApplicationProvider
             .getApplicationContext<android.app.Application>()
-        val f = File(ctx.cacheDir, "test_wallpaper.png")
+        val f = File(ctx.cacheDir, if (light) "test_wallpaper_light.png" else "test_wallpaper.png")
         val bmp = android.graphics.Bitmap.createBitmap(1080, 1920, android.graphics.Bitmap.Config.ARGB_8888)
         val canvas = android.graphics.Canvas(bmp)
-        canvas.drawColor(android.graphics.Color.rgb(18, 34, 48))
+        canvas.drawColor(
+            if (light) android.graphics.Color.rgb(233, 227, 240)
+            else android.graphics.Color.rgb(18, 34, 48),
+        )
         val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
         val colors = intArrayOf(
             0xFFE8A33D.toInt(), 0xFF3D8BE8.toInt(),
@@ -283,6 +323,8 @@ class ScreenshotTest {
         name: String,
         cellFrost: Boolean = true,
         bgBlur: Boolean = false,
+        alpha: Float = 0.9f,
+        lightWallpaper: Boolean = false,
         block: @androidx.compose.runtime.Composable () -> Unit,
     ) {
         val ctx = androidx.test.core.app.ApplicationProvider
@@ -294,14 +336,14 @@ class ScreenshotTest {
         val oldFrost = store.courseCellFrost
         val oldBlur = store.courseBgBlur
 
-        val f = makeTestWallpaper()
+        val f = makeTestWallpaper(lightWallpaper)
         store.courseBgPath = f.absolutePath
-        store.courseBgAlpha = 0.9f
+        store.courseBgAlpha = alpha
         store.courseCellOpacity = 0.40f
         store.courseCellFrost = cellFrost
         store.courseBgBlur = bgBlur
         try {
-            shot(name, dark = dark, block = block)
+            shot(name, dark = dark, realWaitMs = 600L, block = block)
         } finally {
             store.courseBgPath = oldPath
             store.courseBgAlpha = oldAlpha
@@ -373,6 +415,319 @@ class ScreenshotTest {
             store.courseCellOpacity = oldOpacity
             store.courseDayView = oldDayView
             f.delete()
+        }
+    }
+
+    /**
+     * 纯色壁纸，用来复现「极端底色 + 极低格子不透明度」下文字读不出来。
+     *
+     * [makeTestWallpaper] 是深蓝底 + 彩色圆点，亮度落在中间区间，
+     * 恰好是「怎么都读得清」的那一段 —— 所以这个坑一直没暴露。
+     * 致辉 2026-11-19 报的两种情况都需要纯色才复现得出来：
+     *
+     *   · 纯黑壁纸 + 浅色主题 → 卡片底色近黑，onSurface(#14181C) 压上去等于隐形
+     *   · 纯白壁纸 + 深色主题 → 卡片底色近白，onSurface(#E9EDF0) 也读不出来
+     */
+    private fun makeSolidWallpaper(argb: Int, fileName: String): File {
+        val ctx = androidx.test.core.app.ApplicationProvider
+            .getApplicationContext<android.app.Application>()
+        val f = File(ctx.cacheDir, fileName)
+        val bmp = android.graphics.Bitmap.createBitmap(
+            1080, 1920, android.graphics.Bitmap.Config.ARGB_8888,
+        )
+        bmp.eraseColor(argb)
+        f.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        return f
+    }
+
+    /** 套一张现成的壁纸文件 + 指定格子不透明度，跑完恢复 prefs（别的用例读同一份） */
+    private fun withWallpaperFile(
+        file: File,
+        dark: Boolean,
+        name: String,
+        opacity: Float,
+        block: @androidx.compose.runtime.Composable () -> Unit,
+    ) {
+        val ctx = androidx.test.core.app.ApplicationProvider
+            .getApplicationContext<android.app.Application>()
+        val store = com.gzucm.pocket.core.SessionStore(ctx)
+        val oldPath = store.courseBgPath
+        val oldAlpha = store.courseBgAlpha
+        val oldOpacity = store.courseCellOpacity
+        val oldFrost = store.courseCellFrost
+        val oldBlur = store.courseBgBlur
+        val oldDayView = store.courseDayView
+
+        store.courseBgPath = file.absolutePath
+        store.courseBgAlpha = 1f
+        store.courseCellOpacity = opacity
+        store.courseCellFrost = true
+        store.courseBgBlur = false
+        store.courseDayView = true
+        try {
+            shot(name, dark = dark, realWaitMs = 700L, block = block)
+        } finally {
+            store.courseBgPath = oldPath
+            store.courseBgAlpha = oldAlpha
+            store.courseCellOpacity = oldOpacity
+            store.courseCellFrost = oldFrost
+            store.courseBgBlur = oldBlur
+            store.courseDayView = oldDayView
+            file.delete()
+        }
+    }
+
+    /**
+     * 问题反馈的正文。
+     *
+     * 只渲染 [FeedbackContent] 而不是整个 [FeedbackSheet]：
+     * ModalBottomSheet 在 Robolectric 里停在收起状态，拍出来是全黑的。
+     * 容器本身和打赏、电费说明共用 AdaptiveSheet，那边已经验过了。
+     */
+    @Test
+    fun feedbackSheet() = shot("25_feedback") {
+        com.gzucm.pocket.ui.settings.FeedbackContent(onBack = {})
+    }
+
+    /* ── 今日标记 / 回到今日（2026-11-19） ────────────────────── */
+
+    /** 今天落在第几周由学期自己算，别写死 —— 否则换个日期跑就全绿。 */
+    private fun todayWeekNow(): Int = semester.weekOf(java.time.LocalDate.now())
+
+    /**
+     * 周视图：今天那一格要有一圈主色描边。
+     *
+     * `week = currentWeek = 今天所在周`，星期条上「今天」与「当前查看」重合，
+     * 正是最容易看不出差别的状态 —— 描边就是为这一刻加的。
+     */
+    @Test
+    fun todayMarkWeek() {
+        val tw = todayWeekNow()
+        shot("21_today_mark_week") {
+            ScheduleScreen(semester, sessions, tw, tw, {}, {})
+        }
+    }
+
+    /** 周视图：翻到别的周时，右下角出现「今」。 */
+    @Test
+    fun todayFabWeek() {
+        val tw = todayWeekNow()
+        shot("22_today_fab_week") {
+            // 签名是 (currentWeek, viewingWeek)：今天在第 tw 周、用户在看第 8 周
+            ScheduleScreen(semester, sessions, tw, 8, {}, {})
+        }
+    }
+
+    /** 日视图：今天那一格同样有描边。 */
+    @Test
+    fun todayMarkDay() {
+        val ctx = androidx.test.core.app.ApplicationProvider
+            .getApplicationContext<android.app.Application>()
+        val store = com.gzucm.pocket.core.SessionStore(ctx)
+        val oldDayView = store.courseDayView
+        store.courseDayView = true
+        try {
+            val tw = todayWeekNow()
+            shot("23_today_mark_day") {
+                ScheduleScreen(semester, sessions, tw, tw, {}, {})
+            }
+        } finally {
+            store.courseDayView = oldDayView
+        }
+    }
+
+    /** 日视图：滑到前一天，「今」按钮浮出来。 */
+    @Test
+    fun todayFabDay() {
+        val ctx = androidx.test.core.app.ApplicationProvider
+            .getApplicationContext<android.app.Application>()
+        val store = com.gzucm.pocket.core.SessionStore(ctx)
+        val oldDayView = store.courseDayView
+        store.courseDayView = true
+        try {
+            val tw = todayWeekNow()
+            shot(
+                "24_today_fab_day",
+                prepare = {
+                    // 向右拖过半页 → currentPage 变成前一天 → 按钮该出现
+                    rule.onNodeWithTag("day-pager").performTouchInput {
+                        down(center)
+                        // 要真的翻过去（超过半页），只拖一点点 currentPage 不会变
+                        repeat(12) { moveBy(androidx.compose.ui.geometry.Offset(60f, 0f)) }
+                    }
+                    rule.waitForIdle()
+                },
+            ) {
+                ScheduleScreen(semester, sessions, tw, tw, {}, {})
+            }
+        } finally {
+            store.courseDayView = oldDayView
+        }
+    }
+
+    /**
+     * 复现「往前一天滑时，前一天的磨砂用错位置」。
+     *
+     * 致辉 2026-11-19 报：后一天正常，前一天总是错 —— 卡片明明还在左边滑入，
+     * 里面的磨砂却已经是「滑到位停在中间」那一块（背景的塔正好落在卡片正中）。
+     *
+     * 拖拽只走一半就截图（不抬手，Pager 不会回弹），这一刻是矛盾的现场：
+     * 卡片的**视觉**位置在左半边，采样的**坐标**却指着屏幕中央。
+     */
+    @Test
+    fun dayFrostSwipeBack() {
+        val ctx = androidx.test.core.app.ApplicationProvider
+            .getApplicationContext<android.app.Application>()
+        val store = com.gzucm.pocket.core.SessionStore(ctx)
+        val oldPath = store.courseBgPath
+        val oldAlpha = store.courseBgAlpha
+        val oldOpacity = store.courseCellOpacity
+        val oldFrost = store.courseCellFrost
+        val oldDayView = store.courseDayView
+
+        val f = makeTestWallpaper()
+        store.courseBgPath = f.absolutePath
+        store.courseBgAlpha = 0.9f
+        store.courseCellOpacity = 0.40f
+        store.courseCellFrost = true
+        store.courseDayView = true
+        try {
+            shot(
+                "19_day_frost_swipe_back",
+                dark = true,
+                realWaitMs = 600L,
+                prepare = {
+                    // 向右拖 = 露出前一天。分多步模拟手指，停在中间不抬手
+                    rule.onNodeWithTag("day-pager").performTouchInput {
+                        down(center)
+                        repeat(10) { moveBy(androidx.compose.ui.geometry.Offset(55f, 0f)) }
+                    }
+                    rule.waitForIdle()
+                },
+            ) {
+                ScheduleScreen(semester, sessions, 8, 8, {}, {})
+            }
+        } finally {
+            store.courseBgPath = oldPath
+            store.courseBgAlpha = oldAlpha
+            store.courseCellOpacity = oldOpacity
+            store.courseCellFrost = oldFrost
+            store.courseDayView = oldDayView
+            f.delete()
+        }
+    }
+
+    /**
+     * 对照组：向左拖，露出**后一天**。
+     *
+     * 致辉说「后一天本来就没问题」，修完滚动位移补偿之后它必须还是没问题 ——
+     * 这条用例就是防「修好一个方向、弄坏另一个方向」。
+     */
+    @Test
+    fun dayFrostSwipeForward() {
+        val ctx = androidx.test.core.app.ApplicationProvider
+            .getApplicationContext<android.app.Application>()
+        val store = com.gzucm.pocket.core.SessionStore(ctx)
+        val oldPath = store.courseBgPath
+        val oldAlpha = store.courseBgAlpha
+        val oldOpacity = store.courseCellOpacity
+        val oldFrost = store.courseCellFrost
+        val oldDayView = store.courseDayView
+
+        val f = makeTestWallpaper()
+        store.courseBgPath = f.absolutePath
+        store.courseBgAlpha = 0.9f
+        store.courseCellOpacity = 0.40f
+        store.courseCellFrost = true
+        store.courseDayView = true
+        try {
+            shot(
+                "20_day_frost_swipe_forward",
+                dark = true,
+                realWaitMs = 600L,
+                prepare = {
+                    rule.onNodeWithTag("day-pager").performTouchInput {
+                        down(center)
+                        repeat(10) { moveBy(androidx.compose.ui.geometry.Offset(-55f, 0f)) }
+                    }
+                    rule.waitForIdle()
+                },
+            ) {
+                ScheduleScreen(semester, sessions, 8, 8, {}, {})
+            }
+        } finally {
+            store.courseBgPath = oldPath
+            store.courseBgAlpha = oldAlpha
+            store.courseCellOpacity = oldOpacity
+            store.courseCellFrost = oldFrost
+            store.courseDayView = oldDayView
+            f.delete()
+        }
+    }
+
+    /**
+     * 日视图 + 自定义壁纸 + **关掉格子磨砂**。
+     *
+     * 三分支里的第三态：卡片没有阴影，但有一圈 0.8dp 灰白描边勾轮廓
+     * （2026-11-19 致辉定：模糊关就关阴影、加描边）。
+     * 阴影本身 Robolectric 拍不出来，这张图验的是「描边出现 + 布局没塌」。
+     */
+    @Test
+    fun dayFrostOff() {
+        val ctx = androidx.test.core.app.ApplicationProvider
+            .getApplicationContext<android.app.Application>()
+        val store = com.gzucm.pocket.core.SessionStore(ctx)
+        val oldPath = store.courseBgPath
+        val oldAlpha = store.courseBgAlpha
+        val oldOpacity = store.courseCellOpacity
+        val oldFrost = store.courseCellFrost
+        val oldDayView = store.courseDayView
+
+        val f = makeTestWallpaper()
+        store.courseBgPath = f.absolutePath
+        store.courseBgAlpha = 0.9f
+        store.courseCellOpacity = 0.40f
+        store.courseCellFrost = false
+        store.courseDayView = true
+        try {
+            shot("18_day_frost_off", realWaitMs = 600L) {
+                ScheduleScreen(semester, sessions, 8, 8, {}, {})
+            }
+        } finally {
+            store.courseBgPath = oldPath
+            store.courseBgAlpha = oldAlpha
+            store.courseCellOpacity = oldOpacity
+            store.courseCellFrost = oldFrost
+            store.courseDayView = oldDayView
+            f.delete()
+        }
+    }
+
+    /**
+     * 复现 A：**纯黑壁纸 + 浅色主题 + 10% 格子不透明度**。
+     *
+     * 10% 时卡片底色 = 磨砂黑 + 30% 白雾 ≈ #4C4C4C，
+     * 而浅色主题的正文色是 #14181C —— 对比度约 2.2:1，远低于可读下限 4.5。
+     */
+    @Test
+    fun dayLowOpacityOnBlack() {
+        val f = makeSolidWallpaper(android.graphics.Color.BLACK, "test_wallpaper_black.png")
+        withWallpaperFile(f, dark = false, name = "16_day_low_opacity_black", opacity = 0.10f) {
+            ScheduleScreen(semester, sessions, 8, 8, {}, {})
+        }
+    }
+
+    /**
+     * 复现 B：**纯白壁纸 + 深色主题 + 10% 格子不透明度**。
+     *
+     * 白磨砂 + 30% 的 #171C23 雾面 ≈ #B9B9B9，
+     * 深色主题正文 #E9EDF0 压上去对比度约 1.6:1，同样读不出来。
+     */
+    @Test
+    fun dayLowOpacityOnWhite() {
+        val f = makeSolidWallpaper(android.graphics.Color.WHITE, "test_wallpaper_white.png")
+        withWallpaperFile(f, dark = true, name = "17_day_low_opacity_white", opacity = 0.10f) {
+            ScheduleScreen(semester, sessions, 8, 8, {}, {})
         }
     }
 
@@ -637,6 +992,18 @@ class ScreenshotTest {
         PowerScreen(power = power, daily = daily, loading = false)
     }
 
+    /**
+     * 浅色电费页：**专盯余额卡的渐变断层**。
+     *
+     * 2026-11-19 真机反馈「浅色下剩余电量面板有色彩断层」，
+     * 根因是渐变第一端用了半透明 primary（透出页面底色），第二端是不透明白面板。
+     * 修完必须有一张浅色截图能看出来 —— 深色截图里那条色带会被压暗吞掉。
+     */
+    @Test
+    fun powerLight() = shot("04b_power_light", dark = false) {
+        PowerScreen(power = power, daily = daily, loading = false)
+    }
+
     /** 整体骨架：验证悬浮底栏的几何关系 */
     @Test
     fun scaffold() = shot("05_scaffold") {
@@ -780,6 +1147,39 @@ class ScreenshotTest {
             onSync = {}, onLogout = {}, onClose = {},
             lastSyncText = "10-30 12:05",
             semesterText = "2026-2027 学年 第一学期",
+        )
+    }
+
+    /**
+     * 设置页铺在**真实 Sheet 底色**上的样子。
+     *
+     * [settings] 那个用例直接把 SettingsScreen 塞进 `shot()` 的 Surface，
+     * 底是主题 surface(#12151A) —— 跟 App 里 AdaptiveSheet 的容器色不是一回事。
+     * 2026-11-19 致辉报的「深色下设置页底色跟面板完全一样」，只有在 Sheet 真底色上才看得出来，
+     * 所以这个用例套一层 [micaSheetColor]（深色 #101318），验「页面 < Sheet < 卡片」拉不拉得开。
+     */
+    @Test
+    fun settingsInSheet() = shot("15_settings_in_sheet") {
+        Box(Modifier.fillMaxSize().background(micaSheetColor())) {
+            com.gzucm.pocket.ui.settings.SettingsScreen(
+                onSync = {}, onLogout = {}, onClose = {},
+                lastSyncText = "10-30 12:05",
+                semesterText = "2026-2027 学年 第一学期",
+            )
+        }
+    }
+
+    /** 导出课表子页面：两条路 + 「微信发不出去？发文件就可以」的排布 */
+    @Test
+    fun exportSheet() = shot("11_export") {
+        com.gzucm.pocket.ui.settings.ExportContent(
+            courseCount = 25,
+            weeksCovered = 18,
+            totalWeeks = 18,
+            tokenChars = 1304,
+            onBack = {},
+            onCopyToken = {},
+            onShareFile = {},
         )
     }
 

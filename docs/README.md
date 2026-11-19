@@ -7,6 +7,8 @@
 | 路径 | 内容 |
 |---|---|
 | `PITFALLS.md` | **踩坑与实现内幕**。日程/考试/周次错位/AdaptiveSheet/重叠布局/测试 —— 每条都写清「现象 → 根因 → 修法」，改代码前先读 |
+| `EXPORT_FORMAT.md` | 课表导出的格式契约：分享串（GZP2）与 JSON 文件两种形态、字段口径、体积实测、网页端解码代码 |
+| `FEEDBACK_SURVEY.md` | 问题反馈问卷的设计与搭建说明（平台对比、6 道题、上线后的维护） |
 | `GRADUATE_SUPPORT_PLAN.md` | 研究生课表接入的调研记录（两套系统的差异、接口实测结论） |
 | `MINIPROGRAM_MIGRATION_PLAN.md` | 微信小程序迁移的可行性调研（**已搁置**，当前重心在 Android） |
 | `TUTORIAL_PLAN.md` | 使用教程 / 功能引导的规划（**方案待拍板**，起因是同学反馈「功能有点复杂」） |

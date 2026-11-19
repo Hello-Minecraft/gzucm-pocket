@@ -156,7 +156,8 @@ object AgendaReminder {
         days: Int = SCHEDULE_DAYS,
     ): List<Planned> {
         if (semester == null) return emptyList()
-        val active = rules.filter { it.remindLeads.isNotEmpty() }
+        // 截止任务 / 待办不排闹钟：它没有上课/日程那种「到点响」的语义
+        val active = rules.filter { !it.isTask && it.remindLeads.isNotEmpty() }
         if (active.isEmpty()) return emptyList()
 
         val byId = active.associateBy { it.id }

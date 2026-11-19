@@ -18,14 +18,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.ChevronRight
+import com.gzucm.pocket.ui.components.G3CornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import com.gzucm.pocket.ui.adaptive.AdaptiveSheet
+import com.gzucm.pocket.ui.icons.AppIcons
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -134,13 +132,13 @@ fun DonateContent(onBack: () -> Unit) {
                 ) {
                     Row(
                         Modifier
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(G3CornerShape(10.dp))
                             .clickable(onClick = onBack)
                             .padding(vertical = 6.dp, horizontal = 2.dp),
                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                     ) {
                         Icon(
-                            androidx.compose.material.icons.Icons.Rounded.ArrowBack,
+                            AppIcons.ArrowBack,
                             contentDescription = null,
                             modifier = Modifier.size(17.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -189,7 +187,7 @@ private fun TierList(onPick: (Tier) -> Unit) {
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(G3CornerShape(12.dp))
                         .background(scheme.surfaceVariant.copy(alpha = 0.45f))
                         .clickable { onPick(t) }
                         .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -211,7 +209,7 @@ private fun TierList(onPick: (Tier) -> Unit) {
                         )
                     }
                     Icon(
-                        Icons.Rounded.ChevronRight,
+                        AppIcons.ChevronRight,
                         contentDescription = null,
                         modifier = Modifier.size(16.dp),
                         tint = scheme.onSurfaceVariant.copy(alpha = 0.4f),
@@ -225,7 +223,7 @@ private fun TierList(onPick: (Tier) -> Unit) {
         Box(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
+                .clip(G3CornerShape(12.dp))
                 .background(scheme.primary.copy(alpha = 0.07f))
                 .padding(horizontal = 14.dp, vertical = 11.dp),
         ) {
@@ -271,13 +269,13 @@ private fun TierDetail(tier: Tier, onBack: () -> Unit) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
+                .clip(G3CornerShape(10.dp))
                 .clickable(onClick = onBack)
                 .padding(vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                Icons.Rounded.ArrowBack,
+                AppIcons.ArrowBack,
                 contentDescription = "返回",
                 modifier = Modifier.size(17.dp),
                 tint = scheme.onSurfaceVariant,
@@ -304,7 +302,7 @@ private fun TierDetail(tier: Tier, onBack: () -> Unit) {
         if (qr != null) {
             Box(
                 Modifier
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(G3CornerShape(16.dp))
                     .background(Color.White)
                     .padding(8.dp),
             ) {
@@ -320,7 +318,7 @@ private fun TierDetail(tier: Tier, onBack: () -> Unit) {
             Box(
                 Modifier
                     .size(230.dp)
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(G3CornerShape(16.dp))
                     .background(scheme.surfaceVariant.copy(alpha = 0.4f)),
                 contentAlignment = Alignment.Center,
             ) {

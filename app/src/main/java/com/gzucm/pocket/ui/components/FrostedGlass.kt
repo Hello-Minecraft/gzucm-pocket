@@ -18,6 +18,22 @@ import dev.chrisbanes.haze.HazeTint
 val FloatingBarHeight = 58.dp
 val FloatingBarBottomGap = 14.dp
 
+/**
+ * 悬浮底栏的自动渐隐（致辉 2026-11-18 定）。
+ *
+ * - 只认**底栏上**的操作：碰一下底栏才唤醒，页面里滚课表、点卡片都不算；
+ * - 静置 [FloatingBarIdleMs] 后渐隐到 [FloatingBarDimAlpha]；
+ * - 半透明时第一次点按**只唤醒不切页**，避免误触旁边的页签。
+ *
+ * 深色/浅色分开给毛玻璃 alpha：深色背景黑，alpha 低了胶囊糊在页面里；
+ * 浅色背景本来就亮，alpha 太高会变成一块死白。
+ */
+internal const val FloatingBarIdleMs = 3000L
+internal const val FloatingBarDimAlpha = 0.15f
+internal const val FloatingBarTintAlpha = 0.42f
+
+internal fun floatingBarGlassAlpha(dark: Boolean): Float = if (dark) 0.86f else 0.80f
+
 /** 内容末尾额外留白：滚到尽头时内容能完全离开底栏遮挡区 */
 val FloatingBarOverscroll = 60.dp
 
