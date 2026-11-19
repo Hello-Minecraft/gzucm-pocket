@@ -95,7 +95,7 @@
 
 ## 安装
 
-到 [Releases](../../releases/latest) 下最新的 APK 直接装（需要允许「安装未知来源应用」）。Android 8.0 及以上。
+到 [Releases](https://github.com/Hello-Minecraft/gzucm-pocket/releases/latest) 下最新的 APK 直接装（需要允许「安装未知来源应用」）。Android 8.0 及以上。
 
 第一次打开要登录一次：可以走内嵌网页输学号密码，也可以微信扫码。登录状态会被保留，过期了会提示。
 
