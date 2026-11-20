@@ -389,6 +389,8 @@ fun AgendaListSheet(
      * 逐条 upsert 会写几十次 prefs、重排几十轮闹钟（见 `replaceAgendas` 的注释）。
      */
     onImportAgendas: (List<Agenda>) -> Unit = {},
+    /** 学籍里的行政班名，班级作业面板拿它预填。null = 还没拉到 */
+    studentClassName: String? = null,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -456,6 +458,7 @@ fun AgendaListSheet(
                 agendas = rules,
                 onAgendasChange = onImportAgendas,
                 onClose = { showClassShare = false },
+                defaultClassName = studentClassName,
             )
             return@AdaptiveSheet
         }

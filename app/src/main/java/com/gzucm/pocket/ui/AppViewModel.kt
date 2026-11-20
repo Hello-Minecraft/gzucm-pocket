@@ -43,6 +43,8 @@ enum class Phase { Loading, NeedLogin, Ready }
 data class UiState(
     val phase: Phase = Phase.Loading,
     val semester: Semester? = null,
+    /** 学籍卡片（班级/年级/专业）。null = 还没拉到过，或这台设备还没登录过 */
+    val studentCard: com.gzucm.pocket.core.StudentCard? = null,
     val sessions: List<CourseSession> = emptyList(),
     val power: PowerInfo? = null,
     val powerDaily: List<PowerDaily> = emptyList(),
@@ -658,6 +660,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
          */
         readExamCache().let { if (it.isNotEmpty()) state = state.copy(exams = it) }
 
+        /*
+         * 学籍（班级 / 年级 / 专业）单独读回。
+         *
+         * 和日程、考试同一个道理：它不属于课表缓存，不该被「课表算法升级」清掉，
+         * 也不依赖登录态 —— 断网时班级作业面板照样要能预填班级名。
+         */
+        readStudentCardCache()?.let { state = state.copy(studentCard = it) }
+
         // 天气和登录态无关：没登录也照样显示，先摆缓存再按节流决定要不要联网
         loadWeather()
 
@@ -978,7 +988,40 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // 手动同步 = 课表 + 电费一起刷；电费要等用户进电费页才能取（会话在 WebView 里），
         // 所以这里只打标记，不做无用的后台请求。研究生没有电费，不打标记
         if (store.campus != Campus.GRADUATE) powerDirty = true
+        ensureStudentCard()
         launchSync(manual = true)
+    }
+
+    /** 从本地读学籍缓存；没有（或者存坏了）返回 null */
+    private fun readStudentCardCache(): com.gzucm.pocket.core.StudentCard? {
+        val raw = store.studentCardJson ?: return null
+        return runCatching {
+            Net.json.decodeFromString(com.gzucm.pocket.core.StudentCard.serializer(), raw)
+        }.getOrNull()
+    }
+
+    /**
+     * 保证本地有一份学籍缓存。
+     *
+     * **只在还没有的时候才真请求**：学籍一学期才变一次，每次同步都拉
+     * 126KB 的 HTML 没有意义，而且失败时（没登录、会话过期）还会白等一次超时。
+     * 取到后同时更新缓存和 state —— 班级作业面板靠它预填班级名。
+     *
+     * 失败静默：拿不到就是拿不到，用户照样能手动填班级名，
+     * 不能因为学籍拉失败就给同步弹一个错误提示。
+     */
+    private fun ensureStudentCard() {
+        if (state.studentCard != null) return
+        viewModelScope.launch {
+            val card = withContext(Dispatchers.IO) {
+                runCatching { Jw.fetchStudentCard() }.getOrNull()
+            } ?: return@launch
+            runCatching {
+                store.studentCardJson =
+                    Net.json.encodeToString(com.gzucm.pocket.core.StudentCard.serializer(), card)
+            }
+            state = state.copy(studentCard = card)
+        }
     }
 
     /**

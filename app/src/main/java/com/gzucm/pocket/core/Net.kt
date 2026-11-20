@@ -54,6 +54,17 @@ class SessionStore(context: Context) {
         set(v) = sp.edit().putString(KEY_SEMESTER, v).apply()
 
     /**
+     * 学籍卡片（班级/年级/专业/院系）的 JSON 缓存。
+     *
+     * 学籍一学期才变一次，不必每次同步都拉 —— 同步成功后顺手刷一遍就够。
+     * 存整段 JSON 而不是拆成五个字段：以后要取「培养层次」「学制」时，
+     * 不用再动 SharedPreferences 的键，也不用写迁移。
+     */
+    var studentCardJson: String?
+        get() = sp.getString(KEY_STUDENT_CARD, null)
+        set(v) = sp.edit().putString(KEY_STUDENT_CARD, v).apply()
+
+    /**
      * 当前学段（本科 / 研究生）。
      *
      * 决定用哪套接口：课表、成绩、学期码格式全都不一样。
@@ -487,6 +498,7 @@ class SessionStore(context: Context) {
     private companion object {
         const val KEY_COOKIES = "cookies"
         const val KEY_SEMESTER = "semester"
+        const val KEY_STUDENT_CARD = "student_card"
         const val KEY_SYNC_AT = "sync_at"
         const val KEY_CACHE_SEM = "cache_semester"
         const val KEY_CACHE_SESSIONS = "cache_sessions"

@@ -10,6 +10,8 @@ import com.gzucm.pocket.core.LevelGrade
 import com.gzucm.pocket.core.Net
 import com.gzucm.pocket.core.NetError
 import com.gzucm.pocket.core.Semester
+import com.gzucm.pocket.core.parseStudentField
+import com.gzucm.pocket.core.StudentCard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -126,6 +128,40 @@ object Jw {
     fun semesterName(code: String): String {
         val year = code.take(4).toIntOrNull() ?: return code
         return if (code.endsWith("01")) "$year-${year + 1} 学年 第一学期" else "${year - 1}-$year 学年 第二学期"
+    }
+
+    // ── 学籍 ─────────────────────────────────────────────────────────────
+
+    /**
+     * 学籍卡片：班级 / 年级 / 专业 / 院系。
+     *
+     * 2026-11-20 用 CDP 在真机上验证过：`GET /new/student/xjkpxx/edit.page`
+     * 只靠同步课表用的那个 session cookie 就返回 200 + 126KB 的服务端渲染 HTML，
+     * 不需要额外参数。
+     *
+     * **注意是二级 iframe 里的那个页面**：外层 `/new/student/xjkpxx` 只是个带
+     * tabs 的壳，直接访问会被踢回首页；真正有数据的是 `edit.page`。
+     *
+     * 解析用正则而不是引 Jsoup：只要五个字段，为它加 400KB 依赖不划算。
+     * 页面结构是 `<td align="right">班级：</td><td align="left"><label>值</label></td>`，
+     * 这套模板十年没变过，正则够稳。
+     */
+    fun fetchStudentCard(): StudentCard? {
+        val html = runCatching {
+            Net.get(
+                "$BASE/new/student/xjkpxx/edit.page?confirmInfo=",
+                referer = "$BASE/new/welcome.page?ui=new",
+            )
+        }.getOrNull() ?: return null
+        // 班级是必填项：取不到说明会话过期或模板变了，当失败处理，别存半份数据
+        val className = parseStudentField(html, "班级") ?: return null
+        return StudentCard(
+            className = className,
+            grade = parseStudentField(html, "所在年级").orEmpty(),
+            major = parseStudentField(html, "专业").orEmpty(),
+            college = parseStudentField(html, "院系名称").orEmpty(),
+            studentId = parseStudentField(html, "学号").orEmpty(),
+        )
     }
 
     // ── 课表 ─────────────────────────────────────────────────────────────

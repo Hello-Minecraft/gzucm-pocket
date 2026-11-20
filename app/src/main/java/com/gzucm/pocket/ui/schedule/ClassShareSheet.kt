@@ -57,13 +57,33 @@ internal fun ClassShareContent(
     agendas: List<Agenda>,
     onAgendasChange: (List<Agenda>) -> Unit,
     onClose: () -> Unit,
+    /**
+     * 学籍里拿到的班级名（如「一院23中医(铁涛)5」），用来预填。
+     *
+     * null = 还没拉到过（没登录 / 首次同步还没跑完）—— 那就留空让用户自己填，
+     * 不能拿「2023级中医学」这种自己拼的字符串糊上去，那和教务的真实值对不上，
+     * 全班同学会各自落在不同的「班」里。
+     */
+    defaultClassName: String? = null,
 ) {
     val ctx = LocalContext.current
     val scheme = MaterialTheme.colorScheme
-    /** 班级名 = 学委名字。分享和导入用的是同一个值，用户填一次就够 */
+    /** 班级名 = 学委名字或学籍里的行政班。分享和导入用同一个值，填一次就够 */
     var className by rememberSaveable { mutableStateOf("") }
     var hint by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     var busy by remember { mutableStateOf(false) }
+
+    /*
+     * 预填只在「用户还没动手」时做。
+     *
+     * 直接拿 defaultClassName 当 rememberSaveable 的 key 会把他手输的内容冲掉；
+     * 学籍晚到一步（同步跑完才拿到）时，这里补上正好。
+     */
+    androidx.compose.runtime.LaunchedEffect(defaultClassName) {
+        if (className.isBlank() && !defaultClassName.isNullOrBlank()) {
+            className = defaultClassName
+        }
+    }
 
     val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     fun readClip(): String =
