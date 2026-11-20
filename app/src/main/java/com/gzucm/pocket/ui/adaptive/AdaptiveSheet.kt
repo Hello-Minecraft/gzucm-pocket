@@ -59,6 +59,14 @@ import com.gzucm.pocket.ui.icons.AppIcons
 val LocalIsWidePane = androidx.compose.runtime.staticCompositionLocalOf { false }
 
 /**
+ * 退场动画的时长（毫秒）。
+ *
+ * 和 [RightSidePane] 里 slideOut 的 200ms 对齐，多留 20ms 余量：
+ * 卸载早了动画会被砍断，卸载晚了面板会在不可见状态下多占一会儿触摸。
+ */
+private const val EXIT_MS = 220L
+
+/**
  * 统一的「弹出面板」容器，按窗口宽度自动选形态。
  *
  * - **手机 / 窄窗口** → 底部 ModalBottomSheet（原有行为）
@@ -153,7 +161,31 @@ fun AdaptiveSheet(
      * 可见时用 appear 标记触发一次进入动画。退场没有动画 ——
      * 这个取舍是刻意的：动画再好看也不能拿「点不动」去换。
      */
-    if (!visible) return
+    /*
+     * 退场也要有动画（2026-11-21 致辉报「关闭是生硬的瞬间消失」）。
+     *
+     * 原来这里直接 `if (!visible) return` —— 整棵子树瞬间被摘掉：
+     * 滑入有 260ms 动画，退出是啪一下没了，两截手感对不上。
+     *
+     * 改成「延迟卸载」：visible 变 false 之后仍然渲染 [EXIT_MS]，
+     * 正好覆盖侧栏的退场动画，之后才真正移除。
+     *
+     * 为什么不用 AnimatedVisibility 包住最外层：它在不可见时仍会测量一次，
+     * 而这套面板有「嵌在电费卡余额数字里」的用法，一测量就把卡片撑成空白
+     * （见上面注释里的坑 ②）。延迟卸载只在关闭那两百毫秒内保留，代价可控。
+     */
+    var mounted by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf(visible)
+    }
+    androidx.compose.runtime.LaunchedEffect(visible) {
+        if (visible) {
+            mounted = true
+        } else if (mounted) {
+            kotlinx.coroutines.delay(EXIT_MS)
+            mounted = false
+        }
+    }
+    if (!mounted) return
 
     var appear by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(Unit) { appear = true }
@@ -162,8 +194,18 @@ fun AdaptiveSheet(
         val usePane = maxWidth >= 840.dp
 
         if (usePane) {
+            /*
+             * 这里必须是 `appear && visible`。
+             *
+             * 第一版只传了 `appear`（组合后恒为 true），于是关闭时
+             * AnimatedVisibility 的 visible 一直是 true —— 退场动画永远不播，
+             * 面板是被外层延迟卸载「抽走」的。致辉看到的「生硬消失」有两层原因，
+             * 这是第二层。
+             *
+             * appear 的作用只是让「首次组合就 visible」时也能播进入动画。
+             */
             RightSidePane(
-                visible = appear,
+                visible = appear && visible,
                 onDismiss = onDismiss,
                 width = paneWidth,
                 title = paneTitle,
@@ -183,6 +225,15 @@ fun AdaptiveSheet(
                         .first { it != SheetValue.Hidden }
                     sheetState.expand()
                 }
+            }
+            /*
+             * 手机端的退场：主动调 hide() 播下滑动画。
+             *
+             * 不调的话，visible=false 之后面板会在原地僵住 220ms
+             * （延迟卸载的窗口），然后整块消失 —— 和改之前一样生硬。
+             */
+            androidx.compose.runtime.LaunchedEffect(visible) {
+                if (!visible) runCatching { sheetState.hide() }
             }
             ModalBottomSheet(
                 onDismissRequest = onDismiss,
@@ -309,7 +360,14 @@ private fun RightSidePane(
                         if (fromLeft) {
                             Modifier
                         } else {
-                            Modifier.micaSideShadow(alpha = if (isDarkSurface()) 0.50f else 0.22f)
+                            /*
+                             * 2026-11-21 调轻（致辉报「双层阴影」）。
+                             *
+                             * 面板左边这层 18dp 渐变，叠在遮罩（0.32 黑）上面：
+                             * 深色下原来给 0.50，两条暗边叠在一起像描了两次边。
+                             * 降一档之后仍能看出版面浮起，但不会出现「黑边上还有一条黑边」。
+                             */
+                            Modifier.micaSideShadow(alpha = if (isDarkSurface()) 0.34f else 0.16f)
                         },
                     )
                     // 同 Sheet：容器用 micaSheetColor()，卡片才用 micaPanelColor()
