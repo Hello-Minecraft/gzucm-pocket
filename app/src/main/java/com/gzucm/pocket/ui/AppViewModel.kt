@@ -230,6 +230,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         rescheduleAgenda(next)
     }
 
+    /**
+     * 整表替换日程（班级作业导入用）。
+     *
+     * 不走 [saveAgenda] 逐条 upsert：一次导入可能几十条，
+     * 每条都写一次 prefs、重排一遍闹钟，几十次同步磁盘 + 几十轮 AlarmManager
+     * 能把主线程卡住两秒。这里只写一次、只重排一次。
+     */
+    fun replaceAgendas(list: List<Agenda>) {
+        agendaStore.save(list)
+        state = state.copy(agenda = list)
+        rescheduleAgenda(list)
+    }
+
     /** 删除一条日程（每周重复会整条删掉，v1 不支持单天例外） */
     fun deleteAgenda(id: String) {
         val next = agendaStore.delete(id)

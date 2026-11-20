@@ -33,6 +33,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -381,10 +382,19 @@ fun AgendaListSheet(
     onEdit: (Agenda) -> Unit,
     /** 勾选 / 取消勾选截止任务（已完成项会移入列表底部的「已完成」栏） */
     onTaskCheck: (Agenda) -> Unit = {},
+    /**
+     * 班级作业导入后整表替换日程。
+     *
+     * 单独一个回调而不是复用 [onTaskCheck]：导入是批量写，走 `saveAgenda`
+     * 逐条 upsert 会写几十次 prefs、重排几十轮闹钟（见 `replaceAgendas` 的注释）。
+     */
+    onImportAgendas: (List<Agenda>) -> Unit = {},
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
+    // 班级作业：和日程列表同一层，不做成二级页面 —— 它只是「往这个列表里灌数据」
+    var showClassShare by remember { mutableStateOf(false) }
     /*
      * 列表分三段：
      *   ① 未完成任务（按紧急度：逾期 → 临近 → 一般 → 长期）
@@ -416,7 +426,11 @@ fun AgendaListSheet(
     AdaptiveSheet(
         visible = visible,
         onDismiss = onDismiss,
-        paneTitle = if (examDetail != null) "考试详情" else "我的日程",
+        paneTitle = when {
+            examDetail != null -> "考试详情"
+            showClassShare -> "班级作业"
+            else -> "我的日程"
+        },
         paneWidth = 400.dp,
         scrollable = false,
     ) {
@@ -428,6 +442,20 @@ fun AgendaListSheet(
                 overlapEntries = examOverlapEntries,
                 currentEntryKey = examCurrentKey,
                 onSwitchEntry = onSwitchEntry,
+            )
+            return@AdaptiveSheet
+        }
+        /*
+         * 班级作业：同一个面板换内容，不新开 Dialog。
+         *
+         * 手机端每多一层 Dialog，返回键就多一分「直接退回桌面」的风险
+         * （Dialog 吃掉 BACK 之后 Activity 又收到一次），考试详情也走这条路。
+         */
+        if (showClassShare) {
+            ClassShareContent(
+                agendas = rules,
+                onAgendasChange = onImportAgendas,
+                onClose = { showClassShare = false },
             )
             return@AdaptiveSheet
         }
@@ -455,13 +483,31 @@ fun AgendaListSheet(
         ) {
             item(key = "agenda_header") {
                 Column {
-                    if (!LocalIsWidePane.current) {
-                        Text(
-                            "我的日程",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Medium,
-                        )
-                        Spacer(Modifier.height(4.dp))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (!LocalIsWidePane.current) {
+                            Text(
+                                "我的日程",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.weight(1f),
+                            )
+                        } else {
+                            Spacer(Modifier.weight(1f))
+                        }
+                        /*
+                         * 「班级作业」入口放在标题右边，不单独占一行卡片 ——
+                         * 它不是每天都用的功能，但学委发 DDL 的那几天会连着进好几次，
+                         * 沉到设置里等于每次都要绕一圈。
+                         */
+                        TextButton(
+                            onClick = { showClassShare = true },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        ) {
+                            Text("班级作业", fontSize = 12.5.sp, color = scheme.primary)
+                        }
                     }
                     Text(
                         "日程、截止任务和待办，和教务课表分开存",

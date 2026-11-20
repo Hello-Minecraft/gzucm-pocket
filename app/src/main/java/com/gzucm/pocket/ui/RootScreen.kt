@@ -744,6 +744,8 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
         examCurrentKey = selectedEntry?.key ?: "",
         onSwitchEntry = { switchEntry(it) },
         onExamClick = { e -> selectedExam = e },
+        // 班级作业导入：一次写一次存储、重排一次闹钟（见 replaceAgendas 的注释）
+        onImportAgendas = { list -> vm.replaceAgendas(list) },
         onAdd = { date, minute ->
             editingAgenda = null
             draftAgendaDate = date

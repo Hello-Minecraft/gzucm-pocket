@@ -67,6 +67,18 @@ data class Agenda(
     val isTask: Boolean = false,
     val deadlineAt: Long? = null,
     val doneAt: Long? = null,
+    /**
+     * 来源标记（2026-11-20 加，为「班级作业」让路）。
+     *
+     * 空串 = 自己建的；`class:张三` = 从「张三」这个班导进来的。
+     * 列表里靠它标一个小「班级」角标，二次分享时也靠它把 id 前缀剥干净。
+     */
+    val origin: String = "",
+    /**
+     * 远程那条内容的修改时刻（epoch millis）。合并时比大小 ——
+     * 学委连发两次串，先导的旧串不能把新内容盖回去。本地建的是 0。
+     */
+    val remoteUpdatedAt: Long = 0L,
 )
 
 /** 截止任务的展示档：逾期 / 临近 / 一般 / 长期待办 */
