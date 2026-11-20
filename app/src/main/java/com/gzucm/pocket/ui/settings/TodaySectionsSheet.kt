@@ -2,6 +2,7 @@ package com.gzucm.pocket.ui.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,24 +10,34 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
+import com.gzucm.pocket.core.TodayBlock
 import com.gzucm.pocket.core.TodaySections
+import kotlin.math.roundToInt
 import com.gzucm.pocket.ui.adaptive.AdaptiveSheet
 import com.gzucm.pocket.ui.components.G3CornerShape
 import com.gzucm.pocket.ui.components.micaPanel
@@ -123,39 +134,11 @@ fun TodaySectionsContent(
 
         Spacer(Modifier.height(16.dp))
 
-        Column(Modifier.micaPanel(14.dp)) {
-            SectionSwitch(
-                title = "宿舍电量",
-                subtitle = "余额、日均用量、还能用几天",
-                checked = sections.power,
-                onChecked = { onChange(sections.copy(power = it)) },
-            )
-            SectionSwitch(
-                title = "天气",
-                subtitle = if (weatherAvailable) {
-                    // 明确写出「关掉就不再请求」：这是用户能感知到的省额度行为
-                    "现在多少度、未来三天预报；关掉后不再请求天气服务"
-                } else {
-                    "这个版本没有配置天气服务"
-                },
-                checked = sections.weather && weatherAvailable,
-                enabled = weatherAvailable,
-                onChecked = { onChange(sections.copy(weather = it)) },
-            )
-            SectionSwitch(
-                title = "接下来",
-                subtitle = "未来几天还有哪些日程和考试",
-                checked = sections.upcoming,
-                onChecked = { onChange(sections.copy(upcoming = it)) },
-            )
-            SectionSwitch(
-                title = "本周概览",
-                subtitle = "这周每天几节课，哪天最忙",
-                checked = sections.weekOverview,
-                onChecked = { onChange(sections.copy(weekOverview = it)) },
-                last = true,
-            )
-        }
+        SectionList(
+            sections = sections,
+            onChange = onChange,
+            weatherAvailable = weatherAvailable,
+        )
 
         Spacer(Modifier.height(14.dp))
 
@@ -167,7 +150,7 @@ fun TodaySectionsContent(
                 .padding(horizontal = 16.dp, vertical = 13.dp),
         ) {
             /*
-             * 标签在左、步进器在右 —— 和上面那组开关的「文字左、控件右」同一条竖线，
+             * 标签在左、步进器在右 —— 和上面那组「文字左、控件右」同一条竖线，
              * 第一版把步进器也摆在左下方，右侧空出一大片，看着像没排完。
              */
             Row(
@@ -206,7 +189,8 @@ fun TodaySectionsContent(
         Spacer(Modifier.height(14.dp))
 
         Text(
-            "今日课程不能关 —— 首页就是给今天用的。只关天气、只留电费都可以，但至少得有一块能看的东西。",
+            "今日课程不能减 —— 这一页就是给今天用的；不过它可以拖到任意位置。" +
+                "其余四块都能减，减掉的会沉到列表最下面，点 + 加回来。",
             fontSize = 11.5.sp,
             lineHeight = 17.sp,
             color = scheme.onSurfaceVariant.copy(alpha = 0.85f),
@@ -214,47 +198,272 @@ fun TodaySectionsContent(
     }
 }
 
-/** 一行开关。整行可点（不只是那个小滑块），Switch 自己不吃点击 */
+/**
+ * 四块内容的列表：上面是「显示中」（可拖动排序），下面是「已减掉」（灰字，排最后）。
+ *
+ * ## 拖动排序为什么不用第三方库
+ *
+ * 只有四项、行高不固定，引一个 `reorderable` 依赖不划算，而且那种库通常绑死
+ * `LazyColumn`，我们这个列表短、还要分两段。手写的代价就是下面这点代码：
+ * 量每行高度 → 拖过半行就换位 → 用 `dragDelta` 补偿，让被拖的那行跟着手指走。
+ *
+ * ## 拖动中为什么不直接 onChange
+ *
+ * `onChange` 会改 `sections.order`，进而让整个列表重组。如果每动一次就提交，
+ * 手势状态会被打断（`pointerInput` 的 key 变了就重启）。所以拖动期间只改本地
+ * [localOrder]，**松手时才提交一次**。
+ */
 @Composable
-private fun SectionSwitch(
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    onChecked: (Boolean) -> Unit,
-    last: Boolean = false,
-    /** 功能不可用时置灰：开关点不动，也不能被误认为「开了但没效果」 */
-    enabled: Boolean = true,
+private fun SectionList(
+    sections: TodaySections,
+    onChange: (TodaySections) -> Unit,
+    weatherAvailable: Boolean,
 ) {
     val scheme = MaterialTheme.colorScheme
-    Row(
+    // 外部变了（点 +/−、别处改配置）就跟上；拖动期间不会触发，因为那时没提交
+    var localOrder by remember(sections.order) { mutableStateOf(sections.order) }
+    var dragging by remember { mutableStateOf<TodayBlock?>(null) }
+    var dragDelta by remember { mutableFloatStateOf(0f) }
+    val heights = remember { mutableStateMapOf<TodayBlock, Int>() }
+
+    fun commit() {
+        if (localOrder != sections.order) onChange(sections.copy(order = localOrder))
+        dragging = null
+        dragDelta = 0f
+    }
+
+    Column(Modifier.micaPanel(14.dp)) {
+        if (localOrder.isEmpty()) {
+            Text(
+                "其余四块都减掉了，今日页只剩课程。点下面的 + 可以加回来。",
+                fontSize = 12.sp,
+                lineHeight = 18.sp,
+                color = scheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
+            )
+        }
+
+        localOrder.forEachIndexed { index, block ->
+            val isDragging = dragging == block
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    // 拖动中的那行浮在别的行上面，不然会被下一行盖住
+                    .zIndex(if (isDragging) 1f else 0f)
+                    .offset { IntOffset(0, if (isDragging) dragDelta.roundToInt() else 0) }
+                    .onGloballyPositioned { heights[block] = it.size.height }
+                    .background(
+                        if (isDragging) scheme.surface else androidx.compose.ui.graphics.Color.Transparent
+                    )
+                    .padding(start = 8.dp, end = 12.dp, top = 11.dp, bottom = 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                DragHandle(
+                    modifier = Modifier.pointerInput(block) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = {
+                                dragging = block
+                                dragDelta = 0f
+                            },
+                            onDrag = { change, drag ->
+                                change.consume()
+                                dragDelta += drag.y
+                                val cur = localOrder.indexOf(block)
+                                if (cur < 0) return@detectDragGesturesAfterLongPress
+                                val self = (heights[block] ?: 1).toFloat()
+                                // 过半行就换位；用「被拖那行自己的高度」当阈值，
+                                // 不用相邻行的 —— 相邻行的值在换位前还拿不到
+                                if (dragDelta > self * 0.5f && cur < localOrder.lastIndex) {
+                                    val other = localOrder[cur + 1]
+                                    val oh = (heights[other] ?: 1).toFloat()
+                                    val next = localOrder.toMutableList()
+                                    next.removeAt(cur)
+                                    next.add(cur + 1, block)
+                                    localOrder = next
+                                    // 换过之后「原始位置」下移了 other 那么高，补偿掉才不跳
+                                    dragDelta -= oh
+                                } else if (dragDelta < -self * 0.5f && cur > 0) {
+                                    val other = localOrder[cur - 1]
+                                    val oh = (heights[other] ?: 1).toFloat()
+                                    val next = localOrder.toMutableList()
+                                    next.removeAt(cur)
+                                    next.add(cur - 1, block)
+                                    localOrder = next
+                                    dragDelta += oh
+                                }
+                            },
+                            onDragEnd = { commit() },
+                            onDragCancel = { commit() },
+                        )
+                    },
+                )
+
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        block.label,
+                        fontSize = 13.5.sp,
+                        color = scheme.onSurface,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        subtitleOf(block, sections, weatherAvailable),
+                        fontSize = 11.5.sp,
+                        lineHeight = 16.sp,
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                if (block.removable) {
+                    ToggleDot(
+                        on = true,
+                        enabled = block != TodayBlock.WEATHER || weatherAvailable,
+                        onClick = { onChange(sections.hide(block)) },
+                    )
+                } else {
+                    // 课程不可减：摆一个「固定」占住按钮的位置，免得看起来像漏了控件
+                    Text(
+                        "固定",
+                        fontSize = 11.sp,
+                        color = scheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.width(30.dp),
+                    )
+                }
+            }
+            if (index != localOrder.lastIndex) RowDivider()
+        }
+
+        // ── 已减掉的一组：间隙更大 + 一条分割，字变灰 ─────────────────
+        val hidden = sections.hidden
+        if (hidden.isNotEmpty()) {
+            if (localOrder.isNotEmpty()) {
+                Spacer(Modifier.height(16.dp))
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
+                        .height(1.dp)
+                        .background(scheme.outlineVariant.copy(alpha = 0.5f)),
+                )
+                Spacer(Modifier.height(4.dp))
+            }
+            hidden.forEachIndexed { i, block ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(start = 8.dp, end = 12.dp, top = 11.dp, bottom = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // 占住拖动条的位置，让标题和上面那一组对齐
+                    Spacer(Modifier.width(28.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            block.label,
+                            fontSize = 13.5.sp,
+                            color = scheme.onSurfaceVariant.copy(alpha = 0.75f),
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            subtitleOf(block, sections, weatherAvailable),
+                            fontSize = 11.5.sp,
+                            lineHeight = 16.sp,
+                            color = scheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    ToggleDot(
+                        on = false,
+                        enabled = block != TodayBlock.WEATHER || weatherAvailable,
+                        onClick = { onChange(sections.show(block)) },
+                    )
+                }
+                if (i != hidden.lastIndex) RowDivider(startPadding = 36.dp)
+            }
+        }
+    }
+}
+
+private fun subtitleOf(
+    block: TodayBlock,
+    sections: TodaySections,
+    weatherAvailable: Boolean,
+): String = when (block) {
+    TodayBlock.WEATHER ->
+        if (weatherAvailable) "现在多少度、未来三天预报；减掉后不再请求天气服务"
+        else "这个版本没有配置天气服务"
+    TodayBlock.POWER -> "余额、日均用量、还能用几天"
+    TodayBlock.UPCOMING -> "未来几天还有哪些日程和考试"
+    TodayBlock.WEEK_OVERVIEW -> "这周每天几节课，哪天最忙"
+    TodayBlock.COURSE -> "这一页的主体，不能减；想放最上面或最下面直接拖"
+}
+
+/** 行间那条极淡的线。比给每行套一张卡安静得多 */
+@Composable
+private fun RowDivider(startPadding: androidx.compose.ui.unit.Dp = 36.dp) {
+    Box(
         Modifier
             .fillMaxWidth()
-            .alpha(if (enabled) 1f else 0.45f)
-            .toggleable(
-                value = checked,
-                enabled = enabled,
-                role = Role.Switch,
-                onValueChange = onChecked,
-            )
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(start = startPadding, end = 12.dp)
+            .height(1.dp)
+            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+    )
+}
+
+/**
+ * 左侧的「三」字拖动条。
+ *
+ * **只有它是长按拖动的热区**，不是整行 —— 行本身还要留给 +/− 和将来的点击，
+ * 整行可拖会让「想点一下」变成「不小心拖动」。
+ */
+@Composable
+private fun DragHandle(modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .size(width = 28.dp, height = 34.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 13.5.sp, color = scheme.onSurface)
-            Spacer(Modifier.height(2.dp))
-            Text(subtitle, fontSize = 11.5.sp, color = scheme.onSurfaceVariant)
+        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            repeat(3) {
+                Box(
+                    Modifier
+                        .width(13.dp)
+                        .height(1.5.dp)
+                        .background(
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                        ),
+                )
+            }
         }
-        Spacer(Modifier.width(12.dp))
-        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
-    if (!last) {
-        // 一条极淡的分隔线，比给每行套一张卡安静得多
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp)
-                .height(1.dp)
-                .background(scheme.outlineVariant.copy(alpha = 0.35f)),
+}
+
+/**
+ * 右侧那个 −/+ 圆角方块。
+ *
+ * [on] = 现在显示着 → 画「−」（点它减掉）；否则画「+」（点它加回来）。
+ * 用符号而不是 Switch：这一列同时承担「开关」和「排在哪」两件事，
+ * Switch 那个滑块会让人下意识去横滑，而这行是纵向拖的。
+ */
+@Composable
+private fun ToggleDot(on: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Box(
+        Modifier
+            .size(30.dp)
+            .alpha(if (enabled) 1f else 0.4f)
+            .clip(G3CornerShape(9.dp))
+            .background(
+                if (on) scheme.surfaceVariant.copy(alpha = 0.5f)
+                else scheme.primary.copy(alpha = 0.14f)
+            )
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            if (on) "−" else "+",
+            fontSize = 17.sp,
+            fontWeight = FontWeight.Medium,
+            color = if (on) scheme.onSurfaceVariant else scheme.primary,
         )
     }
 }

@@ -52,6 +52,7 @@ import com.gzucm.pocket.core.PowerDaily
 import com.gzucm.pocket.core.PowerInfo
 import com.gzucm.pocket.core.Semester
 import com.gzucm.pocket.core.TodayLogic
+import com.gzucm.pocket.core.TodayBlock
 import com.gzucm.pocket.core.TodaySections
 import com.gzucm.pocket.core.Weather
 import com.gzucm.pocket.ui.components.Fmt
@@ -250,33 +251,31 @@ fun TodayScreen(
                         verticalArrangement = Arrangement.spacedBy(18.dp),
                     ) {
                         /*
-                         * 有数据就画；没数据但功能可用时也画（卡片自己显示「正在取 / 取不到」）——
-                         * 首次请求就失败时卡片凭空消失，看着像开关没生效。
+                         * 左栏按用户排的顺序渲染（2026-11-20 加的排序）。
+                         *
+                         * 「接下来」不在这里 —— 它跟课程一起在右栏，属于「今天之后」那一列；
+                         * 平板的两栏布局本身是固定的，排序只在栏内生效。
                          */
-                        if (sections.weather && (Weather.enabled || weather != null)) {
-                            WeatherCard(
-                                info = weather,
-                                refreshing = weatherRefreshing,
-                                error = weatherError,
-                                onLongPress = onOpenSections,
-                            )
-                        }
-                        if (sections.power) {
-                            PowerCard(
-                                power = power,
-                                daily = powerDaily,
-                                checkedAt = powerCheckedAt,
-                                onClick = onOpenPower,
-                                onLongPress = onOpenSections,
-                            )
-                        }
-                        if (sections.weekOverview) {
-                            WeekOverview(
-                                sessions = weekSessions,
-                                currentWeek = currentWeek,
-                                onLongPress = onOpenSections,
-                            )
-                        }
+                        sections.order
+                            .filter { it != TodayBlock.UPCOMING && it != TodayBlock.COURSE }
+                            .forEach { block ->
+                                TodayBlockCard(
+                                    block = block,
+                                    weather = weather,
+                                    weatherRefreshing = weatherRefreshing,
+                                    weatherError = weatherError,
+                                    power = power,
+                                    powerDaily = powerDaily,
+                                    powerCheckedAt = powerCheckedAt,
+                                    upcoming = upcoming,
+                                    upcomingDays = sections.upcomingDays,
+                                    weekSessions = weekSessions,
+                                    currentWeek = currentWeek,
+                                    onOpenPower = onOpenPower,
+                                    onAgendaClick = onAgendaClick,
+                                    onOpenSections = onOpenSections,
+                                )
+                            }
                     }
                     LazyColumn(
                         Modifier
@@ -342,55 +341,51 @@ fun TodayScreen(
                     Spacer(Modifier.height(12.dp))
                 }
 
-                // 同宽屏：没数据但功能可用时也要画，否则首次失败会像「开关坏了」
-                if (sections.weather && (Weather.enabled || weather != null)) {
-                    WeatherCard(
-                        info = weather,
-                        refreshing = weatherRefreshing,
-                        error = weatherError,
-                        onLongPress = onOpenSections,
-                    )
+                /*
+                 * 渲染顺序 = sections.order（2026-11-20 起的拖动排序）。
+                 *
+                 * 课程卡也在这个列表里 —— 能拖、不能减。第一版把它钉死在中间，
+                 * 结果是「减掉两块之后，剩下那块会自己跳到课程上面」，
+                 * 看着像 bug。现在顺序是唯一的真相。
+                 *
+                 * 课程卡就地展开而不是塞进 TodayBlockCard：它要的参数
+                 * （课表、日程、进度、勾选…）比另外四块加起来还多，
+                 * 传进去只会让那个函数变成一个参数搬运工。
+                 */
+                sections.order.forEach { block ->
+                    if (block == TodayBlock.COURSE) {
+                        CourseSection(
+                            title = if (showingTomorrow) "明日课程" else "今日课程",
+                            sessions = if (showingTomorrow) tomorrowSessions else todaySessions,
+                            agenda = shownAgenda,
+                            taskCards = taskCards,
+                            onAgendaClick = onAgendaClick,
+                            onTaskCheck = onTaskCheck,
+                            syncing = syncing,
+                            allEmpty = sessions.isEmpty(),
+                            progressDone = progressDone,
+                            progressTotal = progressTotal,
+                            onCourseClick = onCourseClick,
+                        )
+                    } else {
+                        TodayBlockCard(
+                            block = block,
+                            weather = weather,
+                            weatherRefreshing = weatherRefreshing,
+                            weatherError = weatherError,
+                            power = power,
+                            powerDaily = powerDaily,
+                            powerCheckedAt = powerCheckedAt,
+                            upcoming = upcoming,
+                            upcomingDays = sections.upcomingDays,
+                            weekSessions = weekSessions,
+                            currentWeek = currentWeek,
+                            onOpenPower = onOpenPower,
+                            onAgendaClick = onAgendaClick,
+                            onOpenSections = onOpenSections,
+                        )
+                    }
                     Spacer(Modifier.height(18.dp))
-                }
-                if (sections.power) {
-                    PowerCard(
-                        power = power,
-                        daily = powerDaily,
-                        checkedAt = powerCheckedAt,
-                        onClick = onOpenPower,
-                        onLongPress = onOpenSections,
-                    )
-                    Spacer(Modifier.height(18.dp))
-                }
-                CourseSection(
-                    title = if (showingTomorrow) "明日课程" else "今日课程",
-                    sessions = if (showingTomorrow) tomorrowSessions else todaySessions,
-                    agenda = shownAgenda,
-                    taskCards = taskCards,
-                    onAgendaClick = onAgendaClick,
-                    onTaskCheck = onTaskCheck,
-                    syncing = syncing,
-                    allEmpty = sessions.isEmpty(),
-                    progressDone = progressDone,
-                    progressTotal = progressTotal,
-                    onCourseClick = onCourseClick,
-                )
-                if (sections.upcoming) {
-                    Spacer(Modifier.height(18.dp))
-                    UpcomingCard(
-                        items = upcoming,
-                        days = sections.upcomingDays,
-                        onAgendaClick = onAgendaClick,
-                        onLongPress = onOpenSections,
-                    )
-                }
-                if (sections.weekOverview) {
-                    Spacer(Modifier.height(20.dp))
-                    WeekOverview(
-                        sessions = weekSessions,
-                        currentWeek = currentWeek,
-                        onLongPress = onOpenSections,
-                    )
                 }
 
                 // 悬浮底栏占位，避免最后一张卡被压在底栏下面
@@ -1113,5 +1108,72 @@ private fun MiniSparkline(points: List<PowerDaily>, color: Color) {
                     .background(color.copy(alpha = 0.25f + 0.5f * ratio)),
             )
         }
+    }
+}
+
+/**
+ * 一块内容的统一入口：把 [TodayBlock] 映射到具体那张卡。
+ *
+ * 为什么要这一层：今日页现在由 `sections.order` 驱动渲染，
+ * 窄屏的「前两块 / 后两块」和宽屏左栏都用同一套映射。
+ * 如果每处各写一遍 `when`，以后加第五块就得改好几处，
+ * 漏一处就是「排了序之后某块凭空消失」。
+ */
+@Composable
+private fun TodayBlockCard(
+    block: TodayBlock,
+    weather: Weather.Info?,
+    weatherRefreshing: Boolean,
+    weatherError: String?,
+    power: PowerInfo?,
+    powerDaily: List<PowerDaily>,
+    powerCheckedAt: Long,
+    upcoming: List<AgendaOccurrence>,
+    upcomingDays: Int,
+    weekSessions: List<CourseSession>,
+    currentWeek: Int,
+    onOpenPower: () -> Unit,
+    onAgendaClick: (AgendaOccurrence) -> Unit,
+    onOpenSections: () -> Unit,
+) {
+    when (block) {
+        TodayBlock.WEATHER -> {
+            /*
+             * 有数据就画；没数据但功能可用时也画（卡片自己显示「正在取 / 取不到」）——
+             * 首次请求就失败时卡片凭空消失，看着像开关没生效。
+             */
+            if (Weather.enabled || weather != null) {
+                WeatherCard(
+                    info = weather,
+                    refreshing = weatherRefreshing,
+                    error = weatherError,
+                    onLongPress = onOpenSections,
+                )
+            }
+        }
+
+        TodayBlock.POWER -> PowerCard(
+            power = power,
+            daily = powerDaily,
+            checkedAt = powerCheckedAt,
+            onClick = onOpenPower,
+            onLongPress = onOpenSections,
+        )
+
+        TodayBlock.UPCOMING -> UpcomingCard(
+            items = upcoming,
+            days = upcomingDays,
+            onAgendaClick = onAgendaClick,
+            onLongPress = onOpenSections,
+        )
+
+        TodayBlock.WEEK_OVERVIEW -> WeekOverview(
+            sessions = weekSessions,
+            currentWeek = currentWeek,
+            onLongPress = onOpenSections,
+        )
+
+        // 课程卡由调用方就地展开（参数太多），这里不该被走到
+        TodayBlock.COURSE -> Unit
     }
 }

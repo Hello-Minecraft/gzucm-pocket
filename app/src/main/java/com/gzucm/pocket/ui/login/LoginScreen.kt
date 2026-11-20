@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -254,7 +255,22 @@ fun LoginScreen(
     }
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(Modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                /*
+                 * 键盘弹出时把整页压上去（2026-11-20 致辉报的：输入框和验证码被遮住）。
+                 *
+                 * Manifest 里虽然写着 `windowSoftInputMode="adjustResize"`，
+                 * 但 `enableEdgeToEdge()` 之后系统**不再 resize 窗口** ——
+                 * 键盘只是变成一块 ime inset 报上来。不给 imePadding，
+                 * Column 仍按整屏高度布局，WebView 保持原尺寸，键盘直接盖在输入框上。
+                 *
+                 * 放在最外层而不是只给 WebView：提示行和学段条一起上移，
+                 * 否则它们会被压到 WebView 底下（Box 里后声明的画在上层，但这里会直接重叠）。
+                 */
+                .imePadding()
+        ) {
             /*
              * 学段切换。
              *

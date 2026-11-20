@@ -406,27 +406,58 @@ class SessionStore(context: Context) {
         set(v) = sp.edit().putBoolean(KEY_OVERLAP_MODE, v).apply()
 
     /**
-     * 今日页显示哪些块。
+     * 今日页显示哪些块、按什么顺序。
      *
-     * 存成五个独立键而不是一串 JSON：这一组开关没有原子性要求，
-     * 分开存以后加一项也不必写迁移代码（缺键就是默认值）。
+     * ## 2026-11-20 改了存法
+     *
+     * 原来存四个 `Boolean`（`today_power` / `today_weather` / …）。加了拖动排序之后
+     * 布尔表达不了顺序，改成**一串有序的 key**（`today_order` = `"weather,power,week"`）：
+     * 在里面 = 显示且顺序如此，不在 = 被减掉了。
+     *
+     * 四个老键**只读不写**，专门用来迁移老用户的配置：
+     * 有 `today_order` 就以它为准；没有就按四个老布尔拼一个，再空的话用默认顺序。
+     * 这样从 1.4.x 升上来的用户看到的还是原来那个页面。
      */
     var todaySections: TodaySections
         get() = TodaySections(
-            power = sp.getBoolean(KEY_TODAY_POWER, true),
-            weather = sp.getBoolean(KEY_TODAY_WEATHER, true),
-            upcoming = sp.getBoolean(KEY_TODAY_UPCOMING, true),
-            weekOverview = sp.getBoolean(KEY_TODAY_WEEK, true),
+            order = readTodayOrder(),
             upcomingDays = sp.getInt(KEY_TODAY_DAYS, TodaySections.DefaultDays)
                 .coerceIn(TodaySections.MinDays, TodaySections.MaxDays),
-        )
+        ).normalized()
         set(v) = sp.edit()
-            .putBoolean(KEY_TODAY_POWER, v.power)
-            .putBoolean(KEY_TODAY_WEATHER, v.weather)
-            .putBoolean(KEY_TODAY_UPCOMING, v.upcoming)
-            .putBoolean(KEY_TODAY_WEEK, v.weekOverview)
+            .putString(KEY_TODAY_ORDER, v.order.joinToString(",") { it.key })
             .putInt(KEY_TODAY_DAYS, v.upcomingDays.coerceIn(TodaySections.MinDays, TodaySections.MaxDays))
             .apply()
+
+    /**
+     * 读出显示顺序。
+     *
+     * 三件事必须做：去掉认不出的 key（版本降级、手改）、去掉重复（存坏了不至于同一块出现两次）、
+     * **把没提到的块丢掉而不是补上**（没提到 = 被减掉了，补上等于用户关掉的块自己回来了）。
+     *
+     * 只有「从来没有 `today_order`」这一种情况才走老布尔迁移。
+     */
+    private fun readTodayOrder(): List<TodayBlock> {
+        val raw = sp.getString(KEY_TODAY_ORDER, null)
+        if (raw != null) {
+            val seen = HashSet<TodayBlock>(4)
+            return raw.split(',')
+                .mapNotNull { TodayBlock.fromKey(it.trim()) }
+                .filter { seen.add(it) }
+        }
+        // ── 老配置迁移：四个布尔 → 有序列表 ──
+        val legacy = listOf(
+            TodayBlock.WEATHER to KEY_TODAY_WEATHER,
+            TodayBlock.POWER to KEY_TODAY_POWER,
+            TodayBlock.UPCOMING to KEY_TODAY_UPCOMING,
+            TodayBlock.WEEK_OVERVIEW to KEY_TODAY_WEEK,
+        ).filter { (_, key) -> sp.getBoolean(key, true) }.map { it.first }
+        // 四个都是 false 也算合法（用户把能关的都关了），不能拿默认顺序兜底
+        return legacy.ifEmpty {
+            if (sp.contains(KEY_TODAY_POWER) || sp.contains(KEY_TODAY_WEATHER)) emptyList()
+            else TodaySections.DefaultOrder
+        }
+    }
 
     /** 天气缓存（[Weather.Info] 的 JSON）。空串/未设置表示还没拉到过 */
     var weatherCache: String?
@@ -486,6 +517,7 @@ class SessionStore(context: Context) {
         const val KEY_TODAY_UPCOMING = "today_upcoming"
         const val KEY_TODAY_WEEK = "today_week_overview"
         const val KEY_TODAY_DAYS = "today_upcoming_days"
+        const val KEY_TODAY_ORDER = "today_order"
         const val KEY_WEATHER_CACHE = "weather_cache"
     }
 }

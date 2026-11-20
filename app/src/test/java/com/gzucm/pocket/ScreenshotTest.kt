@@ -1659,7 +1659,13 @@ class ScreenshotTest {
         TodayScreen(
             semester, 8, sessions, power, daily, 0L, {}, {}, {}, {}, false, 0, 0, false, null,
             agendaOccurrences = demoUpcoming(),
-            sections = com.gzucm.pocket.core.TodaySections(power = false, weekOverview = false),
+            sections = com.gzucm.pocket.core.TodaySections(
+                order = listOf(
+                    com.gzucm.pocket.core.TodayBlock.WEATHER,
+                    com.gzucm.pocket.core.TodayBlock.COURSE,
+                    com.gzucm.pocket.core.TodayBlock.UPCOMING,
+                ),
+            ),
             weather = demoWeather(),
         )
     }
@@ -1668,6 +1674,36 @@ class ScreenshotTest {
     fun todaySectionsSheet() = shot("29_today_sections", dark = false) {
         com.gzucm.pocket.ui.settings.TodaySectionsContent(
             sections = com.gzucm.pocket.core.TodaySections(upcomingDays = 7),
+            onChange = {},
+            showBack = true,
+            onBack = {},
+        )
+    }
+
+    /** 减掉两块之后的样子：剩下的一组分在上面，减掉的沉到最下面、字变灰、按钮变 + */
+    @Test
+    fun todaySectionsHidden() = shot("30_today_sections_hidden", dark = false) {
+        com.gzucm.pocket.ui.settings.TodaySectionsContent(
+            sections = com.gzucm.pocket.core.TodaySections(
+                order = listOf(
+                    com.gzucm.pocket.core.TodayBlock.POWER,
+                    com.gzucm.pocket.core.TodayBlock.COURSE,
+                    com.gzucm.pocket.core.TodayBlock.UPCOMING,
+                ),
+            ),
+            onChange = {},
+            showBack = true,
+            onBack = {},
+        )
+    }
+
+    /** 四块全减掉：今日页只剩课程，面板给一句说明而不是一片空白 */
+    @Test
+    fun todaySectionsAllHidden() = shot("31_today_sections_empty", dark = false) {
+        com.gzucm.pocket.ui.settings.TodaySectionsContent(
+            sections = com.gzucm.pocket.core.TodaySections(
+                order = listOf(com.gzucm.pocket.core.TodayBlock.COURSE),
+            ),
             onChange = {},
             showBack = true,
             onBack = {},

@@ -24,8 +24,8 @@ class VersionTest {
 
     @Test
     fun `版本名与期望值一致`() {
-        assertEquals("1.4.1", BuildConfig.VERSION_NAME)
-        assertEquals(10401, BuildConfig.VERSION_CODE)
+        assertEquals("1.4.2", BuildConfig.VERSION_NAME)
+        assertEquals(10402, BuildConfig.VERSION_CODE)
     }
 
     @Test

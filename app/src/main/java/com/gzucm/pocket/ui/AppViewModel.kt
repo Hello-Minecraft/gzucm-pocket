@@ -725,11 +725,35 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         Net.cookies.seed("jw.gzucm.edu.cn", jwCookies)
         // 教务已经认过了，那条「会话过期」的说明可以撤了
         reloginNotice = null
+
+        /*
+         * 「点同步 → 掉登录 → 重登」这条路上的补同步，**必须在这里做**。
+         *
+         * 2026-11-20 致辉实测：点同步后登录页弹出、一秒后自己消失。
+         * 那一秒就是 CAS 还活着、直接放行 —— 而 `onJwReady` 一改 phase，
+         * 登录页当场被组合移除、WebView 跟着销毁，后面 Ecard 阶段的
+         * onPageFinished 和 8 秒兜底都不会再跑，**`onLoggedIn` 根本不会被调用**。
+         *
+         * 所以补同步只写在 onLoggedIn 里等于没写：用户会看到网页闪一下、
+         * 回到课表还是旧数据，点了半天像什么都没发生。
+         */
+        val resumeSync = syncAfterRelogin
+        syncAfterRelogin = false
+
         if (state.phase != Phase.Ready) {
             state = state.copy(phase = Phase.Ready, message = null)
         }
         // 已经在同步就别重复开一份
-        if (!state.syncing && state.sessions.isEmpty()) syncQuietly()
+        if (!state.syncing) {
+            /*
+             * 补同步走**静默**（manual = false），不能按手动跑。
+             *
+             * 手动同步撞上 401 会再次触发「直接跳登录页」；补同步如果再失败，
+             * 就变成「登录页 → 自动关 → 又弹登录页」的无限循环。
+             * 静默失败只是留一句提示，用户想再试可以自己点同步。
+             */
+            if (state.sessions.isEmpty() || resumeSync) syncQuietly()
+        }
     }
 
     fun onLoggedIn(jwCookies: Map<String, String>, ecardCookies: Map<String, String>) {
