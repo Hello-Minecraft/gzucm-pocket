@@ -314,6 +314,8 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
         androidx.lifecycle.Lifecycle.Event.ON_RESUME
     ) {
         vm.checkUpdateIfStale()
+        // 天气也是「回到前台就看一眼」：内部按 1 小时节流，多调无副作用
+        vm.maybeRefreshWeather()
         // 用户可能刚去系统设置里开了通知 / 精确闹钟，回来要立刻反映，
         // 不然设置页「未授权」的红字一直挂着
         notifyOk = notifyGranted()
@@ -427,6 +429,30 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
     var showExport by remember { mutableStateOf(false) }
     // 「问题反馈」子页面（大字版本号 + 问卷入口），同一层级
     var showFeedback by remember { mutableStateOf(false) }
+    // 「今日页显示」子页面（电费 / 天气 / 接下来 / 本周概览 开关 + 提前天数）
+    var showTodaySectionsInSettings by remember { mutableStateOf(false) }
+    /**
+     * 今日页显示配置。
+     *
+     * 单独存一份状态而不是每次读 prefs：SharedPreferences 不是可观察对象，
+     * 面板里一改，首页不会重组 —— 用户会以为开关没生效。
+     *
+     * 两处入口（设置子页面 / 首页长按）都改这一份，再回写磁盘。
+     */
+    var todaySections by remember { mutableStateOf(prefs.todaySections) }
+    // 首页长按卡片弹出的那个（独立面板，不在设置里面）
+    var showTodaySections by remember { mutableStateOf(false) }
+    fun applyTodaySections(s: com.gzucm.pocket.core.TodaySections) {
+        val old = todaySections
+        todaySections = s
+        prefs.todaySections = s
+        /*
+         * 天气从关到开时补一次请求（否则要等下次冷启动，
+         * 用户刚打开开关却看不到卡片，会以为开关坏了）。
+         * 关的方向不用管：ViewModel 那边的刷新入口自己会看这个开关。
+         */
+        vm.onTodaySectionsChanged(old, s)
+    }
     // 从「登录已过期」点「去登录」进来时：设置页要自动滚到「重新登录」并抖动提示
     var focusRelogin by remember { mutableStateOf(false) }
 
@@ -471,6 +497,16 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                  */
                 initialCampus = vm.rememberedCampus,
                 onCampusPicked = vm::rememberCampusPicked,
+                /*
+                 * 只有「点同步发现会话过期」这条路径会带说明进来；
+                 * 冷启动未登录 / 主动退出登录时是 null，登录页跟以前一模一样。
+                 */
+                notice = vm.reloginNotice,
+                /*
+                 * 有缓存课表才给「稍后再登」：自动弹到登录页时，
+                 * 用户至少得能退回去看已经同步好的课表。
+                 */
+                onSkip = if (vm.state.sessions.isNotEmpty()) vm::skipRelogin else null,
             )
 
             else -> MainScaffold(
@@ -534,6 +570,11 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                                 // 已完成卡片仍留在首页最下方（变淡），点勾即取消完成
                                 vm.setTaskDone(o.sourceId, done = o.doneAt == null)
                             },
+                            sections = todaySections,
+                            weather = state.weather,
+                            weatherRefreshing = state.weatherRefreshing,
+                            weatherError = state.weatherError,
+                            onOpenSections = { showTodaySections = true },
                             onOpenPower = { tab = Tab.Power },
                             onOpenSettings = { showSettings = true },
                             onOpenLogin = {
@@ -651,6 +692,19 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
      * 这里不再手动分叉 —— 所有面板统一走 AdaptiveSheet，
      * 免得每个调用点各写一遍断点判断。
      */
+    /*
+     * 今日页显示（长按今日页卡片打开）。
+     *
+     * 和日程面板一样常驻组合树、靠 visible 控制 —— 用 if 包起来会让
+     * AdaptiveSheet 的退场动画不播、子树被直接摘掉。
+     */
+    com.gzucm.pocket.ui.settings.TodaySectionsSheet(
+        visible = showTodaySections,
+        onDismiss = { showTodaySections = false },
+        sections = todaySections,
+        onChange = { applyTodaySections(it) },
+    )
+
     detail?.let { s ->
         /*
          * 同一时段的其他课。
@@ -826,6 +880,7 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 // Compose 仍认为面板存在 → 留下一个透明遮罩盖在首页上，什么都点不动。
                 showAbout = false
                 showExport = false
+                showTodaySectionsInSettings = false
                 showSettings = false
             },
             paneWidth = 460.dp,
@@ -833,6 +888,7 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 showAbout -> "关于软件"
                 showDonate -> "打赏作者"
                 showExport -> "导出课表"
+                showTodaySectionsInSettings -> "今日页显示"
                 else -> "设置"
             },
             // 设置页和关于页正文自带 verticalScroll，这里必须关掉
@@ -850,12 +906,14 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
              * 整个设置面板关掉，用户以为退出了设置。跟系统设置的习惯相反。
              */
             androidx.activity.compose.BackHandler(
-                enabled = showAbout || showDonate || showExport || showFeedback,
+                enabled = showAbout || showDonate || showExport || showFeedback ||
+                    showTodaySectionsInSettings,
             ) {
                 showAbout = false
                 showDonate = false
                 showExport = false
                 showFeedback = false
+                showTodaySectionsInSettings = false
             }
             if (showFeedback) {
                 com.gzucm.pocket.ui.settings.FeedbackSheet(
@@ -1000,6 +1058,21 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 )
                 return@AdaptiveSheet
             }
+            /*
+             * 今日页显示（2026-11-20）。
+             *
+             * 和「导出课表」「关于」同一层级：同一块面板换正文、换标题，返回回到设置。
+             * 不在这里另开一个 AdaptiveSheet —— 手机上一个面板就是一个 Dialog，
+             * 两层叠起来按 BACK 会先关掉一层，层级一乱就出现「退回桌面」。
+             */
+            if (showTodaySectionsInSettings) {
+                com.gzucm.pocket.ui.settings.TodaySectionsContent(
+                    sections = todaySections,
+                    onChange = { applyTodaySections(it) },
+                    onBack = { showTodaySectionsInSettings = false },
+                )
+                return@AdaptiveSheet
+            }
             com.gzucm.pocket.ui.settings.SettingsScreen(
                 onSync = { vm.sync(); showSettings = false },
                 onLogout = { vm.logout(); showSettings = false },
@@ -1036,6 +1109,7 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                  * 「太长就导出为 json，发文件就可以」—— 于是入口改成先让他选。
                  */
                 onOpenExport = { showExport = true },
+                onOpenTodaySections = { showTodaySectionsInSettings = true },
                 startTabIndex = prefs.startTab,
                 onStartTabChange = {
                     prefs.startTab = it

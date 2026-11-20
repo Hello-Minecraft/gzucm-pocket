@@ -50,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.gzucm.pocket.ui.icons.AppIcons
@@ -87,6 +88,8 @@ fun SettingsScreen(
     onOpenExport: () -> Unit = {},
     /** 打开「问题反馈」子页面（大字版本号 + 问卷入口）。 */
     onOpenFeedback: () -> Unit = {},
+    /** 打开「今日页显示」子页面（电费 / 天气 / 接下来 / 本周概览 的开关 + 提前天数） */
+    onOpenTodaySections: () -> Unit = {},
 ) {
     val scheme = MaterialTheme.colorScheme
     val scrollState = rememberScrollState()
@@ -139,39 +142,61 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // ── 默认启动页 ────────────────────────────────────────────
+        // ── 页面：默认启动页 + 今日页显示 ──────────────────────────
+        //
+        // 2026-11-20 合并成一张卡（致辉提的）。原来「今日页显示」是单独一张
+        // 只有一行入口的卡，两张卡说的都是「页面长什么样」，摆一起反而碎。
+        // 拆分线之后接入口行，读起来就是「这块管页面」。
         Column(
             Modifier
                 .fillMaxWidth()
-                .micaPanel(14.dp)
-                .padding(14.dp),
+                .micaPanel(14.dp),
         ) {
-            Text("默认启动页", fontSize = 13.sp, color = scheme.onSurfaceVariant)
-            Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StartTabs.forEachIndexed { i, name ->
-                    val on = i == startTabIndex
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .clip(G3CornerShape(10.dp))
-                            .background(
-                                if (on) scheme.primary.copy(alpha = 0.16f)
-                                else scheme.surfaceVariant.copy(alpha = 0.5f)
+            Column(Modifier.padding(14.dp)) {
+                Text("默认启动页", fontSize = 13.sp, color = scheme.onSurfaceVariant)
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    StartTabs.forEachIndexed { i, name ->
+                        val on = i == startTabIndex
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .clip(G3CornerShape(10.dp))
+                                .background(
+                                    if (on) scheme.primary.copy(alpha = 0.16f)
+                                    else scheme.surfaceVariant.copy(alpha = 0.5f)
+                                )
+                                .clickable { onStartTabChange(i) }
+                                .padding(vertical = 9.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                name,
+                                fontSize = 12.5.sp,
+                                fontWeight = if (on) FontWeight.Medium else FontWeight.Normal,
+                                color = if (on) scheme.primary else scheme.onSurfaceVariant,
                             )
-                            .clickable { onStartTabChange(i) }
-                            .padding(vertical = 9.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            name,
-                            fontSize = 12.5.sp,
-                            fontWeight = if (on) FontWeight.Medium else FontWeight.Normal,
-                            color = if (on) scheme.primary else scheme.onSurfaceVariant,
-                        )
+                        }
                     }
                 }
             }
+
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp)
+                    .height(0.7.dp)
+                    .background(scheme.onSurfaceVariant.copy(alpha = 0.14f)),
+            )
+
+            // 「首页显示」这个名字一直有歧义（首页 = 今日？课表？），
+            // 改成跟面板标题一致的「今日页显示」
+            ActionRow(
+                "今日页显示",
+                AppIcons.Tune,
+                onOpenTodaySections,
+                hPadding = 14.dp,
+            )
         }
 
         Spacer(Modifier.height(16.dp))
@@ -497,6 +522,13 @@ private fun ActionRow(
     danger: Boolean = false,
     /** 右侧的小提示（如「检测到新版本」），红点 + 主色字 */
     badge: String? = null,
+    /**
+     * 水平内边距。默认 16dp。
+     *
+     * 放进「卡片自己带 14dp 内边距」的分组里时传 14dp —— 否则图标会比
+     * 上面那行标题多缩进 2dp，单看卡不出来，两行摆一起就歪了。
+     */
+    hPadding: Dp = 16.dp,
 ) {
     val scheme = MaterialTheme.colorScheme
     val tint = if (danger) scheme.error else scheme.onSurface
@@ -504,7 +536,7 @@ private fun ActionRow(
         Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 15.dp),
+            .padding(horizontal = hPadding, vertical = 15.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, contentDescription = null, modifier = Modifier.size(19.dp), tint = tint)
@@ -537,7 +569,7 @@ private val StartTabs = listOf("今日", "课表", "成绩", "电费")
 /**
  * 主题色色卡。
  *
- * 排两行：第一行「默认 + 5 个预设」，第二行「4 个预设 + 自定义」。
+ * 两行各 6 格：`默认 + 9 个预设 + 自定义` = 12 格，正好排满。
  * 点一下就立刻换色 —— 色卡本身也在被换色的界面里，所见即所得。
  */
 @Composable

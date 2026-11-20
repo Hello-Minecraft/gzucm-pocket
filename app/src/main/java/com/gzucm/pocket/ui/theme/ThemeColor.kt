@@ -20,10 +20,14 @@ object ThemeColor {
     const val DEFAULT_SEED = 0L
 
     /**
-     * 9 个预设。
+     * 10 个预设。
      *
-     * 前 5 个是莫兰迪系（低饱和、掺灰），后 4 个是鲜艳强调色。
+     * 前 5 个是莫兰迪系（低饱和、掺灰），后 5 个是鲜艳强调色。
      * 名字只用于无障碍描述，界面里不显示 —— 色卡看颜色就够了。
+     *
+     * **凑 10 个是为了排版**：加上「默认」和「自定义」，一共 12 格，
+     * 手机上 6 列 × 2 行正好排满，不会像原来那样第二行缺一格、
+     * 右边空一块（2026-11-20 致辉提的）。
      */
     val presets: List<Preset> = listOf(
         Preset("雾蓝", 0xFF7A93A8),
@@ -35,6 +39,13 @@ object ThemeColor {
         Preset("珊瑚", 0xFFFF7A59),
         Preset("品红", 0xFFE255A1),
         Preset("青柠", 0xFFA3D655),
+        /*
+         * 第 10 个补的是紫色：鲜艳那一组原本缺一个冷色收尾
+         * （蓝 → 橙 → 粉 → 黄绿 → 空），补上之后第二行才是完整的色谱。
+         * #8B5CF6 在浅色主题下压暗后约等于 #6D3FD9，深色主题提亮后约 #A88BFA，
+         * 两头都能和白字 / 深底拉开距离。
+         */
+        Preset("紫藤", 0xFF8B5CF6),
     )
 
     data class Preset(val label: String, val seed: Long)

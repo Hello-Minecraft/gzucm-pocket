@@ -80,6 +80,20 @@ fun LoginScreen(
     initialCampus: Campus = Campus.UNDERGRAD,
     /** 用户在登录页主动切换学段时回调，用来记住「他自己的选择」 */
     onCampusPicked: (Campus) -> Unit = {},
+    /**
+     * 从「点同步 → 发现会话过期 → 自动跳过来」时的说明。
+     *
+     * null 表示正常进登录页（冷启动没登录、刚退出登录），不显示任何横幅 ——
+     * 那些场景用户自己清楚在干什么，多一句话反而啰嗦。
+     */
+    notice: String? = null,
+    /**
+     * 「稍后再登」：退回主界面看缓存。
+     *
+     * 只有手里有缓存课表时才由调用方传入（否则退回去是白屏）。
+     * 自动弹到登录页时必须有这个出口，不然用户只是点了下同步，却被困在登录页。
+     */
+    onSkip: (() -> Unit)? = null,
 ) {
     /*
      * 学段切换。
@@ -110,7 +124,15 @@ fun LoginScreen(
     var pendingDaily by remember { mutableStateOf<String?>(null) }
 
     BackHandler(enabled = true) {
-        webRef?.let { if (it.canGoBack()) it.goBack() }
+        val w = webRef
+        /*
+         * 先让 WebView 自己后退（登录流程里可能停在统一认证的二级页）。
+         *
+         * 退无可退时才走 onSkip：
+         *   · 正常登录页 → onSkip 为 null，行为跟以前一样（按键被消费，什么也不做）
+         *   · 自动弹过来的登录页 → 回到主界面，别把用户锁死在这一屏
+         */
+        if (w != null && w.canGoBack()) w.goBack() else onSkip?.invoke()
     }
 
     fun cookieOf(url: String): Map<String, String> {
@@ -306,6 +328,54 @@ fun LoginScreen(
                             .padding(horizontal = 14.dp, vertical = 7.dp),
                     )
                 }
+            }
+
+            /*
+             * 「同步时发现登录过期」的说明条。
+             *
+             * 只在自动跳过来时出现（notice != null）。一句话交代「为什么在这」，
+             * 外加一个「稍后再登」的出口 —— 用户可能只是顺手点了下同步，
+             * 不该被困在登录页。
+             */
+            if (notice != null) {
+                val skip = onSkip
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 2.dp)
+                        .clip(G3CornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                        .padding(start = 12.dp, end = 8.dp, top = 9.dp, bottom = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            notice,
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            "重新验证一次就会继续，已经同步的课表不会丢",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (skip != null) {
+                        Text(
+                            "稍后再登",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .clip(G3CornerShape(8.dp))
+                                .clickable(onClick = skip)
+                                .padding(horizontal = 10.dp, vertical = 7.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
             }
 
             Row(

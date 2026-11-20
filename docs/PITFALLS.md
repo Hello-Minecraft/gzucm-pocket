@@ -696,6 +696,114 @@ WCAG 正文要求 4.5:1，这两个都只有三分之一；教师/教室行还�
 
 ---
 
+## 二十二、天气、未来日程、首页显示管理（2026-11-20）
+
+### 1. 第三方 key 不能进公开仓库
+
+仓库是公开的，和风天气的 key 一旦提交，等于把免费额度（1000 次/天）挂出来。
+做法和 `keystore.properties` 一致：根目录 `weather.properties`（已 gitignore）
+→ `buildConfigField` 注入 `BuildConfig.WEATHER_KEY`。
+
+**没有这个文件时功能要整块消失**，不能留一个报错的空壳：
+`Weather.enabled == false` 时首页根本不渲染天气卡，管理面板里那一行置灰并写明
+「这个版本没有配置天气服务」—— 否则用户会认为开关坏了。
+
+### 2. `LazyListScope` 的 lambda 不是 @Composable
+
+第一版把 `remember(exams) { … }` 写在了 `LazyColumn { … }` 里面，编译直接报
+「@Composable invocations can only happen from the context of a @Composable function」。
+排序、分组这类 `remember` 必须在 LazyColumn **外面**算好再进 items。
+
+同一类坑：`itemsIndexed(exams)` 里也不能调 `remember`。
+
+### 3. 只响应长按，别用 `combinedClickable(onClick = {})`
+
+首页卡片的「长按 → 打开首页显示」如果写成 `combinedClickable(onClick = {})`，
+整张卡会带上「点了有波纹但什么也没发生」的点击语义，用户会以为卡坏了。
+用 `pointerInput { detectTapGestures(onLongPress = …) }`，配合
+`rememberUpdatedState` 拿最新回调（直接闭包捕获会一直用第一次组合时的 lambda）。
+
+### 4. 天气的刷新节流要卡在数据层，不要卡在 UI
+
+`Weather.canRefresh(lastAt, now)` 是纯函数，`.equals` 边界写死 60 分钟（差 1ms 都不行）。
+两个触发点（冷启动、ON_RESUME）都走 `AppViewModel.maybeRefreshWeather()`，
+它自己判断要不要发请求 —— 调用方不需要知道节流的存在。
+
+`weatherJob` **必须声明在 `init` 之前**，和 `syncJob` 同一个道理：
+bootstrap() 里就会发起第一次请求，属性初始化语句晚于 init 执行会把引用重置成 null，
+下一次 ON_RESUME 就会重复发一份，节流形同虚设。
+
+### 5. 图标用官方库，别自己画
+
+第一版用 Canvas 画了七种天气形状。能跑，但和风有几十种天气现象
+（小雨转中雨、雷阵雨伴有冰雹、浮尘……），自己画永远追不上。
+官方 `qwd/Icons` 是 MIT、单色 `currentColor` 的纯 path SVG，
+转 VectorDrawable 后可以直接 `Icon(tint = …)`，和 App 内其他图标同一种质感。
+转换规则与许可全文见 `docs/QWEATHER_ICONS.md`。
+
+**夜间要单独映射**：150/151~153 用月亮系图标，否则晚上 11 点的「晴」会显示大太阳。
+
+### 6. 考试排序：`LocalDate.parse` 会丢掉带时间后缀的日期
+
+教务的 `date` 可能是 `2026-11-14`，也可能带时间。原来 `runCatching { LocalDate.parse(e.date) }`
+遇到后者返回 null → 整条考试从课表/首页消失（不只是排序问题）。
+现在 `ExamItem.dateOnly` 先 `substringBefore(' ')` 再解析，解析不了沉底但保留。
+
+排序本身：`examOccurrences` 内部按 `(date, startMinute, title)` 排；
+今日页是「日程（已排序）+ 考试」拼接，过滤完**必须再排一次**
+（`compareBy(startMinute, title)`），否则上午的考试会落在晚上的日程下面。
+
+---
+
+## 二十三、关掉开关 ≠ 停下请求；自动跳登录 ≠ 跳完就完（2026-11-20）
+
+### 1. UI 不渲染，不代表后台不跑
+
+天气卡上「关掉天气」这个开关，原来只影响 `if (sections.weather)` 那层渲染判断 ——
+卡片不画了，但 `loadWeather()` / `maybeRefreshWeather()` 里**没有任何地方看这个开关**，
+冷启动和回前台照样每小时打一次接口。用户看到的是「我已经关了」，
+实际是「关了还在烧额度」，而额度是他自己去控制台盯的。
+
+**规矩**：凡是「关掉 = 省资源」的开关，判断要写在**数据层**（ViewModel / Repository），
+不能只写在 UI。UI 那层只决定画不画，两件事都要做：
+
+```kotlin
+fun maybeRefreshWeather() {
+    if (!Weather.enabled) return
+    if (!store.todaySections.weather) return   // ← 少这一行，开关就是假的
+    …
+}
+```
+
+反向（关 → 开）还要补一次拉取，否则用户开了开关却要等下次冷启动才见到卡片，
+会以为开关坏了。补的时候仍然受原来的节流（1 小时）约束，不会重复打接口。
+
+### 2. 「点同步发现掉登录 → 直接进登录页」，要连做三件事
+
+只把 `phase` 改成 `NeedLogin` 是不够的：
+
+| 动作 | 不做会怎样 |
+|---|---|
+| 给一个「稍后再登」的出口（有缓存时） | 用户只点了下同步，却被锁死在登录页，返回键也退不出 |
+| 登录成功后**补一次同步** | `onLoggedIn` 只在 `sessions` 为空时同步；有缓存时重登回来还是旧课表，等于白跳一趟 |
+| 失败分支别把 phase 写回 `Ready` | 后台静默同步（manual=false）也走同一段失败代码，会把正对着登录页的用户弹回主界面 |
+
+第二条要用**独立标记**（`syncAfterRelogin`），不能复用「为什么到这来」的那句说明：
+`onJwReady` 在教务一通过的瞬间就把人放回主界面（早于 `onLoggedIn`，还要等一卡通那 8 秒），
+说明条那时就该撤掉，但「补同步」得留到 `onLoggedIn`。
+
+### 3. 重登的语义决定了它有多好卖
+
+`reopenLogin()` **只切 phase，不碰任何 cookie 和缓存** —— 所以 WebView 带着
+CAS 会话进去，多数情况点一下就回来了。这跟「退出登录」清一切是两码事
+（见第十九轮那次回归）。
+
+正因为「其实不用重输密码」，把它做成自动跳转才成立：
+用户点同步的意图就是「拿新数据」，中间那步「提示 → 去设置 → 找重新登录 → 点」
+纯属让他自己猜。**能一步到位的事不要拆成四步，尤其当那四步里有个按钮长得像危险操作。**
+
+---
+
 ## 十、其它
 
 - **电费会话在 WebView 里**，OkHttp 拿不到 → 只能 App 内弹窗同步（`EcardSyncSheet`）。

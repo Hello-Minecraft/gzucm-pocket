@@ -26,6 +26,8 @@ import com.gzucm.pocket.core.NetError
 import com.gzucm.pocket.core.PowerDaily
 import com.gzucm.pocket.core.PowerInfo
 import com.gzucm.pocket.core.Semester
+import com.gzucm.pocket.core.TodaySections
+import com.gzucm.pocket.core.Weather
 import com.gzucm.pocket.data.Ecard
 import com.gzucm.pocket.data.Jw
 import com.gzucm.pocket.data.Yjs
@@ -94,6 +96,14 @@ data class UiState(
      * 提醒排程读的是 sessions，所以日程天然不会进上课提醒（v1 约定）。
      */
     val agenda: List<Agenda> = emptyList(),
+    /**
+     * 天气。没配 key、没网、或缓存超过 6 小时都是 null ——
+     * 卡片据此决定「显示 / 显示旧数据 / 整块不出现」。
+     */
+    val weather: Weather.Info? = null,
+    val weatherRefreshing: Boolean = false,
+    /** 拉取失败的原因（只在已经有一次成功数据时不显示，避免吵闹） */
+    val weatherError: String? = null,
 )
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -120,6 +130,66 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun onPowerSyncFailed() {
         powerDirty = false
+    }
+
+    // ── 天气 ────────────────────────────────────────────────────────────
+    //
+    // 和风天气，全局最多 1 次/小时（见 Weather.MinIntervalMs）。
+    // 触发点只有两处：冷启动、从后台回到前台 —— 都走 [maybeRefreshWeather]，
+    // 由它自己判断「距上次不足一小时就跳过」，所以调用方不用做任何判断。
+    //
+    // **今日页把天气关掉之后，这里一次都不请求**（2026-11-20 致辉提的「省额度」）。
+    // 判据放在 ViewModel 而不是 UI：卡片不渲染不等于不联网，
+    // 之前就是 UI 隐藏着、后台照拉，每小时白烧一次额度。
+
+    /** 冷启动时先摆缓存，再决定要不要联网 */
+    fun loadWeather() {
+        if (!Weather.enabled) return
+        if (!store.todaySections.weather) return
+        Weather.cached(store)?.let { cached ->
+            if (state.weather == null) state = state.copy(weather = cached)
+        }
+        maybeRefreshWeather()
+    }
+
+    fun maybeRefreshWeather() {
+        if (!Weather.enabled) return
+        // 关掉就是关掉：不拉、也不排后续刷新
+        if (!store.todaySections.weather) return
+        if (weatherJob?.isActive == true) return
+        val last = state.weather?.fetchedAt ?: 0L
+        if (!Weather.canRefresh(last, System.currentTimeMillis())) return
+        weatherJob = viewModelScope.launch {
+            state = state.copy(weatherRefreshing = true)
+            val info = Weather.fetch()
+            state = if (info == null) {
+                /*
+                 * 失败不清旧数据：手里有一份一小时前的天气，
+                 * 比换成一个「获取失败」的空卡有用得多。
+                 */
+                state.copy(
+                    weatherRefreshing = false,
+                    // 具体原因由 Weather 记（key 错 / 超额 / 没网），这里只做兜底
+                    weatherError = Weather.lastError ?: "天气暂时取不到",
+                )
+            } else {
+                Weather.save(store, info)
+                state.copy(weather = info, weatherRefreshing = false, weatherError = null)
+            }
+        }
+    }
+
+    /**
+     * 今日页显示配置变了。
+     *
+     * 唯一需要「立刻产生动作」的是天气：从关到开时补一次拉取，
+     * 否则用户打开开关后要等到下一次冷启动才见到卡片，会以为开关坏了。
+     * 反向（开→关）不用管 —— 卡片已经不渲染，请求也就不会再发。
+     *
+     * 这里仍然受 [Weather.canRefresh] 的一小时节流：刚拉过就开开关，不会重复打接口。
+     */
+    fun onTodaySectionsChanged(old: TodaySections, new: TodaySections) {
+        if (!old.weather && new.weather) maybeRefreshWeather()
     }
 
     /**
@@ -245,7 +315,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun examOccurrences(semester: Semester?): List<AgendaOccurrence> {
         if (semester == null) return emptyList()
         return state.exams.mapNotNull { e ->
-            val date = runCatching { LocalDate.parse(e.date) }.getOrNull() ?: return@mapNotNull null
+            val date = e.dateOnly ?: return@mapNotNull null
             val s = e.startMinute ?: return@mapNotNull null
             val en = (e.endMinute ?: (s + 120)).coerceAtLeast(s + 30)
             AgendaOccurrence(
@@ -265,7 +335,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 weekly = false,
                 seat = e.seat,
             )
-        }
+        }.sortedWith(
+            /*
+             * 按考试时间排（致辉 2026-11-20 指出）。
+             *
+             * 以前直接用 state.exams 的顺序 —— 那是教务返回的顺序，
+             * 大致按课程走，和考试早晚无关；今日页又是「日程（已排序）+ 考试」拼接，
+             * 结果同一天里上午的考试永远排在晚上的日程后面。
+             */
+            compareBy({ it.date }, { it.startMinute }, { it.title }),
+        )
     }
 
     /** 考试的唯一键：同名课可能考好几次，所以带上日期和开考时间 */
@@ -310,6 +389,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      */
     var loginExpired by mutableStateOf(false)
         private set
+
+    /**
+     * 为什么被送到登录页（只在「点同步 → 发现会话过期 → 自动跳登录」时非空）。
+     *
+     * 冷启动未登录、手动退出登录都是 null —— 那些场景用户自己知道在干什么，
+     * 不需要再解释。登录页据此显示一句说明和「稍后再登」的出口。
+     */
+    var reloginNotice by mutableStateOf<String?>(null)
+        private set
+
+    /**
+     * 「重登完之后补一次同步」的标记。
+     *
+     * 为什么不复用 [reloginNotice]：`onJwReady` 在教务一通过的瞬间就把人放回主界面
+     * （早于 `onLoggedIn`，因为还要等一卡通那 8 秒），那时说明条就该撤掉；
+     * 但「把刚才没做完的那次同步补上」要留到 `onLoggedIn` 才执行。
+     *
+     * 没有这个标记的话，用户重登回来会看到**旧课表**（`onLoggedIn` 只在
+     * `sessions` 为空时才同步），得再点一次同步 —— 等于白跳一趟。
+     */
+    private var syncAfterRelogin = false
 
     /** 有可用更新（首页设置按钮上的小红点） */
     var hasUpdate by mutableStateOf(
@@ -498,6 +598,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      */
     private var syncJob: kotlinx.coroutines.Job? = null
 
+    /**
+     * 天气请求的防重入闸。
+     *
+     * 和 [syncJob] 同理：**必须声明在 init 之前** —— bootstrap() 里就会调
+     * loadWeather()，Job 在建完之后如果被这里的初始化语句重置成 null，
+     * 下一次 ON_RESUME 就会再发一份请求，一小时一次的节流直接失效。
+     */
+    private var weatherJob: kotlinx.coroutines.Job? = null
+
     /** 当前周（1 起）。用户可手动校正，默认为按校历推算。 */
     var currentWeek by mutableStateOf(1)
         private set
@@ -535,6 +644,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
          * 课表算法改一次就顺手清掉考试缓存没有道理，而且会逼用户重新联网一次。
          */
         readExamCache().let { if (it.isNotEmpty()) state = state.copy(exams = it) }
+
+        // 天气和登录态无关：没登录也照样显示，先摆缓存再按节流决定要不要联网
+        loadWeather()
 
         val cachedSessions = readSessionCache()
         val cachedSemester = readSemesterCache()
@@ -611,6 +723,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun onJwReady(jwCookies: Map<String, String>) {
         if (jwCookies.isEmpty()) return
         Net.cookies.seed("jw.gzucm.edu.cn", jwCookies)
+        // 教务已经认过了，那条「会话过期」的说明可以撤了
+        reloginNotice = null
         if (state.phase != Phase.Ready) {
             state = state.copy(phase = Phase.Ready, message = null)
         }
@@ -623,6 +737,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (ecardCookies.isNotEmpty()) Net.cookies.seed("ecard.gzucm.edu.cn", ecardCookies)
         state = state.copy(phase = Phase.Ready, message = null)
         loginExpired = false
+        reloginNotice = null
+        // 从「点同步发现过期」跳过来的：把那次没做完的同步补上，用户不用再点一次
+        val resumeSync = syncAfterRelogin
+        syncAfterRelogin = false
         /*
          * 登录成功后再查一次更新。
          *
@@ -632,8 +750,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
          * 一整天都看不到新版本提示。
          */
         checkUpdateSilently()
-        // 课表可能已经在 onJwReady 时抓过了，别重复
-        if (state.sessions.isEmpty() && !state.syncing) syncQuietly()
+        // 课表可能已经在 onJwReady 时抓过了，别重复；
+        // 但「重登补同步」这条路上即使有缓存也要刷一次 —— 那正是用户点同步的目的
+        if (!state.syncing && (state.sessions.isEmpty() || resumeSync)) syncQuietly()
         // 电费：登录后打个待刷新标记，用户进电费页时弹窗同步一次
         if (ecardCookies.isNotEmpty()) powerDirty = true
     }
@@ -664,6 +783,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             exams = emptyList(),
         )
         loginExpired = false
+        reloginNotice = null
         checkUpdateSilently()
         if (!state.syncing) syncQuietly()
     }
@@ -741,6 +861,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             store.cachedFitness = null
             // 日程是用户自建数据，退出登录不该把它清掉；从独立存储原样带回来
             state = UiState(phase = Phase.NeedLogin, agenda = agendaStore.load())
+            // 主动退出登录是用户自己的决定，别把「会话过期」的解释挂在这上面
+            reloginNotice = null
+            syncAfterRelogin = false
         }
     }
 
@@ -793,6 +916,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * `LoginReopenTest` 会同时拦一下。
      */
     fun relogin() = reopenLogin()
+
+    /**
+     * 「稍后再登」：从自动弹出的登录页退回主界面，保留缓存课表。
+     *
+     * 为什么需要这个出口：点同步被直接送到登录页时，如果用户当时没空扫码，
+     * 他至少得能回去看已经缓存的课表 —— 否则这个「贴心」的设计就变成
+     * 「点一下同步，App 卡在登录页出不去」。
+     *
+     * 没有任何缓存时不给这个入口（回到主界面也是白屏），由调用方传 null。
+     */
+    fun skipRelogin() {
+        reloginNotice = null
+        // 用户决定先不登，那次补同步也就跟着作废
+        syncAfterRelogin = false
+        if (state.sessions.isEmpty()) return
+        state = state.copy(phase = Phase.Ready)
+    }
 
     // ── 同步 ────────────────────────────────────────────────────────────
 
@@ -943,6 +1083,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             state = state.copy(syncing = false, progressDone = 0, progressTotal = 0)
             val msg = when {
                 e is NetError.Unauthorized -> {
+                    /*
+                     * 研究生系统一旦 401，后面 19 个请求全会一样失败 ——
+                     * 所以这里不像本科那样「有缓存就先留在主界面」，
+                     * 直接进登录页（有缓存时给「稍后再登」的出口，见 skipRelogin）。
+                     */
+                    reloginNotice = "研究生系统登录状态已过期"
+                    syncAfterRelogin = true
                     state = state.copy(phase = Phase.NeedLogin)
                     "研究生系统登录已过期"
                 }
@@ -993,16 +1140,49 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             // 以前每次冷启动都会看到同一句话，纯噪音。
             val authIssue = com.gzucm.pocket.core.UserMessage.isAuthIssue(e)
             if (authIssue) loginExpired = true
+
+            /*
+             * 手动同步撞上会话过期 → 直接把登录页摆出来（2026-11-20 致辉提的）。
+             *
+             * 原来的路径是：提示「登录已过期」→ 用户点「去登录」→ 设置面板 →
+             * 滚到「重新登录」→ 再点。四步，而且很多同学**不敢点**那个按钮，
+             * 怕点完要重新扫码 / 重输账号。
+             *
+             * 实际上 reopenLogin 只切页面、不碰 cookie，WebView 带着 CAS 会话进去
+             * 通常直接就回来了 —— 也就是说这一步本来就是「点一下就好」，
+             * 那就不该让用户去猜。点同步 = 想拿最新数据，直接把他送到该去的地方。
+             *
+             * 只在有缓存课表时才这么干：没缓存时 phase 本来就是 NeedLogin，不必特别处理。
+             */
+            val jumpToLogin = authIssue && manual && state.sessions.isNotEmpty()
+            if (jumpToLogin) {
+                reloginNotice = "同步时发现登录状态已过期"
+                // 登录成功回来后把这次没做完的同步补上
+                syncAfterRelogin = true
+            }
+
             val showIt = if (!authIssue) true else store.loginExpiredNotifiedDate != today
             if (authIssue && showIt) store.loginExpiredNotifiedDate = today
 
             val sem = state.semester
             state = state.copy(
                 syncing = false,
-                message = if (showIt) describe(e) else state.message,
+                // 已经跳到登录页了就不必再在首页留一句同样的话
+                message = if (showIt && !jumpToLogin) describe(e) else state.message,
                 syncResultSeq = if (manual) state.syncResultSeq + 1 else state.syncResultSeq,
                 syncResultText = if (manual) "同步失败：${describe(e)}" else state.syncResultText,
-                phase = if (state.sessions.isEmpty()) Phase.NeedLogin else Phase.Ready,
+                phase = when {
+                    state.sessions.isEmpty() || jumpToLogin -> Phase.NeedLogin
+                    /*
+                     * 人已经在登录页就别把他拽回主界面。
+                     *
+                     * 场景：自动跳到登录页之后，某次后台静默同步也失败了
+                     * （manual = false），走原来的分支会把 phase 写回 Ready ——
+                     * 用户正对着登录页输密码，页面自己关了。
+                     */
+                    state.phase == Phase.NeedLogin -> Phase.NeedLogin
+                    else -> Phase.Ready
+                },
                 // 失败时别让课表停在「加载中」：有缓存就按缓存全量展示
                 loadedWeeks = if (sem != null && state.sessions.isNotEmpty())
                     (1..sem.totalWeeks).toSet() else state.loadedWeeks,
@@ -1068,6 +1248,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             store.lastSyncAt = System.currentTimeMillis()
             store.loginExpiredNotifiedDate = null
             loginExpired = false
+            reloginNotice = null
+            syncAfterRelogin = false
             // 课表变了就重排提醒（未来 7 天，代价很小）
             reschedule(semester, sessions)
             state = state.copy(

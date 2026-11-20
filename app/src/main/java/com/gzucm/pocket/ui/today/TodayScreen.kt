@@ -3,6 +3,7 @@ package com.gzucm.pocket.ui.today
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -50,6 +51,9 @@ import com.gzucm.pocket.core.CourseSession
 import com.gzucm.pocket.core.PowerDaily
 import com.gzucm.pocket.core.PowerInfo
 import com.gzucm.pocket.core.Semester
+import com.gzucm.pocket.core.TodayLogic
+import com.gzucm.pocket.core.TodaySections
+import com.gzucm.pocket.core.Weather
 import com.gzucm.pocket.ui.components.Fmt
 import com.gzucm.pocket.ui.components.LocalFloatingBarInset
 import com.gzucm.pocket.ui.icons.AppIcons
@@ -102,6 +106,17 @@ fun TodayScreen(
     taskCards: List<AgendaOccurrence> = emptyList(),
     /** 勾选截止任务 / 待办（已完成）。任务卡在首页和日程页都有勾选圈 */
     onTaskCheck: (AgendaOccurrence) -> Unit = {},
+    /*
+     * 以下都是 2026-11-20 新增（天气 + 接下来 + 显示管理），
+     * 一律追加在末尾：截图测试里有按位置传参的调用，插在中间会整体错位。
+     */
+    /** 今日页显示哪些块（电费 / 天气 / 接下来 / 本周概览）+ 提前天数 */
+    sections: TodaySections = TodaySections(),
+    weather: Weather.Info? = null,
+    weatherRefreshing: Boolean = false,
+    weatherError: String? = null,
+    /** 长按任意卡片、或从设置进来：打开「今日页显示」面板 */
+    onOpenSections: () -> Unit = {},
 ) {
     // today 也挂在同一个 tick 上：停在首页跨过 0 点后要切到新的一天，
     // 下面 remember(…, today) 那几处才会重算
@@ -139,12 +154,27 @@ fun TodayScreen(
     val showingTomorrow = todayDone && tomorrowSessions.isNotEmpty()
 
     /*
+     * 未来 N 天的日程 / 考试（不含今天）。
+     *
+     * 数据源就是上面那一条合并列表，不额外问 ViewModel 要 ——
+     * 它已经包含日程和考试两种来源，筛选和排序都是纯函数（TodayLogic.upcoming），
+     * 单测里能直接验「第 N 天算不算在内」这种边界。
+     */
+    val upcoming = remember(agendaOccurrences, today, sections.upcomingDays) {
+        TodayLogic.upcoming(agendaOccurrences, today, sections.upcomingDays)
+    }
+
+    /*
      * 今日页的日程：只跟着「显示今天还是明天」切换，不改 [todayDone] 的判定
      * （那是按最后一节课算的，把日程混进去会让首页提前翻到明天）。
      */
     val shownAgenda = remember(agendaOccurrences, today, showingTomorrow) {
         val d = if (showingTomorrow) today.plusDays(1) else today
-        agendaOccurrences.filter { it.date == d }
+        agendaOccurrences
+            .filter { it.date == d }
+            // 入参是「日程 + 考试」两段拼接的，各自有序、合起来不一定有序：
+            // 同一天里必须再按开考/开始时间排一次，否则上午的考试会落到晚上的日程下面
+            .sortedWith(compareBy({ it.startMinute }, { it.title }))
     }
 
     /*
@@ -208,16 +238,45 @@ fun TodayScreen(
                     Column(
                         Modifier
                             .weight(1f)
-                            .fillMaxHeight(),
+                            .fillMaxHeight()
+                            /*
+                             * 左列自己可滚（2026-11-20 加天气卡之后）。
+                             *
+                             * 宽屏整页不滚动是有意为之，但左列内容从两张卡变成三张，
+                             * 平板横屏高度不足时会溢出。这里加的是**本列**的滚动，
+                             * 外层没有嵌套滚动容器，不会出现「内外抢手势」那种事。
+                             */
+                            .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(18.dp),
                     ) {
-                        PowerCard(
-                            power = power,
-                            daily = powerDaily,
-                            checkedAt = powerCheckedAt,
-                            onClick = onOpenPower,
-                        )
-                        WeekOverview(sessions = weekSessions, currentWeek = currentWeek)
+                        /*
+                         * 有数据就画；没数据但功能可用时也画（卡片自己显示「正在取 / 取不到」）——
+                         * 首次请求就失败时卡片凭空消失，看着像开关没生效。
+                         */
+                        if (sections.weather && (Weather.enabled || weather != null)) {
+                            WeatherCard(
+                                info = weather,
+                                refreshing = weatherRefreshing,
+                                error = weatherError,
+                                onLongPress = onOpenSections,
+                            )
+                        }
+                        if (sections.power) {
+                            PowerCard(
+                                power = power,
+                                daily = powerDaily,
+                                checkedAt = powerCheckedAt,
+                                onClick = onOpenPower,
+                                onLongPress = onOpenSections,
+                            )
+                        }
+                        if (sections.weekOverview) {
+                            WeekOverview(
+                                sessions = weekSessions,
+                                currentWeek = currentWeek,
+                                onLongPress = onOpenSections,
+                            )
+                        }
                     }
                     LazyColumn(
                         Modifier
@@ -241,6 +300,17 @@ fun TodayScreen(
                                 progressTotal = progressTotal,
                                 onCourseClick = onCourseClick,
                             )
+                        }
+                        if (sections.upcoming) {
+                            item {
+                                Spacer(Modifier.height(18.dp))
+                                UpcomingCard(
+                                    items = upcoming,
+                                    days = sections.upcomingDays,
+                                    onAgendaClick = onAgendaClick,
+                                    onLongPress = onOpenSections,
+                                )
+                            }
                         }
                     }
                 }
@@ -272,13 +342,26 @@ fun TodayScreen(
                     Spacer(Modifier.height(12.dp))
                 }
 
-                PowerCard(
-                    power = power,
-                    daily = powerDaily,
-                    checkedAt = powerCheckedAt,
-                    onClick = onOpenPower,
-                )
-                Spacer(Modifier.height(18.dp))
+                // 同宽屏：没数据但功能可用时也要画，否则首次失败会像「开关坏了」
+                if (sections.weather && (Weather.enabled || weather != null)) {
+                    WeatherCard(
+                        info = weather,
+                        refreshing = weatherRefreshing,
+                        error = weatherError,
+                        onLongPress = onOpenSections,
+                    )
+                    Spacer(Modifier.height(18.dp))
+                }
+                if (sections.power) {
+                    PowerCard(
+                        power = power,
+                        daily = powerDaily,
+                        checkedAt = powerCheckedAt,
+                        onClick = onOpenPower,
+                        onLongPress = onOpenSections,
+                    )
+                    Spacer(Modifier.height(18.dp))
+                }
                 CourseSection(
                     title = if (showingTomorrow) "明日课程" else "今日课程",
                     sessions = if (showingTomorrow) tomorrowSessions else todaySessions,
@@ -292,8 +375,23 @@ fun TodayScreen(
                     progressTotal = progressTotal,
                     onCourseClick = onCourseClick,
                 )
-                Spacer(Modifier.height(20.dp))
-                WeekOverview(sessions = weekSessions, currentWeek = currentWeek)
+                if (sections.upcoming) {
+                    Spacer(Modifier.height(18.dp))
+                    UpcomingCard(
+                        items = upcoming,
+                        days = sections.upcomingDays,
+                        onAgendaClick = onAgendaClick,
+                        onLongPress = onOpenSections,
+                    )
+                }
+                if (sections.weekOverview) {
+                    Spacer(Modifier.height(20.dp))
+                    WeekOverview(
+                        sessions = weekSessions,
+                        currentWeek = currentWeek,
+                        onLongPress = onOpenSections,
+                    )
+                }
 
                 // 悬浮底栏占位，避免最后一张卡被压在底栏下面
                 Spacer(Modifier.height(LocalFloatingBarInset.current))
@@ -559,7 +657,11 @@ private fun CourseSection(
 
 /** 本周概览：每天几节课的分布，填充界面下半部分 */
 @Composable
-private fun WeekOverview(sessions: List<CourseSession>, currentWeek: Int) {
+private fun WeekOverview(
+    sessions: List<CourseSession>,
+    currentWeek: Int,
+    onLongPress: () -> Unit = {},
+) {
     val scheme = MaterialTheme.colorScheme
     if (sessions.isEmpty()) return
 
@@ -579,6 +681,8 @@ private fun WeekOverview(sessions: List<CourseSession>, currentWeek: Int) {
             .fillMaxWidth()
             // 阴影用系统原生 elevation，不再按高度分档（见 MicaPanel.kt）
             .micaPanel(16.dp)
+            // 这张卡本身没有点击动作，长按只是「打开今日页显示管理」的快捷入口
+            .cardLongPress(onLongPress)
             .padding(horizontal = 16.dp, vertical = 15.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -883,12 +987,15 @@ private fun parseMinutes(hhmm: String): Int {
  *   · 本科首次同步电费失败时同样不该占位 —— 电费页有入口，
  *     这里空着反而更干净
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun PowerCard(
     power: PowerInfo?,
     daily: List<PowerDaily>,
     checkedAt: Long,
     onClick: () -> Unit,
+    /** 长按卡片 = 打开「今日页显示」管理（致辉 2026-11-20 定的快捷入口） */
+    onLongPress: () -> Unit = {},
 ) {
     if (power == null) return
     val scheme = MaterialTheme.colorScheme
@@ -903,7 +1010,7 @@ private fun PowerCard(
              * 这张卡是它的样板（2026-11-19 第二轮：所有面板对齐到这里）。
              */
             .micaPanel(18.dp)
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
             .padding(horizontal = 17.dp, vertical = 15.dp),
     ) {
         Column {

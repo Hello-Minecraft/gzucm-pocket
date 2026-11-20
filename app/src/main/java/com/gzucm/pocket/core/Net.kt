@@ -405,6 +405,35 @@ class SessionStore(context: Context) {
         get() = sp.getBoolean(KEY_OVERLAP_MODE, true)
         set(v) = sp.edit().putBoolean(KEY_OVERLAP_MODE, v).apply()
 
+    /**
+     * 今日页显示哪些块。
+     *
+     * 存成五个独立键而不是一串 JSON：这一组开关没有原子性要求，
+     * 分开存以后加一项也不必写迁移代码（缺键就是默认值）。
+     */
+    var todaySections: TodaySections
+        get() = TodaySections(
+            power = sp.getBoolean(KEY_TODAY_POWER, true),
+            weather = sp.getBoolean(KEY_TODAY_WEATHER, true),
+            upcoming = sp.getBoolean(KEY_TODAY_UPCOMING, true),
+            weekOverview = sp.getBoolean(KEY_TODAY_WEEK, true),
+            upcomingDays = sp.getInt(KEY_TODAY_DAYS, TodaySections.DefaultDays)
+                .coerceIn(TodaySections.MinDays, TodaySections.MaxDays),
+        )
+        set(v) = sp.edit()
+            .putBoolean(KEY_TODAY_POWER, v.power)
+            .putBoolean(KEY_TODAY_WEATHER, v.weather)
+            .putBoolean(KEY_TODAY_UPCOMING, v.upcoming)
+            .putBoolean(KEY_TODAY_WEEK, v.weekOverview)
+            .putInt(KEY_TODAY_DAYS, v.upcomingDays.coerceIn(TodaySections.MinDays, TodaySections.MaxDays))
+            .apply()
+
+    /** 天气缓存（[Weather.Info] 的 JSON）。空串/未设置表示还没拉到过 */
+    var weatherCache: String?
+        get() = sp.getString(KEY_WEATHER_CACHE, null)
+        set(v) = if (v == null) sp.edit().remove(KEY_WEATHER_CACHE).apply()
+        else sp.edit().putString(KEY_WEATHER_CACHE, v).apply()
+
     private companion object {
         const val KEY_COOKIES = "cookies"
         const val KEY_SEMESTER = "semester"
@@ -452,6 +481,12 @@ class SessionStore(context: Context) {
         const val KEY_POWER_SYNC_DATE = "power_sync_date"
         const val KEY_POWER_ATTEMPT_AT = "power_attempt_at"
         const val KEY_CACHE_POWER_DAILY = "cache_power_daily"
+        const val KEY_TODAY_POWER = "today_power"
+        const val KEY_TODAY_WEATHER = "today_weather"
+        const val KEY_TODAY_UPCOMING = "today_upcoming"
+        const val KEY_TODAY_WEEK = "today_week_overview"
+        const val KEY_TODAY_DAYS = "today_upcoming_days"
+        const val KEY_WEATHER_CACHE = "weather_cache"
     }
 }
 

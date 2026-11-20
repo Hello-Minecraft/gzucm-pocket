@@ -3,6 +3,8 @@
 *.keystore
 keystore.properties
 local.properties
+# 和风天气的 key：公开仓库里放着等于把免费额度送人
+weather.properties
 
 # ── 构建产物 ──────────────────────────────────────────────
 build/

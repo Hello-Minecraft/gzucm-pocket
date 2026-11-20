@@ -69,9 +69,10 @@ class ThemeColorTest {
     }
 
     @Test
-    fun `九个预设颜色互不相同`() {
-        assertEquals(9, ThemeColor.presets.size)
-        assertEquals(9, ThemeColor.presets.map { it.seed }.toSet().size)
+    fun `十个预设颜色互不相同`() {
+        // 10 个预设 + 默认 + 自定义 = 12 格，正好排满两行（6 列）
+        assertEquals(10, ThemeColor.presets.size)
+        assertEquals(10, ThemeColor.presets.map { it.seed }.toSet().size)
     }
 
     @Test

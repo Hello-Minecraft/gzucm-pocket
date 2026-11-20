@@ -17,9 +17,46 @@ android {
         targetSdk = 35
         // versionCode 由 versionName 推出：主*10000 + 次*100 + 修订
         // 1.2.5 → 10205。改版本名必须同步改 code，VersionTest 会校验。
-        versionCode = 10400
-        versionName = "1.4.0"
+        versionCode = 10401
+        versionName = "1.4.1"
         resourceConfigurations += listOf("zh", "en")
+
+        /*
+         * 和风天气的 key / host。
+         *
+         * **不写进仓库**：仓库是公开的，key 一旦提交等于把免费额度公开。
+         * 从根目录 weather.properties（已 gitignore）读；文件不存在时留空，
+         * 天气卡整块消失，其余功能不受影响（见 core/Weather.kt 的说明）。
+         *
+         *   key=你的和风 API Key
+         *   host=https://xxxxx.re.qweatherapi.com     # 新账号的专属 host，可省略
+         */
+        val weatherProps = Properties().apply {
+            val f = rootProject.file("weather.properties")
+            if (f.exists()) f.inputStream().use { load(it) }
+        }
+        buildConfigField(
+            "String",
+            "WEATHER_KEY",
+            "\"${weatherProps.getProperty("key", "").trim()}\"",
+        )
+        buildConfigField(
+            "String",
+            "WEATHER_HOST",
+            "\"${weatherProps.getProperty("host", "https://devapi.qweather.com").trim()}\"",
+        )
+        // 阿里云 FC 转发地址（推荐用法）：填了它 App 就只跟自己的函数说话，
+        // 不再直连和风、也不碰私钥 —— 见 weather.properties 里的说明
+        buildConfigField(
+            "String",
+            "WEATHER_BASE",
+            "\"${weatherProps.getProperty("base", "").trim()}\"",
+        )
+        buildConfigField(
+            "String",
+            "WEATHER_APP_TOKEN",
+            "\"${weatherProps.getProperty("app_token", "").trim()}\"",
+        )
     }
 
     /**

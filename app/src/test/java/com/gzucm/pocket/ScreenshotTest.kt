@@ -1566,4 +1566,111 @@ class ScreenshotTest {
             onDismiss = {},
         )
     }
+
+    // ── 2026-11-20：首页天气卡 / 接下来 / 首页显示管理 ──────────────
+
+    /**
+     * 一份假天气。
+     *
+     * 测试环境没有和风 key（`Weather.enabled == false`），所以线上那条路是「整块不渲染」；
+     * 但 [com.gzucm.pocket.ui.today.TodayScreen] 的判定是
+     * `sections.weather && (Weather.enabled || weather != null)` ——
+     * 直接注入一份数据就能把卡片渲染出来，正好用来盯排版。
+     */
+    private fun demoWeather(): com.gzucm.pocket.core.Weather.Info {
+        val today = java.time.LocalDate.now()
+        fun d(offset: Long, text: String, icon: String, max: Int, min: Int) =
+            com.gzucm.pocket.core.Weather.Day(
+                date = today.plusDays(offset).toString(),
+                text = text,
+                icon = icon,
+                max = max,
+                min = min,
+            )
+        return com.gzucm.pocket.core.Weather.Info(
+            city = com.gzucm.pocket.core.Weather.CityLabel,
+            temp = 14,
+            feelsLike = 11,
+            humidity = 63,
+            text = "阴",
+            icon = "104",
+            days = listOf(
+                d(0, "阴", "104", 18, 12),
+                d(1, "小雨", "305", 17, 11),
+                d(2, "多云", "101", 21, 13),
+            ),
+            // 12 分钟前更新：卡片右上角应该显示「12 分钟前」
+            fetchedAt = System.currentTimeMillis() - 12 * 60_000L,
+        )
+    }
+
+    /** 未来几天的日程 / 考试，用来验「接下来」卡的五条上限和考试红点 */
+    private fun demoUpcoming(): List<com.gzucm.pocket.core.AgendaOccurrence> {
+        val t = java.time.LocalDate.now()
+        fun o(offset: Long, title: String, h: Int, m: Int, place: String, exam: Boolean = false) =
+            com.gzucm.pocket.core.AgendaOccurrence(
+                key = "demo-$title",
+                sourceId = "demo-$title",
+                title = title,
+                date = t.plusDays(offset),
+                week = 8,
+                weekday = t.plusDays(offset).dayOfWeek.value,
+                startMinute = h * 60 + m,
+                endMinute = h * 60 + m + 90,
+                place = place,
+                note = if (exam) "闭卷" else "",
+                colorIndex = if (exam) com.gzucm.pocket.core.EXAM_COLOR_INDEX else 0,
+                unitStart = 0,
+                unitEnd = 0,
+                weekly = false,
+            )
+        return listOf(
+            o(1, "内科学见习", 8, 0, "内科楼 302"),
+            o(2, "中医各家学说 随堂测", 14, 30, "新课室楼 501", exam = true),
+            o(4, "摄影部例会", 19, 0, "融媒体中心"),
+            o(6, "针灸科见习", 8, 30, "针灸科门诊"),
+            o(9, "年度体测", 9, 0, "田径场"),
+        )
+    }
+
+    @Test
+    fun todayWeather() = shot("26_today_weather") {
+        TodayScreen(
+            semester, 8, sessions, power, daily, 0L, {}, {}, {}, {}, false, 0, 0, false, null,
+            agendaOccurrences = demoUpcoming(),
+            sections = com.gzucm.pocket.core.TodaySections(),
+            weather = demoWeather(),
+        )
+    }
+
+    @Test
+    fun todayWeatherLight() = shot("27_today_weather_light", dark = false) {
+        TodayScreen(
+            semester, 8, sessions, power, daily, 0L, {}, {}, {}, {}, false, 0, 0, false, null,
+            agendaOccurrences = demoUpcoming(),
+            sections = com.gzucm.pocket.core.TodaySections(),
+            weather = demoWeather(),
+        )
+    }
+
+    /** 关掉电费和本周概览：只剩天气 + 课程 + 接下来 */
+    @Test
+    fun todaySectionsMinimal() = shot("28_today_minimal") {
+        TodayScreen(
+            semester, 8, sessions, power, daily, 0L, {}, {}, {}, {}, false, 0, 0, false, null,
+            agendaOccurrences = demoUpcoming(),
+            sections = com.gzucm.pocket.core.TodaySections(power = false, weekOverview = false),
+            weather = demoWeather(),
+        )
+    }
+
+    @Test
+    fun todaySectionsSheet() = shot("29_today_sections", dark = false) {
+        com.gzucm.pocket.ui.settings.TodaySectionsContent(
+            sections = com.gzucm.pocket.core.TodaySections(upcomingDays = 7),
+            onChange = {},
+            showBack = true,
+            onBack = {},
+        )
+    }
 }

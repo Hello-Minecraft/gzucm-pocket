@@ -431,6 +431,21 @@ fun AgendaListSheet(
             )
             return@AdaptiveSheet
         }
+        /*
+         * 考试按时间排（致辉 2026-11-20）。
+         *
+         * **必须在 LazyColumn 外面算**：LazyListScope 的 lambda 不是 @Composable 上下文，
+         * 里面调 remember 会直接编译失败（第一版就这么写错了）。
+         */
+        val sortedExams = remember(exams) {
+            exams.sortedWith(
+                compareBy(
+                    { it.dateOnly ?: java.time.LocalDate.MAX },
+                    { it.startMinute ?: Int.MAX_VALUE },
+                    { it.course },
+                ),
+            )
+        }
         LazyColumn(
             modifier = modifier
                 .fillMaxWidth()
@@ -542,9 +557,10 @@ fun AgendaListSheet(
             /*
              * 考试安排（只读）。
              *
-             * 不排序处理 date 字段：教务返回的格式没在真实数据上核对过，
-             * 可能是 "2026-11-14"，也可能是 "2026-11-14 14:30"。
-             * 按字符串排在没有前导零时会出错，索性保持接口给的顺序（一般已按时间排）。
+             * 按考试时间排（致辉 2026-11-20）。原来照搬教务顺序，
+             * 遇到「下周考的高数排在前天考的内科前面」那种就会很怪。
+             * 日期走 [ExamItem.dateOnly]（兼容带时间后缀的写法），
+             * 解析不了的沉到底，但不会消失。
              */
             if (exams.isNotEmpty()) {
                 item(key = "exam_header") {
@@ -563,7 +579,7 @@ fun AgendaListSheet(
                         )
                     }
                 }
-                itemsIndexed(exams, key = { i, e -> "exam|$i|${e.course}|${e.date}" }) { _, exam ->
+                itemsIndexed(sortedExams, key = { i, e -> "exam|$i|${e.course}|${e.date}" }) { _, exam ->
                     ExamRow(exam = exam, onClick = { onExamClick(exam) })
                 }
             } else {

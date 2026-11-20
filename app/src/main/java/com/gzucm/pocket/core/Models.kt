@@ -165,9 +165,20 @@ data class ExamItem(
     val type: String,
     val details: List<ExamDetail> = emptyList(),
 ) {
+    /**
+     * 日期（只取年月日）。
+     *
+     * 教务给的 `date` 可能是 `2026-11-14`，也可能带时间后缀（`2026-11-14 14:30`）。
+     * 直接 `LocalDate.parse` 碰到后者会抛异常 —— 之前这类考试会被整条丢掉。
+     * 统一截到空格前再解析；解析不了返回 null（排序时沉底，但至少还在列表里）。
+     */
+    val dateOnly: java.time.LocalDate?
+        get() = runCatching {
+            java.time.LocalDate.parse(date.trim().substringBefore(' '))
+        }.getOrNull()
+
     /** 开考分钟（当天第几分钟）。`kssj` 为空或格式变了就返回 null */
     val startMinute: Int? get() = parseMinute(time, 0)
-
     /** 结束分钟。没有结束时间时给 2 小时，够画出块又不至于太长 */
     val endMinute: Int? get() = parseMinute(time, 1) ?: startMinute?.plus(120)
 
