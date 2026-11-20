@@ -303,8 +303,15 @@ internal fun DayScheduleView(
                 modifier = Modifier
                     .fillMaxSize()
                     .testTag("day-pager"),
-                // 多留两页：相邻周的页面也能立刻渲染，跨周滑动不白屏
-                beyondViewportPageCount = 2,
+                /*
+                 * 前后各留 1 页 = 同时存在 3 页（当前 + 两侧）。
+                 *
+                 * 原来是 2（5 页同时组合 + 布局），2026-11-20 致辉在自己小米 14 上
+                 * 都能明显感到卡顿 —— 每页是一个 LazyColumn 加十几张磨砂卡片，
+                 * 5 页一起测就是 5 份活。降到 1 之后首帧和滑动都轻一截；
+                 * 代价是极快甩动时相邻周可能白一帧，但预渲染仍然在，正常滑动看不到。
+                 */
+                beyondViewportPageCount = 1,
             ) { page ->
                 val w = page / 7 + 1
                 val weekday = page % 7 + 1

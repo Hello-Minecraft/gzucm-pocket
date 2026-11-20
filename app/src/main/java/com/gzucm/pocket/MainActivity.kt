@@ -58,7 +58,31 @@ class MainActivity : ComponentActivity() {
                 ),
             ) {
                 Surface(modifier = Modifier.fillMaxSize()) {
+                    /*
+                     * 上次崩过就先摆一个说明，盖在主界面上面。
+                     *
+                     * 读文件放 LaunchedEffect：`filesDir` 是磁盘 IO，
+                     * 在组合里同步做会拖慢首帧（冷启动本来就是最卡的时候）。
+                     * 读完才赋值，所以正常启动只是多一次「读不到 → null」。
+                     */
+                    val crashState = androidx.compose.runtime.remember {
+                        androidx.compose.runtime.mutableStateOf<com.gzucm.pocket.core.CrashLog.Report?>(null)
+                    }
+                    androidx.compose.runtime.LaunchedEffect(Unit) {
+                        crashState.value = com.gzucm.pocket.core.CrashLog.read(applicationContext)
+                    }
+
                     RootScreen()
+
+                    crashState.value?.let { report ->
+                        com.gzucm.pocket.ui.CrashReportDialog(
+                            report = report,
+                            onDismiss = {
+                                com.gzucm.pocket.core.CrashLog.clear(applicationContext)
+                                crashState.value = null
+                            },
+                        )
+                    }
                 }
             }
         }

@@ -9,6 +9,16 @@ class App : Application() {
 
     override fun onCreate() {
         super.onCreate()
+
+        /*
+         * 崩溃现场记录，**排在所有初始化之前**。
+         *
+         * 装晚了（比如放在 Graph.init 之后），启动阶段崩的那次就抓不到 ——
+         * 而「一打开就闪退」正是最常见的崩法，也正是最需要日志的那种。
+         * handler 内部已经 runCatching 兜过，不会因为它自己失败而影响启动。
+         */
+        com.gzucm.pocket.core.CrashLog.install(this)
+
         Graph.init(this)
 
         /*
