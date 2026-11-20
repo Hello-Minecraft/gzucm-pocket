@@ -30,12 +30,14 @@ class CampusWebActivity : ComponentActivity() {
     companion object {
         private const val EXTRA_URL = "url"
         private const val EXTRA_TITLE = "title"
+        private const val EXTRA_DESKTOP = "desktop"
 
         /** 统一从这里建 Intent，避免外面手拼 extra 键名写错 */
-        fun intent(ctx: Context, url: String, title: String): Intent =
+        fun intent(ctx: Context, url: String, title: String, desktopMode: Boolean = false): Intent =
             Intent(ctx, CampusWebActivity::class.java)
                 .putExtra(EXTRA_URL, url)
                 .putExtra(EXTRA_TITLE, title)
+                .putExtra(EXTRA_DESKTOP, desktopMode)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -50,6 +52,7 @@ class CampusWebActivity : ComponentActivity() {
 
         val url = intent.getStringExtra(EXTRA_URL).orEmpty()
         val title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
+        val desktop = intent.getBooleanExtra(EXTRA_DESKTOP, false)
         if (url.isBlank()) {
             finish()
             return
@@ -67,6 +70,7 @@ class CampusWebActivity : ComponentActivity() {
                         url = url,
                         title = title.ifBlank { "学校服务" },
                         onClose = { finish() },
+                        desktopMode = desktop,
                     )
                 }
             }

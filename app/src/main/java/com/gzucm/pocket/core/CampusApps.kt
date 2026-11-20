@@ -41,6 +41,17 @@ data class CampusApp(
      * 目前只有「实验室平台」是这种情况，原因见下面那条注释。
      */
     val external: Boolean = false,
+    /**
+     * 桌面版页面：按桌面宽度渲染再整体缩放（手机浏览器看 PC 网页那种效果）。
+     *
+     * 学校有几个系统只有 PC 版，左侧固定菜单占掉三分之一屏，正文被挤到视口外：
+     * 教务系统的右侧正文空白、路路通只有顶栏没有内容、库巴扎的登录表单被裁掉。
+     * 开这个开关让 WebView 按 1280 渲染再缩放塞进屏幕 —— 字会变小、要双指放大，
+     * 但至少看得见、点得到。
+     *
+     * 移动版页面**不要开**：它们本来就按手机宽度设计，开了反而被缩小。
+     */
+    val desktopMode: Boolean = false,
     /** 卡片右上角的小角标，如「企微」 */
     val badge: String = "",
     /** [CampusAppKind.BROKEN] 的原因，点卡片时 Toast 出来 */
@@ -115,12 +126,22 @@ val CampusApps: List<CampusApp> = listOf(
             "只能跳企业微信打开",
     ),
     CampusApp("library", "图书馆", "https://library.gzucm.edu.cn/index.htm"),
+    /*
+     * 智慧宿管：**实测在 App 里白屏**（2026-11-21 逐个测出来的）。
+     *
+     * CAS 入口 `acs.gzucm.edu.cn/platform/casLogin.php?system=dormitory` 在浏览器里
+     * 会正常跳统一身份认证，但在 App 的 WebView 里连 DOM 都没渲染出来
+     * （只有顶栏，正文一个元素没有）。同类的 i.gzucm 系页面都正常，
+     * 所以不是 cookie 或 TLS 的问题，偏这套系统自己的前端兼容性。
+     *
+     * 企业微信里有它的入口且能正常用，所以归到「只能企业微信」。
+     */
     CampusApp(
         "dorm",
         "智慧宿管",
-        // CAS 入口。不是企业微信 OAuth —— 那条是 `acs.gzucm.edu.cn/dormitory/m/home`，
-        // 在浏览器里直接报「请在企业微信客户端打开链接」
-        "https://acs.gzucm.edu.cn/platform/casLogin.php?system=dormitory",
+        kind = CampusAppKind.WEWORK,
+        badge = "企微",
+        note = "这个系统在 App 内置浏览器里渲染不出来，只能跳企业微信打开",
     ),
 
     // ── 业务系统 ──
@@ -130,8 +151,22 @@ val CampusApps: List<CampusApp> = listOf(
         "财务平台",
         "https://cwptxmk.gzucm.edu.cn/ValidateLoginToUrl/ExternalLogin.aspx",
     ),
-    CampusApp("jwxt", "教务系统", "https://jw.gzucm.edu.cn/new/ssoLogin"),
-    CampusApp("pass", "路路通", "https://fangyimgr.gzucm.edu.cn/door/index.html"),
+    /*
+     * 教务系统的网页版**不放**：
+     *
+     * App 里的课表、成绩、考试都是直接调它的接口，信息比网页版还全；
+     * 而网页版是正方那套 PC 布局，在 WebView 里只出来左侧菜单、右侧正文永久空白
+     * （2026-11-21 实测，DOM 里除了顶栏一个元素都没有）。
+     * 放一个点开白屏的格子不如不放。
+     */
+    CampusApp(
+        "pass",
+        "路路通",
+        kind = CampusAppKind.WEWORK,
+        badge = "企微",
+        note = "这个系统在 App 内置浏览器里只出来一个空壳（左侧蓝块 + 一个空白 tab），" +
+            "只能跳企业微信打开",
+    ),
 
     // ── 其他 ──
     CampusApp("booking", "预约中心", "https://i.gzucm.edu.cn/yy-sys/"),
@@ -142,7 +177,13 @@ val CampusApps: List<CampusApp> = listOf(
     ),
     CampusApp("equipment", "大仪共享", "https://yqgx.gzucm.edu.cn/"),
     CampusApp("software", "正版软件", "https://ms.gzucm.edu.cn/login"),
-    CampusApp("reagent", "库巴扎试剂", "https://hcgl.gzucm.edu.cn"),
+    CampusApp(
+        "reagent",
+        "库巴扎试剂",
+        kind = CampusAppKind.WEWORK,
+        badge = "企微",
+        note = "这个系统的登录页在 App 内置浏览器里只渲染出上半截，只能跳企业微信打开",
+    ),
     CampusApp("intranet", "访问内网", "https://vpn.sangfor.gzucm.edu.cn:5443"),
 
     /*
@@ -163,9 +204,12 @@ val CampusApps: List<CampusApp> = listOf(
  * 常用区默认显示哪几个（还没打开记录时）。
  *
  * 图书馆第一：查资料最高频；办事大厅第二（证明、申请都从这儿进）；
- * 实验室第三 —— 致辉说师兄们天天用。
+ * 预约中心第三。
+ *
+ * **不塞企微的那几个**（实验室平台、智慧宿管、路路通、库巴扎）：它们点了会跳出 App，
+ * 放进常用只会让「常用」变成「跳转列表」。
  */
-val CampusDefaultCommon = listOf("library", "hall", "lab")
+val CampusDefaultCommon = listOf("library", "hall", "booking")
 
 /**
  * 跳企业微信工作台的 scheme。

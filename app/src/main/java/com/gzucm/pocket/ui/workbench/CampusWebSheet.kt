@@ -61,7 +61,7 @@ import com.gzucm.pocket.ui.icons.AppIcons
  * 分开写迟早会漂移。
  */
 @SuppressLint("SetJavaScriptEnabled")
-fun buildCampusWebView(ctx: Context): WebView = WebView(ctx).apply {
+fun buildCampusWebView(ctx: Context, desktopMode: Boolean = false): WebView = WebView(ctx).apply {
     settings.javaScriptEnabled = true
     settings.domStorageEnabled = true
     // 学校服务不需要读本地文件，关掉少一类攻击面
@@ -74,7 +74,14 @@ fun buildCampusWebView(ctx: Context): WebView = WebView(ctx).apply {
      * 移动版的样式和布局按手机宽度算出来可能全是 0。
      */
     settings.useWideViewPort = true
-    settings.loadWithOverviewMode = false
+    /*
+     * desktopMode = 按桌面宽度渲染再整体缩放。
+     *
+     * 学校有几个系统只有 PC 版（教务、路路通、库巴扎），左侧固定菜单会把正文挤出
+     * 视口，表现是「菜单出来了、右边永远空白」。开了这个至少整页可见，代价是字变小。
+     * 移动版页面必须保持 false，否则会被整体缩小、白占两边。
+     */
+    settings.loadWithOverviewMode = desktopMode
     /*
      * 去掉 UA 里的 "; wv" 标记。
      *
@@ -136,7 +143,12 @@ internal fun shouldBlockNavigation(url: android.net.Uri): Boolean {
  * 顶栏是必需的：网页自己也会吃 BACK，没有明确的关闭入口用户会困在里面。
  */
 @Composable
-fun CampusWebScreen(url: String, title: String, onClose: () -> Unit) {
+fun CampusWebScreen(
+    url: String,
+    title: String,
+    onClose: () -> Unit,
+    desktopMode: Boolean = false,
+) {
     val scheme = MaterialTheme.colorScheme
     var loading by remember { mutableStateOf(true) }
     var canGoBack by remember { mutableStateOf(false) }
@@ -186,7 +198,7 @@ fun CampusWebScreen(url: String, title: String, onClose: () -> Unit) {
         }
         AndroidView(
             factory = { ctx ->
-                buildCampusWebView(ctx).apply {
+                buildCampusWebView(ctx, desktopMode).apply {
                     webViewClient = object : WebViewClient() {
                         override fun onPageStarted(v: WebView?, u: String?, favicon: Bitmap?) {
                             loading = true

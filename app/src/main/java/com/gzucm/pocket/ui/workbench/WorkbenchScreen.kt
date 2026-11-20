@@ -87,7 +87,17 @@ fun WorkbenchScreen(
     val filtering = term.isNotEmpty()
 
     val commons = remember(openCounts, wide) {
-        val byCount = CampusApps.filter { (openCounts[it.id] ?: 0) > 0 }
+        /*
+         * 只从「能在 App 内打开」的应用里选常用。
+         *
+         * 跳企业微信的那几个（实验室、宿管、路路通、库巴扎）点了只是把用户送出去，
+         * App 里一次都没看到内容 —— 算进常用会把真正常用的挤下去。
+         * 这里再过滤一次而不是只靠「不计数」：早期版本已经给它们计过数了，
+         * 不清掉的历史数据还得靠这道闸拦住。
+         */
+        val byCount = CampusApps
+            .filter { it.kind == com.gzucm.pocket.core.CampusAppKind.WEB }
+            .filter { (openCounts[it.id] ?: 0) > 0 }
             .sortedByDescending { openCounts[it.id] ?: 0 }
             .map { it.id }
         (byCount + CampusDefaultCommon).distinct()

@@ -660,11 +660,15 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                                     onOpenGrades = { showGradesFromWorkbench = true },
                                     onOpenApp = { app ->
                                         /*
-                                         * 打不开的（证书过期）不记打开次数 ——
-                                         * 否则「常用」区会天天把它顶到前面，
-                                         * 而用户其实一次都没成功打开过。
+                                         * 只有真正在 App 内打开的（WEB）才计入「常用」。
+                                         *
+                                         * 跳企业微信的那几个（实验室、宿管、路路通…）点一下只是
+                                         * 把用户送出去，一次都没在 App 里看到内容 —— 算进去会把
+                                         * 常用区占满，把图书馆、办事大厅这些真正常用的挤下去
+                                         * （2026-11-21 实测就是这样）。
+                                         * 打不开的（BROKEN）同理不记。
                                          */
-                                        if (app.kind != com.gzucm.pocket.core.CampusAppKind.BROKEN) {
+                                        if (app.kind == com.gzucm.pocket.core.CampusAppKind.WEB) {
                                             prefs.recordCampusOpen(app.id)
                                             campusCounts = prefs.campusOpenCounts
                                         }
@@ -682,7 +686,12 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                                             app.kind == com.gzucm.pocket.core.CampusAppKind.WEB ->
                                                 ctx0.startActivity(
                                                     com.gzucm.pocket.ui.workbench.CampusWebActivity
-                                                        .intent(ctx0, app.url.orEmpty(), app.name),
+                                                        .intent(
+                                                            ctx0,
+                                                            app.url.orEmpty(),
+                                                            app.name,
+                                                            app.desktopMode,
+                                                        ),
                                                 )
                                             // 企业微信专属 / 已知坏的：Toast + 跳转，不在这里开
                                             else -> com.gzucm.pocket.ui.workbench.openOutsideApp(
