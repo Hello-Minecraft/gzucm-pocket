@@ -73,7 +73,7 @@ fun openOutsideApp(ctx: Context, app: CampusApp) {
             val ok = launchWeWorkWorkbench(ctx)
             Toast.makeText(
                 ctx,
-                if (ok) "已打开企业微信，点「${app.name}」就行"
+                if (ok) app.note.ifBlank { "已打开企业微信，点「${app.name}」就行" }
                 else "这个应用只能用企业微信打开，但这台手机没装企业微信",
                 Toast.LENGTH_LONG,
             ).show()

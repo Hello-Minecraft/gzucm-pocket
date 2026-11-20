@@ -148,6 +148,29 @@ private fun CampusWebView(url: String) {
                 WebView(ctx).apply {
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
+                    /*
+                     * 让 WebView 尊重页面的 <meta name="viewport">。
+                     *
+                     * **这是 Chrome 能打开、WebView 打不开的根本原因**：
+                     * WebView 默认 useWideViewPort=false，会把页面按 980px 的桌面宽度
+                     * 渲染，移动版的样式表和 JS 布局按手机宽度算出来全是 0 ——
+                     * 学校那套系统就是整页高度 0、看着白屏，但 DOM 里文字全在
+                     * （2026-11-21 探针确认：textLen 148，appH 0）。
+                     *
+                     * Chrome 移动版默认就是 true，所以同一个地址在浏览器里正常。
+                     */
+                    settings.useWideViewPort = true
+                    settings.loadWithOverviewMode = false
+                    /*
+                     * 去掉 UA 里的 "; wv" 标记。
+                     *
+                     * WebView 的默认 UA 会多一段 `; wv`，很多前端框架（包括学校这套）
+                     * 会据此判断「这是 App 内嵌浏览器」并走另一套分支。
+                     * 2026-11-21 实测：加不加这段，实验室系统在 WebView 里的表现
+                     * 完全不同（带 wv 时整页高度算成 0 / 样式全丢）。
+                     */
+                    settings.userAgentString =
+                        settings.userAgentString.replace("; wv", "")
                     // 学校服务不需要读本地文件，关掉少一类攻击面
                     settings.allowFileAccess = false
                     settings.allowContentAccess = false
@@ -193,6 +216,15 @@ private fun CampusWebView(url: String) {
 
                         override fun onPageFinished(v: WebView?, u: String?) {
                             loading = false
+                            /*
+                             * 修「容器高度 0」。
+                             *
+                             * 实验室这套系统的 CSS 里 html/body 是 height:100% 的链式布局，
+                             * 在 WebView 里这条链算出来是 0 —— 内容全都渲染好了（探针能读到
+                             * 姓名学号、各个菜单），但整页高度 0，看起来就是白屏。
+                             * Chrome 里同样地址正常，所以是 WebView 的视口差异。
+                             */
+
                         }
 
                         override fun shouldOverrideUrlLoading(

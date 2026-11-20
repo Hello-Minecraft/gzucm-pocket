@@ -82,35 +82,37 @@ val CampusApps: List<CampusApp> = listOf(
         /*
          * 全称「实验室智能综合管理系统」/「实验室与大仪系统」。
          *
-         * ## 为什么要走外部浏览器（2026-11-21 实测定稿）
+         * ## 结论：App 内置浏览器打不开，只能企业微信（2026-11-21 实测定稿）
          *
-         * 这套系统在 App 的 WebView 里**起不来**：页面 HTML 加载了（标题「实验平台」在），
-         * 但 `<div id=app>` 是空的、无障碍读不到一个字符、Vue 的 vendor chunk
-         * 一声不响地不挂载。同一个地址在 Chrome 里完全正常（蓝色登录页）。
+         * 这套系统的前端对 WebView 环境不兼容。**CAS 登录本身是成功的**
+         * （探针能读到 `广州中医药大学 / 学生 / 2023014093-朱致辉 /
+         * 实验培训与准入考试 / 大型仪器共享 / 实验室开放管理…` 整页菜单），
+         * 但页面要么高度算成 0（整页白屏），要么样式全丢（白字 + 空背景）。
          *
-         * 试过并排除的：
-         * - `#/home` vs `/base/wz/login/pc` vs `?type=h5` —— 三个入口都白屏。
-         *   致辉那边还看到过「没带 auth」的提示，说明学校的 CAS 集成没能把
-         *   `id_token` 传给这套系统（HTML 里就在找 `getQueryString("id_token")`）
-         * - 关掉算法暗化                —— 无效
-         * - 打开 mixedContentMode 允许混合内容 —— 无效
-         * - 清空 cookie                —— 无效
-         * - WebView 153 / Chrome 156，版本都够新 —— 不是语法问题
+         * 试过并逐一排除的：
+         * - 三个入口：`gz_h5/#/home`、`/base/wz/login/pc`、`?type=h5`
+         * - 关掉算法暗化（Android 13+ 的强制反色）
+         * - 打开 mixedContentMode 允许混合内容
+         * - 清空 WebView cookie
+         * - `useWideViewPort = true`（让 WebView 尊重 viewport meta）
+         * - 去掉 UA 里的 `; wv` 标记
+         * - 注入 CSS 强制 `html/body/#app` 高度（能撑到 776px，但内容挤在顶部一条）
+         * - WebView 153 / Chrome 156，版本都够新
          * - 厂商模板里还留着 `sysglxt.pdsu.edu.cn`（平顶山学院）的注释，
          *   说明这是定制产品的残留，WebView 兼容性大概率没人测过
          *
-         * **入口必须走 CAS**（`/base/wz/login/pc`），不是那个蓝色账密页 ——
-         * 致辉 2026-11-21 明确纠正过：这套系统是统一身份认证进的，
-         * 蓝色登录页（`gz_h5/#/home` 直开）是错的路径。
+         * Chrome 里同一个地址完全正常 —— 所以不是网络、不是登录态、不是证书。
          *
-         * 所以只能用浏览器 + CAS 入口。代价是跳出 App，但**总比白屏强**。
+         * ## 所以按「不能就说明并跳对应 app」处理
          *
-         * 卡角标标「外链」，点之前就知道会跳出去。
+         * 走企业微信工作台。**不跳浏览器**：浏览器里还要再登一次统一身份认证，
+         * 等于把 App 已有的登录态白白扔掉（致辉 2026-11-21 明确否掉的方案）。
          */
         "实验室平台",
-        "https://sysgl.gzucm.edu.cn:8080/base/wz/login/pc",
-        external = true,
-        badge = "外链",
+        kind = CampusAppKind.WEWORK,
+        badge = "企微",
+        note = "这个系统的页面在 App 内置浏览器里渲染不出来（样式和高度都会丢），" +
+            "只能跳企业微信打开",
     ),
     CampusApp("library", "图书馆", "https://library.gzucm.edu.cn/index.htm"),
     CampusApp(
