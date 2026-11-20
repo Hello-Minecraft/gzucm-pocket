@@ -389,8 +389,13 @@ fun AgendaListSheet(
      * 逐条 upsert 会写几十次 prefs、重排几十轮闹钟（见 `replaceAgendas` 的注释）。
      */
     onImportAgendas: (List<Agenda>) -> Unit = {},
-    /** 学籍里的行政班名，班级作业面板拿它预填。null = 还没拉到 */
-    studentClassName: String? = null,
+    /** 学委维护的班级清单 */
+    classPlan: com.gzucm.pocket.core.ClassPlan = com.gzucm.pocket.core.ClassPlan(key = ""),
+    onClassPlanChange: (com.gzucm.pocket.core.ClassPlan) -> Unit = {},
+    /** 学籍里的姓名，班级清单拿它预填密钥 */
+    studentName: String? = null,
+    /** 学籍里的行政班，班级日程里显示「自动识别到你的班级为…」 */
+    studentClass: String? = null,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -430,7 +435,7 @@ fun AgendaListSheet(
         onDismiss = onDismiss,
         paneTitle = when {
             examDetail != null -> "考试详情"
-            showClassShare -> "班级作业"
+            showClassShare -> "班级日程"
             else -> "我的日程"
         },
         paneWidth = 400.dp,
@@ -454,11 +459,14 @@ fun AgendaListSheet(
          * （Dialog 吃掉 BACK 之后 Activity 又收到一次），考试详情也走这条路。
          */
         if (showClassShare) {
-            ClassShareContent(
-                agendas = rules,
-                onAgendasChange = onImportAgendas,
+            ClassPlanContent(
+                plan = classPlan,
+                onPlanChange = onClassPlanChange,
+                myAgendas = rules,
+                onImportToAgenda = onImportAgendas,
                 onClose = { showClassShare = false },
-                defaultClassName = studentClassName,
+                defaultKey = studentName,
+                studentClass = studentClass,
             )
             return@AdaptiveSheet
         }
@@ -509,7 +517,7 @@ fun AgendaListSheet(
                             onClick = { showClassShare = true },
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                         ) {
-                            Text("班级作业", fontSize = 12.5.sp, color = scheme.primary)
+                            Text("班级日程", fontSize = 12.5.sp, color = scheme.primary)
                         }
                     }
                     Text(

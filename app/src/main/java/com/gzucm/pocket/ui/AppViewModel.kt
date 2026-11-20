@@ -45,6 +45,13 @@ data class UiState(
     val semester: Semester? = null,
     /** 学籍卡片（班级/年级/专业）。null = 还没拉到过，或这台设备还没登录过 */
     val studentCard: com.gzucm.pocket.core.StudentCard? = null,
+    /**
+     * 班级日程：学委维护的那份清单。
+     *
+     * 和 `agenda`（自己的日程）分开两块 —— 一个是「我发给别人的」，
+     * 一个是「我自己的事」，责任人和生命周期都不一样（见 ClassPlanStore 的注释）。
+     */
+    val classPlan: com.gzucm.pocket.core.ClassPlan = com.gzucm.pocket.core.ClassPlan(key = ""),
     val sessions: List<CourseSession> = emptyList(),
     val power: PowerInfo? = null,
     val powerDaily: List<PowerDaily> = emptyList(),
@@ -243,6 +250,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         agendaStore.save(list)
         state = state.copy(agenda = list)
         rescheduleAgenda(list)
+    }
+
+    /**
+     * 存班级清单（学委维护的那份）。
+     *
+     * 不走 [replaceAgendas]：那份是「我的日程」，这份是「我发给别人的清单」。
+     * 两套存储分开，删掉自己日程里的一条不会让全班的清单少一条。
+     */
+    fun saveClassPlan(plan: com.gzucm.pocket.core.ClassPlan) {
+        classPlanStore.save(plan)
+        state = state.copy(classPlan = plan)
     }
 
     /** 删除一条日程（每周重复会整条删掉，v1 不支持单天例外） */
@@ -605,6 +623,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 日程独立存储，声明在 init 之前：bootstrap 就要读它 */
     private val agendaStore = AgendaStore(getApplication())
+    /** 班级清单的独立存储：和 agendaStore 分开（一个发给别人、一个是自己的） */
+    private val classPlanStore = com.gzucm.pocket.core.ClassPlanStore(getApplication())
 
     /**
      * 正在跑的那份同步。**必须声明在 init 之前**：init 里 bootstrap() 就会调
@@ -667,6 +687,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
          * 也不依赖登录态 —— 断网时班级作业面板照样要能预填班级名。
          */
         readStudentCardCache()?.let { state = state.copy(studentCard = it) }
+
+        /*
+         * 学籍：启动时顺手补一次。
+         *
+         * 只在「还没拉到」时真请求，所以正常情况下开机就是空跑一跳 ——
+         * 但不能只挂在手动同步上：用户可能一整个学期都不点同步，
+         * 班级日程的密钥就一直是空的。
+         */
+        ensureStudentCard()
+
+        // 班级清单：学委维护的那份。空 key 表示还没建过，面板会引导他填
+        classPlanStore.load().let { if (it.key.isNotBlank() || it.tasks.isNotEmpty()) {
+            state = state.copy(classPlan = it)
+        } }
 
         // 天气和登录态无关：没登录也照样显示，先摆缓存再按节流决定要不要联网
         loadWeather()

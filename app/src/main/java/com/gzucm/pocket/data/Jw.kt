@@ -157,6 +157,7 @@ object Jw {
         val className = parseStudentField(html, "班级") ?: return null
         return StudentCard(
             className = className,
+            name = parseStudentField(html, "姓名").orEmpty(),
             grade = parseStudentField(html, "所在年级").orEmpty(),
             major = parseStudentField(html, "专业").orEmpty(),
             college = parseStudentField(html, "院系名称").orEmpty(),

@@ -1,55 +1,69 @@
 package com.gzucm.pocket.core
 
+import android.content.Context
 import kotlinx.serialization.Serializable
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
 /**
- * 班级作业共享串。
+ * 班级日程：学委（或课代表）维护的一份 DDL 清单。
  *
- * ## 为什么先是「分享串」而不是云端
+ * ## 它和「自己的日程」是两样东西
  *
- * 需求是「学委建一份 DDL，全班能看到」。做云端要先解决三件事：谁来托管、
- * 怎么防别人删光、服务器谁维护。而这个项目此前一条后端都没有（见 [Feedback]
- * 那段「为什么不维护服务器」）。
+ * 第一版做成「把你所有截止任务打包发出去」—— 致辉当场指出这样不对：
+ * 学委要的是**一份能改的清单**，新作业来了加一条、作业延期了改日期、
+ * 取消了删一条。打包自己的日程只能发快照，改一条就得重发一次全班皆错。
  *
- * 所以第一版走**分享串**：学委在 App 里把截止任务打成一行字，发到班级群，
- * 同学粘进来就合并。零服务器、零成本、不涉及任何人的隐私。
- * 代价是学委加了新作业要重发一次 —— 但对一学期几十条 DDL 来说够用，
- * 等确认班里真有人天天看，再接云端（那时代码不用推翻，只是多一个「拉取」）。
+ * 所以清单独立存在（[ClassPlanStore]），和 `AgendaStore` 一个字都不共享：
+ *   · 学委维护的是它，分享发出去的也是它；
+ *   · 同学导入后，它变成同学自己日程里的**截止任务**（今日页、逾期标红、
+ *     勾选完成全都复用，不需要新造展示）。
  *
- * ## 编码跟课表分享串同一套
+ * ## 「密钥」为什么是学委名字
  *
- * `GZP3:` + raw deflate + Base64URL（去掉 `=`）。
- * 理由和课表那边完全一样（见 [encodeTimetableToken] 的注释）：
- * 微信能直接发、输入法不会吃掉字符、`+` `/` 不会在链接识别里出岔子。
- *
- * 前缀必须和 `GZP2` 不同：用户可能把两种串先后粘进同一个输入框，
- * 认错了就是「课表串解析失败」，还查不出为什么。
+ * 同学要拿到这份清单，得知道填什么。填班级全名（「一院23中医(铁涛)5」）太拗口，
+ * 而且换辅导员、分方向之后会变。用**学委的名字**最稳：全班都知道是谁，
+ * 而且这个名字天然是「一个人」的标识 —— 以后接云端时，
+ * 用户只要填一个学委名字，服务端就能查「这个人有没有活跃清单，要不要拉」，
+ * 不需要用户先选年级再选班级。
  */
 const val CLASS_TOKEN_PREFIX = "GZP3:"
 
-/** 一条班级作业。字段短名是为了压低分享串长度，反正只有这个文件读写它 */
+/** 一条班级作业。字段短名是为了压低分享串长度，只有这个文件读写它 */
 @Serializable
 data class ClassTaskDto(
-    /** 学委那边的稳定 id。合并靠它认人，不能用标题当键（同名的 DDL 很常见） */
+    /** 维护者这边的稳定 id。合并靠它认人，不能用标题当键（同名的 DDL 很常见） */
     val id: String,
     val title: String,
+    /**
+     * 科目，**选填**。
+     *
+     * 大多数情况直接写在标题里更省事（「中医内科学期末论文」），
+     * 这个字段留给「标题不想带科目、又想按科目看」的人。
+     */
+    val course: String = "",
     /** 截止时间（epoch millis）。null = 长期待办 */
     val dueAt: Long? = null,
+    /** 详细要求（选填）。作业要求长的时候就写这里 */
     val note: String = "",
     /** 这一条的修改时间。合并时只认更新的那份，避免旧串把新内容盖回去 */
     val updatedAt: Long,
 )
 
-/** 一个班级的一份 DDL 清单 */
+/** 一个学委维护的整份清单 */
 @Serializable
-data class ClassDoc(
-    /** 班级名 / 学委名字。**同时是这串数据属于谁的唯一标识** */
-    val name: String,
-    val tasks: List<ClassTaskDto>,
-    val v: Int = 1,
+data class ClassPlan(
+    /** 密钥 = 学委名字。同学凭它认出这份清单是谁的 */
+    val key: String,
+    val tasks: List<ClassTaskDto> = emptyList(),
+    /**
+     * 整份清单的更新时间。
+     *
+     * 现在只有本地用得上（「上次改于 X」），
+     * 接云端之后它是「要不要提示同学有新版」的判据。
+     */
+    val updatedAt: Long = 0L,
 )
 
 /** 导入结果，直接拿去拼一句人话给用户看 */
@@ -74,10 +88,43 @@ data class ClassImportResult(
     }
 }
 
+// ── 清单存储 ──────────────────────────────────────────────────────────
+
+/**
+ * 班级清单的独立持久化。
+ *
+ * 为什么不放进 `AgendaStore`：清单是「我发给别人的东西」，日程是「我自己的事」。
+ * 混在一起会出现「我把自己加的那条作业删了，结果全班的清单也少一条」——
+ * 这两件事的责任人不同，存储也必须分开。
+ */
+class ClassPlanStore(context: Context) {
+
+    private val sp = context.applicationContext
+        .getSharedPreferences("gzucm_pocket_class_plan", Context.MODE_PRIVATE)
+
+    fun load(): ClassPlan = synchronized(LOCK) {
+        val raw = sp.getString(KEY_PLAN, null) ?: return@synchronized ClassPlan(key = "")
+        runCatching { Net.json.decodeFromString(ClassPlan.serializer(), raw) }
+            .getOrDefault(ClassPlan(key = ""))
+    }
+
+    fun save(plan: ClassPlan) = synchronized(LOCK) {
+        val encoded = Net.json.encodeToString(ClassPlan.serializer(), plan)
+        sp.edit().putString(KEY_PLAN, encoded).apply()
+    }
+
+    fun clear() = synchronized(LOCK) { sp.edit().remove(KEY_PLAN).apply() }
+
+    private companion object {
+        const val KEY_PLAN = "class_plan"
+        val LOCK = Any()
+    }
+}
+
 // ── 编解码 ────────────────────────────────────────────────────────────
 
-fun encodeClassToken(doc: ClassDoc): String {
-    val json = Net.json.encodeToString(ClassDoc.serializer(), doc)
+fun encodeClassToken(plan: ClassPlan): String {
+    val json = Net.json.encodeToString(ClassPlan.serializer(), plan)
     val raw = json.toByteArray(Charsets.UTF_8)
 
     val deflater = java.util.zip.Deflater(java.util.zip.Deflater.BEST_COMPRESSION, true)
@@ -101,20 +148,20 @@ fun encodeClassToken(doc: ClassDoc): String {
  * 失败一律抛 `IllegalArgumentException`，文案直接给用户看 ——
  * 这里最常见的错是「粘了课表串」和「粘了一半」，两种都要说清楚是哪种。
  */
-fun decodeClassToken(token: String): ClassDoc {
+fun decodeClassToken(token: String): ClassPlan {
     val text = token.trim()
-    require(text.isNotEmpty()) { "先复制同学发你的那串字，再来点导入" }
+    require(text.isNotEmpty()) { "先复制学委发你的那串字，再来点导入" }
     require(text.startsWith(CLASS_TOKEN_PREFIX)) {
         if (text.startsWith(EXPORT_TOKEN_PREFIX)) {
-            "这是课表的分享串，不是班级作业的"
+            "这是课表的分享串，不是班级日程的"
         } else {
-            "这不像班级作业的分享串，可能没复制全"
+            "这不像班级日程的分享串，可能没复制全"
         }
     }
 
     val b64 = text.removePrefix(CLASS_TOKEN_PREFIX).trim()
     val packed = runCatching { java.util.Base64.getUrlDecoder().decode(b64) }
-        .getOrElse { throw IllegalArgumentException("分享串被截断了，让对方重新发一次") }
+        .getOrElse { throw IllegalArgumentException("分享串被截断了，让学委重新发一次") }
 
     val json = runCatching {
         val inflater = java.util.zip.Inflater(true)
@@ -128,29 +175,29 @@ fun decodeClassToken(token: String): ClassDoc {
         }
         inflater.end()
         out.toByteArray().toString(Charsets.UTF_8)
-    }.getOrElse { throw IllegalArgumentException("分享串解不开，让对方重新发一次") }
+    }.getOrElse { throw IllegalArgumentException("分享串解不开，让学委重新发一次") }
 
-    val doc = runCatching { Net.json.decodeFromString(ClassDoc.serializer(), json) }
+    val plan = runCatching { Net.json.decodeFromString(ClassPlan.serializer(), json) }
         .getOrElse { throw IllegalArgumentException("分享串格式对不上，可能来自更新的版本") }
 
-    require(doc.tasks.isNotEmpty()) { "这串里没有作业，让对方重新生成一次" }
-    return doc
+    require(plan.tasks.isNotEmpty()) { "这串里没有作业，让学委重新生成一次" }
+    return plan
 }
 
-// ── 导入 / 导出 ───────────────────────────────────────────────────────
+// ── 导入 / 转换 ───────────────────────────────────────────────────────
 
-/** 导入进来的任务 id 前缀。带班级名，避免两个班的同名作业互相覆盖 */
-private fun taskId(className: String, remoteId: String) = "cls:$className:$remoteId"
+/** 导入进来的任务 id 前缀。带密钥，避免两个学委的清单互相覆盖 */
+private fun taskId(key: String, remoteId: String) = "cls:$key:$remoteId"
 
 /** `origin` 的取值：本地建的是空串 */
-fun classOrigin(className: String) = "class:$className"
+fun classOrigin(key: String) = "class:$key"
 
-/** 这条任务是哪个班导进来的；本地建的回空串 */
+/** 这条任务是哪个学委的清单导进来的；本地建的回空串 */
 fun Agenda.originClass(): String =
     if (origin.startsWith("class:")) origin.removePrefix("class:") else ""
 
 /**
- * 把全班 DDL 合并进本地列表。
+ * 把一份班级清单合并进本地日程。
  *
  * 三条规则，缺一条都会出问题：
  *
@@ -162,7 +209,7 @@ fun Agenda.originClass(): String =
  */
 fun mergeClassTasks(
     existing: List<Agenda>,
-    doc: ClassDoc,
+    plan: ClassPlan,
     today: LocalDate = LocalDate.now(),
 ): Pair<List<Agenda>, ClassImportResult> {
     val list = existing.toMutableList()
@@ -173,8 +220,8 @@ fun mergeClassTasks(
     var unchanged = 0
     var keptDone = 0
 
-    doc.tasks.forEach { dto ->
-        val incoming = dto.toAgenda(doc.name, today)
+    plan.tasks.forEach { dto ->
+        val incoming = dto.toAgenda(plan.key, today)
         val at = indexById[incoming.id]
         if (at == null) {
             list += incoming
@@ -196,46 +243,17 @@ fun mergeClassTasks(
 }
 
 /**
- * 把本地截止任务打包成分享串要的内容。
- *
- * 只导**未完成**的任务：已勾掉的作业对同学没有意义，全带上只会让串变长、
- * 让同学那边多出一堆已经做完的东西。
- *
- * 本地建的任务没有 `remoteUpdatedAt`，用 [now] 兜底 —— 它第一次被分享出去时，
- * 就是这条任务在远程世界里的「出生时间」。
- */
-fun buildClassDoc(
-    className: String,
-    all: List<Agenda>,
-    now: Long = System.currentTimeMillis(),
-): ClassDoc {
-    val tasks = all
-        .filter { it.isTask && it.doneAt == null }
-        .map { a ->
-            ClassTaskDto(
-                // 二次分享时 id 已经带 `cls:班级:` 前缀，这里剥掉，不然会层层嵌套
-                id = if (a.id.startsWith("cls:")) a.id.substringAfterLast(':') else a.id,
-                title = a.title,
-                dueAt = a.deadlineAt,
-                note = a.note,
-                updatedAt = if (a.remoteUpdatedAt > 0L) a.remoteUpdatedAt else now,
-            )
-        }
-    return ClassDoc(name = className, tasks = tasks)
-}
-
-/**
- * 一条远程 DDL → 本地截止任务。
+ * 一条班级作业 → 本地截止任务。
  *
  * 没填截止时间的按「长期待办」处理（`deadlineAt = null`）——
  * 和本地建的长期待办语义一致，首页会把它排在最后而不是标逾期。
  */
-private fun ClassTaskDto.toAgenda(className: String, today: LocalDate): Agenda {
+private fun ClassTaskDto.toAgenda(key: String, today: LocalDate): Agenda {
     val day = dueAt?.let {
         Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate()
     } ?: today
     return Agenda(
-        id = taskId(className, id),
+        id = taskId(key, id),
         title = title,
         date = day.toString(),
         // 截止任务不占时段，这两个值只用来通过校验
@@ -244,7 +262,23 @@ private fun ClassTaskDto.toAgenda(className: String, today: LocalDate): Agenda {
         note = note,
         isTask = true,
         deadlineAt = dueAt,
-        origin = classOrigin(className),
+        origin = classOrigin(key),
         remoteUpdatedAt = updatedAt,
     )
 }
+
+/**
+ * 一条本地日程 → 班级清单里的条目。
+ *
+ * 「从我的日程导入」用：把已经建好的截止任务搬进清单，不用重新敲一遍。
+ * id 原样保留（本地 id 是 UUID，不会和别的条目撞）。
+ */
+fun Agenda.toClassTask(now: Long = System.currentTimeMillis()): ClassTaskDto = ClassTaskDto(
+    id = id,
+    title = title,
+    // 本地日程没有单独存科目，标题里已经带了；这里留空
+    course = "",
+    dueAt = deadlineAt,
+    note = note,
+    updatedAt = now,
+)

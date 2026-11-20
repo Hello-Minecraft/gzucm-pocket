@@ -16,6 +16,8 @@ import kotlinx.serialization.Serializable
 data class StudentCard(
     /** 行政班，如「一院23中医(铁涛)5」。这是唯一可靠的班级标识 */
     val className: String,
+    /** 姓名。班级日程拿它预填密钥（学委一般就填自己的名字） */
+    val name: String = "",
     /** 所在年级，如「2023」 */
     val grade: String = "",
     /** 专业，如「中医学(铁涛班)」 */

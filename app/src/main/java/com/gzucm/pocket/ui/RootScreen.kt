@@ -746,8 +746,12 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
         onExamClick = { e -> selectedExam = e },
         // 班级作业导入：一次写一次存储、重排一次闹钟（见 replaceAgendas 的注释）
         onImportAgendas = { list -> vm.replaceAgendas(list) },
-        // 学籍里的行政班名，预填到班级作业面板（拿不到就留空让用户自己填）
-        studentClassName = state.studentCard?.className,
+        // 班级清单（学委维护的），和上面的「导入到我自己的日程」是两件事
+        classPlan = state.classPlan,
+        onClassPlanChange = { vm.saveClassPlan(it) },
+        // 学籍里的姓名，预填班级清单的密钥（学委一般就用自己的名字）
+        studentName = state.studentCard?.name,
+        studentClass = state.studentCard?.className,
         onAdd = { date, minute ->
             editingAgenda = null
             draftAgendaDate = date
