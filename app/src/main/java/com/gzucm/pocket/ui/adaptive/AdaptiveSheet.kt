@@ -105,6 +105,17 @@ fun AdaptiveSheet(
      */
     expandOnOpen: Boolean = false,
     /**
+     * 让面板**始终撑到最高**，不跟着内容高矮走。
+     *
+     * 为什么需要：`skipPartiallyExpanded = true` 时，M3 的 Expanded 锚点是
+     * **内容测量出来的高度**，不是屏幕高度。内容一变矮，面板就整个往下缩一截 ——
+     * 日程切成「截止任务」少了半天时间那几行，标题直接从屏幕顶端掉到中间
+     * （致辉 2026-11-20 报的「窗口会从全屏缩小到下方小一级」）。
+     *
+     * 撑满之后锚点就是屏幕顶，切什么形态都不动。
+     */
+    fillHeight: Boolean = false,
+    /**
      * 正文是否由 AdaptiveSheet 负责滚动。
      *
      * 设成 false 用于「正文自己就会滚动」的面板（设置页、关于页）——
@@ -201,7 +212,12 @@ fun AdaptiveSheet(
                     topStart = 24.dp, topEnd = 24.dp,
                 ),
             ) {
-                Column(Modifier.fillMaxWidth(), content = content)
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .then(if (fillHeight) Modifier.fillMaxHeight() else Modifier),
+                    content = content,
+                )
             }
         }
     }

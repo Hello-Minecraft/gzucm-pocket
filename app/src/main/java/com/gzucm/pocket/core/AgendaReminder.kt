@@ -57,23 +57,33 @@ object AgendaReminder {
      *
      * 顺序就是表单里胶囊的顺序，加档位改这里一处即可。
      * 多选时 -1 只在「一个都没选」时显示为选中。
+     *
+     * 2026-11-20 从 8 档扩到 14 档（致辉定）：原来 30 分到 1 小时、1 小时到 1 天
+     * 之间是空的，1 天之后干脆没了 —— 截止任务想提前两三天提醒做不到。
+     * 现在按「分钟 → 小时 → 天 → 周」一路递增，中间不留断档。
      */
-    val LEADS = intArrayOf(-1, 0, 5, 10, 15, 30, 60, 24 * 60)
+    val LEADS = intArrayOf(-1, 0, 5, 10, 15, 30, 60, 120, 180, 720, 1440, 2880, 4320, 10080)
+
+    private const val DAY_MINUTES = 24 * 60
+    private const val WEEK_MINUTES = 7 * DAY_MINUTES
 
     /** 单个档位的文案（表单胶囊、编辑页标题都用它） */
     fun label(minutes: Int): String = when {
         minutes < 0 -> "不提醒"
         minutes == 0 -> "准时"
-        minutes == 60 -> "提前 1 小时"
-        minutes == 24 * 60 -> "提前 1 天"
+        // 一周单独说，不然按通用规则会写成「提前 7 天」
+        minutes == WEEK_MINUTES -> "提前 1 周"
+        minutes % DAY_MINUTES == 0 -> "提前 ${minutes / DAY_MINUTES} 天"
+        minutes % 60 == 0 -> "提前 ${minutes / 60} 小时"
         else -> "提前 $minutes 分钟"
     }
 
     /** 通知里显示的短文案（不带「提前」前缀） */
     private fun shortLabel(minutes: Int): String = when {
         minutes == 0 -> "准时"
-        minutes == 60 -> "1 小时"
-        minutes == 24 * 60 -> "1 天"
+        minutes == WEEK_MINUTES -> "1 周"
+        minutes % DAY_MINUTES == 0 -> "${minutes / DAY_MINUTES} 天"
+        minutes % 60 == 0 -> "${minutes / 60} 小时"
         else -> "$minutes 分钟"
     }
 
