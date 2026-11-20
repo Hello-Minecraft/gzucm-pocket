@@ -908,6 +908,37 @@ val order get() = allOrder.filter { it !in hiddenSet }
 
 ---
 
+## 二十七、`ModalBottomSheet` 的 Expanded 锚点是**内容高度**，不是屏幕高度（2026-11-20）
+
+日程和截止任务是同一个面板的两种形态。一切换，面板就从全屏缩到下方一小块，
+看着像「掉到半屏档了」。把 `skipPartiallyExpanded` 从 false 改成 true —— **没用**。
+
+原因在 M3 的锚点计算：
+
+```kotlin
+Expanded at if (skipPartiallyExpanded) fullHeight - sheetHeight else fullHeight / 2
+```
+
+`sheetHeight` 是**内容测量出来的高度**。内容矮了（截止任务比日程少几行：
+没有结束时间、没有跨天那一堆），Expanded 锚点就跟着抬高，面板贴着内容往下缩 ——
+这压根不是半屏档，是「高度自适应」。
+
+**解法**：让面板内容撑满，锚点自然固定在屏幕顶。
+
+```kotlin
+Column(
+    Modifier.fillMaxWidth().then(if (fillHeight) Modifier.fillMaxHeight() else Modifier),
+) { content() }
+```
+
+`AdaptiveSheet(fillHeight = true)`，默认 false —— 内容本来就该自适应的面板别开。
+
+同一个坑还有另一个面：**`expand()` 救不了**。它照着当时的锚点走，
+锚点本身变了，展开到哪都缩；试过加 `LaunchedEffect(key) { sheetState.expand() }`，
+日志里 expand 确实调了，界面纹丝不动。
+
+---
+
 ## 十、其它
 
 - **电费会话在 WebView 里**，OkHttp 拿不到 → 只能 App 内弹窗同步（`EcardSyncSheet`）。
