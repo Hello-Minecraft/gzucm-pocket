@@ -78,8 +78,8 @@ internal fun ClassPlanContent(
     myAgendas: List<Agenda>,
     onImportToAgenda: (List<Agenda>) -> Unit,
     onClose: () -> Unit,
-    /** 学籍里的姓名，用来预填密钥（学委一般就是自己的名字） */
-    defaultKey: String? = null,
+    /** 学籍里的姓名 = 维护人，**自动填、不可改**（不是密钥） */
+    maintainer: String? = null,
     /** 学籍里的行政班，只用于显示「你是哪个班的」，不参与密钥 */
     studentClass: String? = null,
 ) {
@@ -90,17 +90,27 @@ internal fun ClassPlanContent(
     var mode by remember { mutableStateOf<Mode>(Mode.LIST) }
     var hint by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
 
-    /** 密钥：空串说明还没填，那就没有「这份清单」可言 */
+    /*
+     * 密钥**不预填**（2026-11-21 致辉定的）：
+     * 它填的是「全班共识的那个名字」（通常是学委），而登录这台手机的人
+     * 可能只是帮忙维护的班长。自动填成自己的名字会让同学认错清单。
+     * 维护人是另一个字段，那个才自动填。
+     */
     var key by rememberSaveable { mutableStateOf(plan.key) }
-    LaunchedEffect(defaultKey) {
-        if (key.isBlank() && !defaultKey.isNullOrBlank()) {
-            key = defaultKey
-            onPlanChange(plan.copy(key = defaultKey))
-        }
-    }
 
     fun persist(next: ClassPlan) {
-        onPlanChange(next.copy(updatedAt = System.currentTimeMillis()))
+        /*
+         * 每次保存都把学籍里的班级带上 —— 这是云端版的主索引。
+         * 本地（分享串）只用于显示「这是 X 班的清单」，
+         * 但传出去的信息越全，以后接云端越省事。
+         */
+        onPlanChange(
+            next.copy(
+                className = studentClass?.takeIf { it.isNotBlank() } ?: next.className,
+                maintainer = maintainer?.takeIf { it.isNotBlank() } ?: next.maintainer,
+                updatedAt = System.currentTimeMillis(),
+            ),
+        )
     }
 
     fun readClip(): String =
@@ -117,7 +127,9 @@ internal fun ClassPlanContent(
             .onSuccess { incoming ->
                 val (next, result) = mergeClassTasks(myAgendas, incoming)
                 onImportToAgenda(next)
-                hint = "${incoming.key}的清单：${result.summary()}" to true
+                val cls = incoming.className.takeIf { it.isNotBlank() }
+                val who = incoming.key.ifBlank { "同学" }
+                hint = "$who 的清单${if (cls != null) "（$cls）" else ""}：${result.summary()}" to true
             }
             .onFailure { hint = (it.message ?: "这串读不出来") to false }
     }
@@ -125,14 +137,20 @@ internal fun ClassPlanContent(
     fun share() {
         val name = key.trim()
         if (name.isEmpty()) {
-            hint = "先填密钥 —— 同学凭它认出这份清单是谁维护的" to false
+            hint = "先填密钥 —— 填全班都知道的那个名字，通常是学委" to false
             return
         }
         if (plan.tasks.isEmpty()) {
             hint = "清单还是空的，先加几条作业再分享" to false
             return
         }
-        val token = encodeClassToken(plan.copy(key = name))
+        val token = encodeClassToken(
+            plan.copy(
+                key = name,
+                className = studentClass?.takeIf { it.isNotBlank() } ?: plan.className,
+                maintainer = maintainer?.takeIf { it.isNotBlank() } ?: plan.maintainer,
+            ),
+        )
         clipboard.setPrimaryClip(ClipData.newPlainText("班级日程分享串", token))
         hint = "已复制 ${plan.tasks.size} 条作业的分享串（${token.length} 字），发到班级群里就行" to true
     }
@@ -163,7 +181,13 @@ internal fun ClassPlanContent(
                 color = scheme.onSurfaceVariant,
             )
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(14.dp))
+
+            // 自动识别的两项：班级（云端主索引）和维护人（谁在上传）
+            InfoLine("本班", studentClass, scheme)
+            InfoLine("维护人", maintainer, scheme)
+
+            Spacer(Modifier.height(14.dp))
 
             OutlinedTextField(
                 value = key,
@@ -177,28 +201,10 @@ internal fun ClassPlanContent(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
             )
-            // 学籍能拿到就告诉他自己是哪个班的：确认密钥没填错班
-            if (!studentClass.isNullOrBlank()) {
-                Spacer(Modifier.height(7.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        AppIcons.Check,
-                        contentDescription = null,
-                        modifier = Modifier.size(13.dp),
-                        tint = scheme.primary,
-                    )
-                    Spacer(Modifier.width(5.dp))
-                    Text(
-                        "自动识别到你的班级为 $studentClass",
-                        fontSize = 11.5.sp,
-                        color = scheme.primary,
-                    )
-                }
-            }
             Spacer(Modifier.height(6.dp))
             Text(
-                "同学要拉这份清单，得填同一个名字。填你自己就行 —— 以后接云端，" +
-                    "别人输入你的名字就能查到这份清单。",
+                "填全班都知道的那个名字，通常是学委 —— 同学凭它认领这份清单。" +
+                    "谁在维护都可以，维护人是上面自动填的那个。",
                 fontSize = 11.5.sp,
                 lineHeight = 16.sp,
                 color = scheme.onSurfaceVariant.copy(alpha = 0.8f),
@@ -333,6 +339,32 @@ private sealed interface Mode {
     data object LIST : Mode
     data class Edit(val task: ClassTaskDto?, val copyFrom: ClassTaskDto?) : Mode
     object PICK : Mode
+}
+
+/** 一行「标签 + 值」的只读信息，值拿不到就整行不显示 */
+@Composable
+private fun InfoLine(
+    label: String,
+    value: String?,
+    scheme: androidx.compose.material3.ColorScheme,
+) {
+    if (value.isNullOrBlank()) return
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            AppIcons.Check,
+            contentDescription = null,
+            modifier = Modifier.size(13.dp),
+            tint = scheme.primary,
+        )
+        Spacer(Modifier.width(5.dp))
+        Text("$label：", fontSize = 11.5.sp, color = scheme.onSurfaceVariant)
+        Text(value, fontSize = 11.5.sp, color = scheme.primary)
+    }
 }
 
 @Composable

@@ -392,7 +392,7 @@ fun AgendaListSheet(
     /** 学委维护的班级清单 */
     classPlan: com.gzucm.pocket.core.ClassPlan = com.gzucm.pocket.core.ClassPlan(key = ""),
     onClassPlanChange: (com.gzucm.pocket.core.ClassPlan) -> Unit = {},
-    /** 学籍里的姓名，班级清单拿它预填密钥 */
+    /** 学籍里的姓名 = 班级清单的维护人（自动，不是密钥） */
     studentName: String? = null,
     /** 学籍里的行政班，班级日程里显示「自动识别到你的班级为…」 */
     studentClass: String? = null,
@@ -465,7 +465,7 @@ fun AgendaListSheet(
                 myAgendas = rules,
                 onImportToAgenda = onImportAgendas,
                 onClose = { showClassShare = false },
-                defaultKey = studentName,
+                maintainer = studentName,
                 studentClass = studentClass,
             )
             return@AdaptiveSheet
