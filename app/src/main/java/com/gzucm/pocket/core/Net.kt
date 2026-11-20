@@ -65,6 +65,37 @@ class SessionStore(context: Context) {
         set(v) = sp.edit().putString(KEY_STUDENT_CARD, v).apply()
 
     /**
+     * 学校服务的打开次数（appId → 次数）。
+     *
+     * 工作台的「常用」按它排序：真实使用频率比我们拍脑袋定的顺序准。
+     * 存一整段 JSON 而不是每个应用一个键 —— 目录会增减，
+     * 拆成键之后加减一条要写迁移，没必要。
+     */
+    var campusOpenCounts: Map<String, Int>
+        get() {
+            val raw = sp.getString(KEY_CAMPUS_COUNTS, null) ?: return emptyMap()
+            return runCatching {
+                Json.decodeFromString(
+                    MapSerializer(String.serializer(), Int.serializer()),
+                    raw,
+                )
+            }.getOrDefault(emptyMap())
+        }
+        set(v) = sp.edit().putString(
+            KEY_CAMPUS_COUNTS,
+            Json.encodeToString(MapSerializer(String.serializer(), Int.serializer()), v),
+        ).apply()
+
+    /** 记一次打开。工作台点卡片时调，返回累计次数方便调用方直接用 */
+    fun recordCampusOpen(id: String): Int {
+        val cur = campusOpenCounts.toMutableMap()
+        val next = (cur[id] ?: 0) + 1
+        cur[id] = next
+        campusOpenCounts = cur
+        return next
+    }
+
+    /**
      * 当前学段（本科 / 研究生）。
      *
      * 决定用哪套接口：课表、成绩、学期码格式全都不一样。
@@ -499,6 +530,7 @@ class SessionStore(context: Context) {
         const val KEY_COOKIES = "cookies"
         const val KEY_SEMESTER = "semester"
         const val KEY_STUDENT_CARD = "student_card"
+        const val KEY_CAMPUS_COUNTS = "campus_open_counts"
         const val KEY_SYNC_AT = "sync_at"
         const val KEY_CACHE_SEM = "cache_semester"
         const val KEY_CACHE_SESSIONS = "cache_sessions"

@@ -452,6 +452,13 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
     // 工作台：从成绩卡片进去的那一层，以及正在用内嵌网页打开的学校服务
     var showGradesFromWorkbench by remember { mutableStateOf(false) }
     var openCampusApp by remember { mutableStateOf<com.gzucm.pocket.core.CampusApp?>(null) }
+    /*
+     * 学校服务的打开次数。
+     *
+     * 存一份 state 而不是每次现读 prefs：SharedPreferences 不是可观察对象，
+     * 点完一张卡片回来，「常用」区不会自己重排 —— 用户会以为计数没生效。
+     */
+    var campusCounts by remember { mutableStateOf(prefs.campusOpenCounts) }
     fun applyTodaySections(s: com.gzucm.pocket.core.TodaySections) {
         val old = todaySections
         todaySections = s
@@ -652,7 +659,12 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                                     studentName = state.studentCard?.name,
                                     gradeCount = state.grades.size,
                                     onOpenGrades = { showGradesFromWorkbench = true },
-                                    onOpenApp = { app -> openCampusApp = app },
+                                    onOpenApp = { app ->
+                                        prefs.recordCampusOpen(app.id)
+                                        campusCounts = prefs.campusOpenCounts
+                                        openCampusApp = app
+                                    },
+                                    openCounts = campusCounts,
                                 )
                             }
                         }
