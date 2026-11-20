@@ -3,8 +3,9 @@ package com.gzucm.pocket.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,6 +33,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.gzucm.pocket.core.CrashLog
+import com.gzucm.pocket.core.Feedback
 import com.gzucm.pocket.ui.components.micaPanel
 
 /**
@@ -75,6 +77,42 @@ fun CrashReportDialog(
             "崩溃日志已复制，粘到「设置 → 问题反馈」的问卷里，或者直接发我",
             Toast.LENGTH_LONG,
         ).show()
+        onDismiss()
+    }
+
+    /**
+     * 去填问卷。
+     *
+     * **先复制再跳**：跳出去之后很可能回不来（用户会顺手在浏览器里干别的事），
+     * 日志留在剪贴板里，他回来或换到微信里都能直接粘。
+     *
+     * 用 `createChooser` 而不是裸 `ACTION_VIEW`：2026-11-20 实测裸跳会被
+     * 默认浏览器劫持成「周大福 · 摇一摇跳转」的开屏广告。套一层选择器，
+     * 至少是用户自己挑的浏览器，不至于莫名其妙被带到广告页。
+     */
+    fun openSurvey() {
+        copyLog()
+        if (!Feedback.hasSurvey) {
+            Toast.makeText(ctx, "崩溃日志已复制，直接发我就行", Toast.LENGTH_LONG).show()
+            onDismiss()
+            return
+        }
+        val chooser = Intent.createChooser(
+            Intent(Intent.ACTION_VIEW, Uri.parse(Feedback.SurveyUrl)),
+            "选择浏览器打开问卷",
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val ok = runCatching { ctx.startActivity(chooser) }.isSuccess
+        if (ok) {
+            /*
+             * 跳出去之前先把「日志已经在剪贴板里」说出来。
+             *
+             * Toast 是系统级窗口，切到浏览器之后仍然浮在上面，用户能看到 ——
+             * 不然他填问卷时会以为还得回 App 手动复制一次。
+             */
+            Toast.makeText(ctx, "崩溃日志已复制，贴到问卷里就行", Toast.LENGTH_LONG).show()
+        } else {
+            Toast.makeText(ctx, "打不开网页，日志已复制，粘到聊天里发我也行", Toast.LENGTH_LONG).show()
+        }
         onDismiss()
     }
 
@@ -141,14 +179,17 @@ fun CrashReportDialog(
             Row(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.End,
             ) {
                 TextButton(onClick = onDismiss) {
-                    Text("知道了", fontSize = 13.sp, color = scheme.onSurfaceVariant)
+                    Text("知道了", fontSize = 12.5.sp, color = scheme.onSurfaceVariant)
                 }
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = ::openSurvey) {
+                    Text("去填问卷", fontSize = 13.sp, color = scheme.primary)
+                }
+                Spacer(Modifier.width(4.dp))
                 Button(onClick = ::copyAndDismiss) {
-                    Text("复制崩溃日志", fontSize = 13.sp)
+                    Text("复制崩溃日志", fontSize = 12.5.sp)
                 }
             }
         }
