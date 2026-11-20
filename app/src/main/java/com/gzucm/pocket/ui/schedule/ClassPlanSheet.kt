@@ -89,6 +89,8 @@ internal fun ClassPlanContent(
 
     var mode by remember { mutableStateOf<Mode>(Mode.LIST) }
     var hint by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    /** 待确认的导入：解析出来了但还没灌进日程 */
+    var pendingImport by remember { mutableStateOf<ClassPlan?>(null) }
 
     /*
      * 密钥**不预填**（2026-11-21 致辉定的）：
@@ -123,14 +125,9 @@ internal fun ClassPlanContent(
             hint = "剪贴板是空的。先在群里长按复制学委发的分享串" to false
             return
         }
+        // 先解析、先预览，**不直接灌进日程**：一窝蜂导入会让人分不清多出来什么
         runCatching { decodeClassToken(text) }
-            .onSuccess { incoming ->
-                val (next, result) = mergeClassTasks(myAgendas, incoming)
-                onImportToAgenda(next)
-                val cls = incoming.className.takeIf { it.isNotBlank() }
-                val who = incoming.key.ifBlank { "同学" }
-                hint = "$who 的清单${if (cls != null) "（$cls）" else ""}：${result.summary()}" to true
-            }
+            .onSuccess { pendingImport = it }
             .onFailure { hint = (it.message ?: "这串读不出来") to false }
     }
 
@@ -211,6 +208,77 @@ internal fun ClassPlanContent(
             )
 
             Spacer(Modifier.height(18.dp))
+
+            /*
+             * 导入预览：先看清「谁发的、几条、会不会覆盖」，再决定。
+             *
+             * 人数一多，一窝蜂导入最危险 —— 用户第二天发现日程里多出八条
+             * 不知道谁加的作业，还得一条条辨认。这一步多花两秒，省一路返工。
+             */
+            pendingImport?.let { incoming ->
+                val preview = remember(incoming, myAgendas) {
+                    mergeClassTasks(myAgendas, incoming)
+                }
+                val cls = incoming.className.takeIf { it.isNotBlank() }
+                val who = incoming.key.ifBlank { "同学" }
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(G3CornerShape(12.dp))
+                        .background(scheme.primary.copy(alpha = 0.08f))
+                        .border(1.dp, scheme.primary.copy(alpha = 0.45f), G3CornerShape(12.dp))
+                        .padding(13.dp),
+                ) {
+                    Text(
+                        "$who 的清单",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = scheme.onSurface,
+                    )
+                    if (cls != null) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(cls, fontSize = 11.5.sp, color = scheme.onSurfaceVariant)
+                    }
+                    Spacer(Modifier.height(7.dp))
+                    Text(
+                        preview.second.summary(),
+                        fontSize = 11.5.sp,
+                        lineHeight = 16.sp,
+                        color = scheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        Text(
+                            "取消",
+                            fontSize = 12.5.sp,
+                            color = scheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { pendingImport = null }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Button(
+                            onClick = {
+                                onImportToAgenda(preview.first)
+                                pendingImport = null
+                                hint = "$who 的清单：${preview.second.summary()}" to true
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Text(
+                                if (preview.second.hasChanges) {
+                                    "导入 ${preview.second.added + preview.second.updated} 条"
+                                } else {
+                                    "确认"
+                                },
+                                fontSize = 12.5.sp,
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+            }
 
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -840,9 +908,18 @@ private fun dayLabel(ms: Long): String {
     return "${d.monthValue}月${d.dayOfMonth}日 $dow"
 }
 
-/** 「11-25」这种短标签；没截止就「长期」 */
+/**
+ * 「11-25」这种短标签；没截止就「长期」。
+ *
+ * 跨年的带上年份：12 月建一条 1 月 5 号交的作业，只写「01-05」
+ * 会让人以为是去年那件事。
+ */
 private fun dueLabel(ms: Long?): String =
     if (ms == null) "长期" else {
         val d = epochToDay(ms)
-        "%02d-%02d".format(d.monthValue, d.dayOfMonth)
+        if (d.year == LocalDate.now().year) {
+            "%02d-%02d".format(d.monthValue, d.dayOfMonth)
+        } else {
+            "${d.year}-%02d-%02d".format(d.monthValue, d.dayOfMonth)
+        }
     }

@@ -69,6 +69,8 @@ internal fun agendaColor(o: AgendaOccurrence): Color = when {
 /** 角标文案：考试 / 截止任务 / 待办 / 日程。角标颜色沿用卡片主色 */
 internal fun agendaBadgeText(o: AgendaOccurrence): String = when {
     o.colorIndex == EXAM_COLOR_INDEX -> "考试"
+    // 班级来的作业单独一档：导入了两份清单时，一眼看出哪条该找谁问
+    o.origin.startsWith("class:") -> "班级"
     o.isTask && o.deadlineAt != null -> "截止任务"
     o.isTask -> "待办"
     else -> "日程"
@@ -425,7 +427,14 @@ internal fun AgendaDayCard(
                 if (occurrence.isTask) {
                     // 任务：显示截止倒计时，逾期标红置顶（逾期状态由列表排序保证）
                     Text(
-                        taskDueLabel(occurrence.deadlineAt, System.currentTimeMillis()),
+                        buildString {
+                            append(taskDueLabel(occurrence.deadlineAt, System.currentTimeMillis()))
+                            // 班级来的：补一句「来自 张三」，两份清单混在一起时能分清
+                            if (occurrence.origin.startsWith("class:")) {
+                                append(" · 来自 ")
+                                append(occurrence.origin.removePrefix("class:"))
+                            }
+                        },
                         fontSize = 11.sp,
                         color = if (overdue) scheme.error else scheme.onSurfaceVariant,
                         maxLines = 1,

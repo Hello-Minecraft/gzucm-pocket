@@ -156,6 +156,13 @@ data class AgendaOccurrence(
     val isTask: Boolean = false,
     val deadlineAt: Long? = null,
     val doneAt: Long? = null,
+    /**
+     * 转发自规则 [Agenda.origin]：空 = 自己建，`class:张三` = 从班级清单导入。
+     *
+     * 卡片靠它显示「班级」角标和「来自 张三」—— 同学导入了两份清单时，
+     * 只有这个能看出哪条作业该找谁问。
+     */
+    val origin: String = "",
 )
 
 object AgendaLogic {
@@ -291,6 +298,7 @@ object AgendaLogic {
         isTask = r.isTask,
         deadlineAt = r.deadlineAt,
         doneAt = r.doneAt,
+        origin = r.origin,
     )
 } // end of AgendaLogic
 
@@ -320,6 +328,7 @@ fun taskAsOccurrence(rule: Agenda, today: LocalDate, semester: Semester?): Agend
         isTask = true,
         deadlineAt = rule.deadlineAt,
         doneAt = rule.doneAt,
+        origin = rule.origin,
     )
 
 /**

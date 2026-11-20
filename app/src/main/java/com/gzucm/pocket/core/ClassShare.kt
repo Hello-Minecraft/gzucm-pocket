@@ -100,7 +100,17 @@ data class ClassImportResult(
     val unchanged: Int,
     /** 本地已勾完成、这次远程改动没有把完成状态抹掉的条数 */
     val keptDone: Int,
+    /**
+     * 本地还留着、但学委这份清单里已经没有的条数（多半是学委删了）。
+     *
+     * **只报告，不自动删**：用户可能已经在那条上写了笔记、
+     * 或者学委删错了还会加回来。真要清理让他自己在日程里删。
+     */
+    val orphaned: Int = 0,
 ) {
+    /** 这次有没有真的产生变化（决定「确认导入」按钮是不是灰的） */
+    val hasChanges: Boolean get() = added > 0 || updated > 0
+
     fun summary(): String = buildString {
         if (added > 0) append("新增 $added 条")
         if (updated > 0) {
@@ -112,6 +122,9 @@ data class ClassImportResult(
             append("$keptDone 条已完成的保持不变")
         }
         if (isEmpty()) append("没有新内容，都是已有的")
+        if (orphaned > 0) {
+            append("。另外有 $orphaned 条学委那边已经删掉了，还留在你这里")
+        }
     }
 }
 
@@ -266,7 +279,17 @@ fun mergeClassTasks(
             unchanged++
         }
     }
-    return list to ClassImportResult(added, updated, unchanged, keptDone)
+
+    /*
+     * 本地还留着、这份清单里已经没有的 —— 学委删过东西。
+     * 只统计**同一个 key** 导进来的条目，别把另一个学委的清单算成「被删了」。
+     */
+    val incomingIds = plan.tasks.mapTo(HashSet()) { taskId(plan.key, it.id) }
+    val orphaned = existing.count {
+        it.origin == classOrigin(plan.key) && it.id !in incomingIds
+    }
+
+    return list to ClassImportResult(added, updated, unchanged, keptDone, orphaned)
 }
 
 /**
@@ -299,13 +322,32 @@ private fun ClassTaskDto.toAgenda(key: String, today: LocalDate): Agenda {
  *
  * 「从我的日程导入」用：把已经建好的截止任务搬进清单，不用重新敲一遍。
  * id 原样保留（本地 id 是 UUID，不会和别的条目撞）。
+ *
+ * **普通日程也有截止时间**：它没有 `deadlineAt`，但「那天什么时候结束」是天然的 DDL。
+ * 不补这一手，把「周三下午的见习」导进清单再导出来，同学那边会变成「无截止时间」的
+ * 长期待办 —— 排在列表最后，等于丢了这个信息。
  */
 fun Agenda.toClassTask(now: Long = System.currentTimeMillis()): ClassTaskDto = ClassTaskDto(
     id = id,
     title = title,
     // 本地日程没有单独存科目，标题里已经带了；这里留空
     course = "",
-    dueAt = deadlineAt,
+    dueAt = deadlineAt ?: eventEndMillis(),
     note = note,
     updatedAt = now,
 )
+
+/**
+ * 普通日程结束的时刻。
+ *
+ * `endMinute` 为 0（用户没填时间）时按当天 23:59 算 ——
+ * 补一个 0 点会变成「当天凌晨截止」，比不填还误导。
+ */
+private fun Agenda.eventEndMillis(): Long? {
+    val day = runCatching { LocalDate.parse(date) }.getOrNull() ?: return null
+    val minute = if (endMinute > 0) endMinute else 23 * 60 + 59
+    return day.atStartOfDay(ZoneId.systemDefault())
+        .plusMinutes(minute.toLong())
+        .toInstant()
+        .toEpochMilli()
+}

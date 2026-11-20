@@ -189,4 +189,74 @@ class ClassShareTest {
         assertTrue(e is IllegalArgumentException)
         assertTrue(e!!.message!!.contains("没有作业"))
     }
+
+    /**
+     * 学委删掉一条，同学这边**不能被自动删**（他可能已经写了笔记），
+     * 但必须告诉他有这么回事 —— 不然他会一直以为还有这份作业。
+     */
+    @Test
+    fun `学委删掉的条目只报告不自动删`() {
+        val first = plan(task("a", "保留的"), task("b", "被删的"))
+        val (afterFirst, _) = mergeClassTasks(emptyList(), first, today)
+        assertEquals(2, afterFirst.size)
+
+        val second = plan(task("a", "保留的"))
+        val (afterSecond, result) = mergeClassTasks(afterFirst, second, today)
+
+        assertEquals("不能自动删用户的数据", 2, afterSecond.size)
+        assertEquals(1, result.orphaned)
+        assertTrue(result.summary().contains("已经删掉"))
+    }
+
+    /** 另一个学委的清单里没有这条，不该被算成「被删了」 */
+    @Test
+    fun `别的学委的清单不影响本班的删除统计`() {
+        val zhang = ClassPlan(key = "张三", tasks = listOf(task("a", "A")))
+        val (afterZhang, _) = mergeClassTasks(emptyList(), zhang, today)
+
+        val li = ClassPlan(key = "李四", tasks = listOf(task("x", "X")))
+        val (afterLi, result) = mergeClassTasks(afterZhang, li, today)
+
+        assertEquals("张三那条不是被李四删的", 0, result.orphaned)
+        assertEquals(2, afterLi.size)
+    }
+
+    /**
+     * 普通日程没有 `deadlineAt`，但「那天什么时候结束」就是天然的截止。
+     * 不补这一手，把见习导进清单再导出来，同学那边会变成「长期待办」。
+     */
+    @Test
+    fun `普通日程导入清单时用结束时刻当截止`() {
+        val event = Agenda(
+            id = "ev-1",
+            title = "针灸见习",
+            date = "2026-11-25",
+            startMinute = 14 * 60,
+            endMinute = 16 * 60,
+        )
+        val dto = event.toClassTask(now = 1L)
+        val expected = java.time.LocalDate.of(2026, 11, 25)
+            .atTime(16, 0)
+            .atZone(java.time.ZoneId.systemDefault())
+            .toInstant().toEpochMilli()
+        assertEquals(expected, dto.dueAt)
+    }
+
+    /** 没填时间的日程按当天 23:59 收口，不能补成凌晨 0 点 */
+    @Test
+    fun `没填时间的日程按当天最后一分钟收口`() {
+        val event = Agenda(
+            id = "ev-2",
+            title = "交材料",
+            date = "2026-11-25",
+            startMinute = 0,
+            endMinute = 0,
+        )
+        val dto = event.toClassTask(now = 1L)
+        val expected = java.time.LocalDate.of(2026, 11, 25)
+            .atTime(23, 59)
+            .atZone(java.time.ZoneId.systemDefault())
+            .toInstant().toEpochMilli()
+        assertEquals(expected, dto.dueAt)
+    }
 }
