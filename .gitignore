@@ -39,3 +39,6 @@ __pycache__/
 
 # ── 小程序版（已独立，不进本仓库）──────────────────────────
 miniprogram/
+
+# WorkBuddy 项目数据（不是代码）
+.workbuddy/

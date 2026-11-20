@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 今日页拖动排序长按抓手时的那一下「嗒」。普通权限，装好就有，不弹窗 -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:name=".App"

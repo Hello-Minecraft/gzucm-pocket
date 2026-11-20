@@ -828,6 +828,86 @@ CAS 会话进去，多数情况点一下就回来了。这跟「退出登录」�
 
 ---
 
+## 二十五、`forEachIndexed` 里的 `pointerInput`：一次只能拖一格（2026-11-20）
+
+拖动排序第一版做完，致辉一上手就报了三个症状：
+
+1. **一次只能拖一格**，手指还没松，拖动就断了；
+2. 断了之后**往下一拖，整个面板被关掉**；
+3. 交换是瞬间跳的，没有动画（这条是没写动画，另一回事）。
+
+前两个是**同一个根因**：
+
+```kotlin
+localOrder.forEachIndexed { index, block ->   // ← 没有 key
+    Row(... Modifier.pointerInput(block) { ... })
+}
+```
+
+每换一次位就 `onChange(order = 新顺序)`，列表重组。但 `forEachIndexed` 里
+**没有 key**，Compose 只能按「第几个位置」认人：顺序一变，第 0 个 slot 里的
+内容从 A 换成 B，`pointerInput(block)` 的 key 跟着从 A 变成 B →
+`SuspendPointerInputElement.equals` 为 false → `resetPointerInputHandler()` →
+手势协程被取消。此时手指还按在屏幕上，**没有新的 down 事件**，
+`awaitFirstDown` 就一直等 —— 表现就是「拖到一格就僵住」。
+
+而手势一断，pointer 事件就回到了外面的 `ModalBottomSheet`，
+它的下拉关闭手势接着管 —— 所以**往下一拖面板就没了**。
+（`change.consume()` 只能让位给还没启动的父级手势，救不了已经死掉的子协程。）
+
+**两条规矩**：
+
+- 顺序会变的列表，每一行都要 `key(block)`；
+- **拖动期间不要重排数据**。只记录「从第几项出发、走了多远」，位置全用
+  `offset` 表达，松手才落地一次。顺序不变 → slot 不变 → 手势不断。
+
+另外，`pointerInput` 的 lambda 捕获了什么也有关系：捕获的东西变了会被当成
+新 handler。把拖动状态全塞进一个 `remember { DragState() }`，
+lambda 只认这一个实例，重组多少次都相等。
+
+动画用 `Animatable` 而不是 `animateFloatAsState`：松手那一刻要
+`snapTo(0f)` 而不是 `animateTo(0f)` —— 重排后自然位置已经变了，
+瞬间抹掉 shift 是**原地不动**，补动画反而多滑一段。
+
+---
+
+## 二十六、减掉再加回来，得回到原来的位置（2026-11-20）
+
+第一版的「今日页显示」是「order 里只放显示中的块」：
+
+- 减掉 = 从列表里删掉；
+- 加回来 = `order + block`，接在末尾。
+
+致辉一句话点破：**「减掉项目再加回去没有回到原来的位置」**。
+
+删掉的那一刻位置就没了，事后只能猜（按默认顺序插？按邻居插？）。
+猜法在用户自己拖过顺序之后一定出错 —— 试过「记住减掉时的下标」，
+连续减两块就互相打架（都记 1，加回来抢同一个位置）。
+
+**正解是别删**：
+
+```kotlin
+data class TodaySections(
+    val allOrder: List<TodayBlock>,   // 全量顺序，被减掉的也在里面
+    val hiddenSet: Set<TodayBlock>,   // 只记谁不显示
+)
+val order get() = allOrder.filter { it !in hiddenSet }
+```
+
+- 减掉 / 加回只动 `hiddenSet`，顺序一个字不改 → 位置天然保住；
+- 拖动改的是 `allOrder`，**但只能改看得见的那些槽位**（`withOrder`）——
+  界面上看不见隐藏块，直接覆盖会把它从中间抹掉，下次加回来又落到末尾；
+- 老配置（只存了显示中的块）由 `normalized()` 补进 `allOrder` 并标 hidden，
+  升级上来看不出差别。
+
+**顺带一个血案**：`withOrder` 里「数量对不上就以新列表为准重建」的兜底，
+在实机上真的丢过一次块 —— 本地副本比上层慢一拍，拿 4 项覆盖 5 项，
+多的那块既不在显示组也不在隐藏组，界面上凭空消失（重启才被 `normalized` 补回）。
+所以兜底的铁律是：**宁可顺序退让，也一个块都不能丢**；
+拖动落地也别用本地副本重排，直接调模型的 `move(from, to)`，两边永远一致。
+
+---
+
 ## 十、其它
 
 - **电费会话在 WebView 里**，OkHttp 拿不到 → 只能 App 内弹窗同步（`EcardSyncSheet`）。

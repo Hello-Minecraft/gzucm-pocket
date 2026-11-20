@@ -33,43 +33,70 @@ enum class TodayBlock(val key: String, val label: String, val removable: Boolean
 /**
  * 今日页显示配置。
  *
- * ## 为什么是「一个有序列表」而不是四个布尔
+ * ## 为什么是「全量顺序 + 隐藏集合」
  *
- * 2026-11-20 加了排序之后，四个 `Boolean` 就表达不了顺序了。
- * 与其「四个开关 + 一个单独的 order 列表」两处状态互相打架
- * （关掉某块时 order 里还留着它，得处处判空），不如只留一份真相：
+ * 2026-11-20 晚，第一版是「[order] 里只放显示中的块」：减掉 = 从列表里删掉，
+ * 加回来 = 接到末尾。致辉一句话点破：**「减掉项目再加回去没有回到原来的位置」**。
  *
- * **在 [order] 里 = 显示，顺序就是页面上的顺序；不在 = 被减掉了。**
- * 便捷属性 [weather] / [power] 等是由它推出来的只读视图，
- * 老代码读它们不受影响。
+ * 删掉的那一刻位置信息就没了，事后只能靠猜（按默认顺序插？按邻居插？），
+ * 怎么猜都会在用户自己拖过顺序之后出错。所以改成：
  *
- * 被减掉的块按 [hidden] 取（枚举声明顺序），界面上排在列表最下面、字变灰。
+ *   · [allOrder] —— **五块的全量顺序，被减掉的也在里面**。拖动改的是它。
+ *   · [hiddenSet] —— 谁不显示。减掉只往这里加一个 key，[allOrder] 一个字不动。
+ *
+ * 于是「减掉 → 加回来」只是一次 `hiddenSet` 的增删，位置天然还在原地。
+ * 连续减掉好几块再逐个加回来也不会乱序 —— 因为顺序从来没被删过。
+ *
+ * [order] 是两者的组合视图（显示中的、按顺序），UI 和渲染读的都是它，
+ * 和第一版的语义完全一样。
  */
 data class TodaySections(
-    /** 显示中的块，顺序 = 今日页顺序。空列表合法（今日页只剩课程） */
-    val order: List<TodayBlock> = DefaultOrder,
+    /** 五块的全量顺序，含被减掉的。空列表不合法，[normalized] 会补齐 */
+    val allOrder: List<TodayBlock> = DefaultOrder,
+    /** 被减掉的块。减掉不动 [allOrder]，所以加回来能回到原位 */
+    val hiddenSet: Set<TodayBlock> = emptySet(),
     /** 「接下来」往后看几天（1~14） */
     val upcomingDays: Int = DefaultDays,
 ) {
+    /**
+     * 显示中的块，按页面顺序。
+     *
+     * 每次读都重新过滤一遍（最多五项）。故意不做缓存：data class 的
+     * 缓存字段会让 `copy` 和相等性判断变得难写，而这五个元素的开销可以忽略。
+     */
+    val order: List<TodayBlock> get() = allOrder.filter { it !in hiddenSet }
+
     // ── 只读视图：老代码继续用 sections.power 这种写法 ──────────────
     val weather: Boolean get() = TodayBlock.WEATHER in order
     val power: Boolean get() = TodayBlock.POWER in order
     val upcoming: Boolean get() = TodayBlock.UPCOMING in order
     val weekOverview: Boolean get() = TodayBlock.WEEK_OVERVIEW in order
 
-    /** 被减掉的块，按枚举顺序（用户不控制这一组，它永远排最后）。课程不会出现在这里 */
+    /**
+     * 被减掉的块，按枚举声明顺序。
+     *
+     * 这一组用户不控制顺序（它永远排在列表最下面、字变灰），
+     * 用枚举顺序而不是「减掉的先后」—— 后者会让同一组东西每次打开都换个排法。
+     */
     val hidden: List<TodayBlock>
-        get() = TodayBlock.entries.filter { it.removable && it !in order }
+        get() = TodayBlock.entries.filter { it in hiddenSet && it.removable }
 
     fun isOn(block: TodayBlock): Boolean = block in order
 
-    /** 减掉一块：从 order 里移除，其余顺序不变。课程不可减，直接原样返回 */
+    /**
+     * 减掉一块：只记进 [hiddenSet]，[allOrder] 不动 —— 位置就是这么保住的。
+     * 课程不可减，直接原样返回。
+     */
     fun hide(block: TodayBlock): TodaySections =
-        if (block.removable && block in order) copy(order = order - block) else this
+        if (block.removable && block in order) copy(hiddenSet = hiddenSet + block) else this
 
-    /** 加回来：接到**已显示那组的末尾**（用户随时能看到它回到哪） */
-    fun show(block: TodayBlock): TodaySections =
-        if (block in order) this else copy(order = order + block)
+    /** 加回来：从 [hiddenSet] 里去掉，它自然回到 [allOrder] 里原来的位置 */
+    fun show(block: TodayBlock): TodaySections {
+        if (block in order) return this
+        // 极端情况：allOrder 里根本没有它（存储被手改坏）—— 先补齐再显示
+        val base = if (block in allOrder) this else normalized()
+        return base.copy(hiddenSet = base.hiddenSet - block)
+    }
 
     /** 点一下 −/+ 的统一入口 */
     fun toggle(block: TodayBlock): TodaySections =
@@ -77,40 +104,75 @@ data class TodaySections(
         else if (block in order) hide(block) else show(block)
 
     /**
-     * 补齐「不可减」的块。
+     * 用一份新的「显示顺序」替换显示中的那部分，被减掉的块保持它们在 [allOrder] 里的位置。
      *
-     * 读存储、尤其是从老配置迁移过来时，`order` 里可能没有课程卡
-     * （老版本根本没这个字段）。这里按**默认顺序里的相对位置**把它插回去：
-     * 找到第一个在默认顺序中排在它后面的块，插在它前面。
+     * 拖动排序落地时调这个。为什么不是直接 `copy(allOrder = 新列表)`：
+     * 拖动的列表里看不见隐藏的块，直接覆盖会把它们丢掉 —— 那「减掉再加回原位」
+     * 就又不成立了。
      *
-     * 这样「只开了天气和接下来」的老配置迁移出来是 `[天气, 课程, 接下来]`，
-     * 和他升级前看到的页面一致；而不是把课程甩到最后。
+     * 做法是把 [allOrder] 里属于「显示中」的那些槽位，按顺序填上新值。
+     * 例：allOrder = [A,B,C,D]，B 被减掉 → 槽位 0/2/3；
+     * 新顺序 [C,A,D] 依次填进 0/2/3 → [C,B,A,D]，B 仍在第 1 位。
      */
-    fun normalized(): TodaySections {
-        val missing = TodayBlock.entries.filter { !it.removable && it !in order }
-        if (missing.isEmpty()) return this
-        val list = order.toMutableList()
-        missing.forEach { block ->
-            val anchor = list.indexOfFirst {
-                DefaultOrder.indexOf(it).let { i -> i >= 0 && i > DefaultOrder.indexOf(block) }
-            }
-            list.add(if (anchor < 0) list.size else anchor, block)
+    fun withOrder(newVisible: List<TodayBlock>): TodaySections {
+        val slots = allOrder.indices.filter { allOrder[it] !in hiddenSet }
+        if (newVisible.size != slots.size) {
+            /*
+             * 数量对不上说明调用方给的列表和当前显示的不一致（正常路径不会走到）。
+             *
+             * 2026-11-20 第一版在这里写成「以 newVisible 为准重建」—— 结果实机
+             * 丢过一次块：某块既不在显示组也不在隐藏组，界面上凭空消失。
+             * 所以这里的铁律是 **宁可顺序退让，也一个块都不能丢**：
+             * 把 allOrder 里没出现在 newVisible 中的全部接到末尾。
+             */
+            val rest = allOrder.filter { it !in newVisible }
+            return copy(allOrder = (newVisible.distinct() + rest).distinct())
         }
-        return copy(order = list)
+        val list = allOrder.toMutableList()
+        slots.forEachIndexed { i, slot -> list[slot] = newVisible[i] }
+        return copy(allOrder = list)
     }
 
     /**
-     * 拖动排序。[from] / [to] 都指 [order] 的下标。
+     * 拖动排序。[from] / [to] 都指 [order]（也就是界面上看得见的列表）的下标。
      *
      * 越界直接忽略而不是抛异常：拖拽手势里的下标来自实时布局，
      * 一次快速甩动可能算出界，这里悄悄吞掉比闪退好。
      */
     fun move(from: Int, to: Int): TodaySections {
+        val visible = order
         if (from == to) return this
-        if (from !in order.indices || to !in order.indices) return this
-        val list = order.toMutableList()
+        if (from !in visible.indices || to !in visible.indices) return this
+        val list = visible.toMutableList()
         list.add(to, list.removeAt(from))
-        return copy(order = list)
+        return withOrder(list)
+    }
+
+    /**
+     * 补齐 [allOrder] 里缺的块。
+     *
+     * 只在「读到老配置」时真的缺东西：1.4.x 存的是「显示中的块」，没提到的
+     * 就是用户关掉的。这里按**默认顺序里的相对位置**把它们插回去，
+     * 并记进 [hiddenSet] —— 于是老用户升级上来看到的还是原来那一页，
+     * 而且随时点 + 就能回到它当年待的地方。
+     *
+     * 课程卡（[TodayBlock.removable] = false）不会被记进 hiddenSet：
+     * 它只是老版本没这个字段，不是用户关掉的。
+     */
+    fun normalized(): TodaySections {
+        val missing = TodayBlock.entries.filter { it !in allOrder }
+        if (missing.isEmpty()) return this
+        val list = allOrder.toMutableList()
+        val extraHidden = hiddenSet.toMutableSet()
+        missing.forEach { block ->
+            val rank = DefaultOrder.indexOf(block)
+            val anchor = if (rank < 0) -1 else list.indexOfFirst {
+                DefaultOrder.indexOf(it).let { i -> i >= 0 && i > rank }
+            }
+            list.add(if (anchor < 0) list.size else anchor, block)
+            if (block.removable) extraHidden += block
+        }
+        return copy(allOrder = list, hiddenSet = extraHidden)
     }
 
     companion object {
@@ -119,7 +181,7 @@ data class TodaySections(
         const val DefaultDays = 7
 
         /**
-         * 默认顺序 = 2026-11 之前写死的那个顺序（天气、电费、接下来、本周概览）。
+         * 默认顺序 = 2026-11 之前写死的那个顺序（天气、电费、课程、接下来、本周概览）。
          *
          * 老用户升级上来看到的是原样的页面，不会因为「新增排序功能」而变样。
          */

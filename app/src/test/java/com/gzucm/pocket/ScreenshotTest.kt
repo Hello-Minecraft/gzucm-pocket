@@ -1660,12 +1660,13 @@ class ScreenshotTest {
             semester, 8, sessions, power, daily, 0L, {}, {}, {}, {}, false, 0, 0, false, null,
             agendaOccurrences = demoUpcoming(),
             sections = com.gzucm.pocket.core.TodaySections(
-                order = listOf(
+                // 只给这三块 → normalized 把电费和本周概览补成全量顺序里的隐藏项
+                allOrder = listOf(
                     com.gzucm.pocket.core.TodayBlock.WEATHER,
                     com.gzucm.pocket.core.TodayBlock.COURSE,
                     com.gzucm.pocket.core.TodayBlock.UPCOMING,
                 ),
-            ),
+            ).normalized(),
             weather = demoWeather(),
         )
     }
@@ -1685,12 +1686,12 @@ class ScreenshotTest {
     fun todaySectionsHidden() = shot("30_today_sections_hidden", dark = false) {
         com.gzucm.pocket.ui.settings.TodaySectionsContent(
             sections = com.gzucm.pocket.core.TodaySections(
-                order = listOf(
+                allOrder = listOf(
                     com.gzucm.pocket.core.TodayBlock.POWER,
                     com.gzucm.pocket.core.TodayBlock.COURSE,
                     com.gzucm.pocket.core.TodayBlock.UPCOMING,
                 ),
-            ),
+            ).normalized(),
             onChange = {},
             showBack = true,
             onBack = {},
@@ -1702,8 +1703,8 @@ class ScreenshotTest {
     fun todaySectionsAllHidden() = shot("31_today_sections_empty", dark = false) {
         com.gzucm.pocket.ui.settings.TodaySectionsContent(
             sections = com.gzucm.pocket.core.TodaySections(
-                order = listOf(com.gzucm.pocket.core.TodayBlock.COURSE),
-            ),
+                allOrder = listOf(com.gzucm.pocket.core.TodayBlock.COURSE),
+            ).normalized(),
             onChange = {},
             showBack = true,
             onBack = {},

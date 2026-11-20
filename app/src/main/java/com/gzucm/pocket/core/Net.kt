@@ -408,44 +408,52 @@ class SessionStore(context: Context) {
     /**
      * 今日页显示哪些块、按什么顺序。
      *
-     * ## 2026-11-20 改了存法
+     * ## 存法是「全量顺序 + 隐藏集合」（2026-11-20 晚定）
      *
-     * 原来存四个 `Boolean`（`today_power` / `today_weather` / …）。加了拖动排序之后
-     * 布尔表达不了顺序，改成**一串有序的 key**（`today_order` = `"weather,power,week"`）：
-     * 在里面 = 显示且顺序如此，不在 = 被减掉了。
+     * 第一版只存**显示中的**那一串 key，减掉 = 从串里删掉。结果致辉一试就发现
+     * 「减掉项目再加回去没有回到原来的位置」—— 位置在删的那一刻就丢了。
      *
-     * 四个老键**只读不写**，专门用来迁移老用户的配置：
-     * 有 `today_order` 就以它为准；没有就按四个老布尔拼一个，再空的话用默认顺序。
-     * 这样从 1.4.x 升上来的用户看到的还是原来那个页面。
+     * 现在分两个键：
+     *   · `today_order`  —— 五块的全量顺序，**被减掉的也在里面**
+     *   · `today_hidden` —— 被减掉的那些（逗号分隔）
+     *
+     * 减掉只是往 hidden 里加一个 key，顺序一个字不动；加回来删掉那个 key，
+     * 它就回到原位。连续减几块再逐个加回来也不会乱。
+     *
+     * 四个更老的布尔键（`today_power` / …）**只读不写**，专门用来迁移：
+     * 没有 `today_order` 就按它们拼一个「可见列表」，交给
+     * [TodaySections.normalized] 把缺的块补进 allOrder 并标成 hidden。
      */
     var todaySections: TodaySections
         get() = TodaySections(
-            order = readTodayOrder(),
+            allOrder = readTodayAllOrder(),
+            hiddenSet = readTodayHidden(),
             upcomingDays = sp.getInt(KEY_TODAY_DAYS, TodaySections.DefaultDays)
                 .coerceIn(TodaySections.MinDays, TodaySections.MaxDays),
         ).normalized()
         set(v) = sp.edit()
-            .putString(KEY_TODAY_ORDER, v.order.joinToString(",") { it.key })
+            .putString(KEY_TODAY_ORDER, v.allOrder.joinToString(",") { it.key })
+            .putString(KEY_TODAY_HIDDEN, v.hiddenSet.joinToString(",") { it.key })
             .putInt(KEY_TODAY_DAYS, v.upcomingDays.coerceIn(TodaySections.MinDays, TodaySections.MaxDays))
             .apply()
 
     /**
-     * 读出显示顺序。
+     * 读出全量顺序。
      *
      * 三件事必须做：去掉认不出的 key（版本降级、手改）、去掉重复（存坏了不至于同一块出现两次）、
-     * **把没提到的块丢掉而不是补上**（没提到 = 被减掉了，补上等于用户关掉的块自己回来了）。
+     * **缺的块留给 [TodaySections.normalized] 去补**（它知道该补到哪、也知道该标成隐藏）。
      *
-     * 只有「从来没有 `today_order`」这一种情况才走老布尔迁移。
+     * 老版本存的这一串只有「显示中的块」，正好就是缺的那部分要标隐藏 —— 两边语义对得上。
      */
-    private fun readTodayOrder(): List<TodayBlock> {
+    private fun readTodayAllOrder(): List<TodayBlock> {
         val raw = sp.getString(KEY_TODAY_ORDER, null)
         if (raw != null) {
-            val seen = HashSet<TodayBlock>(4)
+            val seen = HashSet<TodayBlock>(8)
             return raw.split(',')
                 .mapNotNull { TodayBlock.fromKey(it.trim()) }
                 .filter { seen.add(it) }
         }
-        // ── 老配置迁移：四个布尔 → 有序列表 ──
+        // ── 老配置迁移：四个布尔 → 可见列表 ──
         val legacy = listOf(
             TodayBlock.WEATHER to KEY_TODAY_WEATHER,
             TodayBlock.POWER to KEY_TODAY_POWER,
@@ -457,6 +465,17 @@ class SessionStore(context: Context) {
             if (sp.contains(KEY_TODAY_POWER) || sp.contains(KEY_TODAY_WEATHER)) emptyList()
             else TodaySections.DefaultOrder
         }
+    }
+
+    /**
+     * 读出被减掉的块。
+     *
+     * 没有这个键（1.4.2 之前存的，或者根本没配过）= 一个都没减，
+     * 由 [TodaySections.normalized] 根据 allOrder 里缺谁反推。
+     */
+    private fun readTodayHidden(): Set<TodayBlock> {
+        val raw = sp.getString(KEY_TODAY_HIDDEN, null) ?: return emptySet()
+        return raw.split(',').mapNotNull { TodayBlock.fromKey(it.trim()) }.toSet()
     }
 
     /** 天气缓存（[Weather.Info] 的 JSON）。空串/未设置表示还没拉到过 */
@@ -518,6 +537,7 @@ class SessionStore(context: Context) {
         const val KEY_TODAY_WEEK = "today_week_overview"
         const val KEY_TODAY_DAYS = "today_upcoming_days"
         const val KEY_TODAY_ORDER = "today_order"
+        const val KEY_TODAY_HIDDEN = "today_hidden"
         const val KEY_WEATHER_CACHE = "weather_cache"
     }
 }
