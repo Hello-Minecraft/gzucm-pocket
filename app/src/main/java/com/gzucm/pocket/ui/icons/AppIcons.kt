@@ -64,6 +64,22 @@ object AppIcons {
         )
     }
 
+    /** Rounded.Apps：工作台 Tab 的九宫格 */
+    val Apps: ImageVector by lazy {
+        icon(
+            "Apps",
+            "M4 8 h4 V4 H4 v4 Z m6 12 h4 v-4 h-4 v4 Z m-6 0 h4 v-4 H4 v4 Z m0 -6 h4 v-4 H4 v4 Z m6 0 h4 V4 h-4 v4 Z m6 12 h4 v-4 h-4 v4 Z m-6 -6 h4 v-4 h-4 v4 Z m6 -6 v4 h4 V4 h-4 Z m0 6 h4 v-4 h-4 v4 Z"
+        )
+    }
+
+    /** Rounded.Search：工作台搜索框用 */
+    val Search: ImageVector by lazy {
+        icon(
+            "Search",
+            "M15.5 14 h-0.79 l-0.28 -0.27 C15.41 12.59 16 11.11 16 9.5 C16 5.91 13.09 3 9.5 3 S3 5.91 3 9.5 S5.91 16 9.5 16 c1.61 0 3.09 -0.59 4.23 -1.57 l0.27 0.28 v0.79 l5 4.99 L20.49 19 l-4.99 -5 Z m-6 0 C7.01 14 5 11.99 5 9.5 S7.01 5 9.5 5 S14 7.01 14 9.5 S11.99 14 9.5 14 Z"
+        )
+    }
+
     /** Rounded.WbSunny */
     val WbSunny: ImageVector by lazy {
         icon(

@@ -76,7 +76,7 @@ class FloatingBarAutoHideTest {
 
     @Test
     fun `成绩页不会渐隐`() {
-        render(Tab.Grades)
+        render(Tab.Workbench)
         settle(4200L)
         assertEquals("成绩页底栏不该渐隐", 1f, barAlpha(), 0.02f)
     }

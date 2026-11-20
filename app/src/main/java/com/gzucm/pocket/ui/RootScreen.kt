@@ -94,7 +94,14 @@ import kotlinx.coroutines.delay
 internal enum class Tab(val label: String, val icon: ImageVector) {
     Today("今日", AppIcons.WbSunny),
     Schedule("课表", AppIcons.CalendarMonth),
-    Grades("成绩", AppIcons.Insights),
+    /*
+     * 工作台取代了原来的「成绩」Tab（2026-11-21 致辉定）。
+     *
+     * 成绩没消失，只是从「一级 Tab」变成工作台里的第一张卡片：
+     * 它是低频操作（一学期看几次），却占着一个每天都划过的位置。
+     * 腾出来的位置放工作台 —— 查图书馆、办事大厅、财务这些才是高频。
+     */
+    Workbench("工作台", AppIcons.Apps),
     Power("电费", AppIcons.Bolt),
 }
 
@@ -442,6 +449,9 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
     var todaySections by remember { mutableStateOf(prefs.todaySections) }
     // 首页长按卡片弹出的那个（独立面板，不在设置里面）
     var showTodaySections by remember { mutableStateOf(false) }
+    // 工作台：从成绩卡片进去的那一层，以及正在用内嵌网页打开的学校服务
+    var showGradesFromWorkbench by remember { mutableStateOf(false) }
+    var openCampusApp by remember { mutableStateOf<com.gzucm.pocket.core.CampusApp?>(null) }
     fun applyTodaySections(s: com.gzucm.pocket.core.TodaySections) {
         val old = todaySections
         todaySections = s
@@ -617,24 +627,34 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                             },
                         )
 
-                        Tab.Grades -> {
-                            LaunchedEffect(Unit) { vm.loadGrades() }
-                            GradesScreen(
-                                grades = state.grades,
-                                levels = state.levels,
-                                fitness = state.fitness,
-                                loading = state.gradesLoading,
-                                progressDone = state.gradesDone,
-                                progressTotal = state.gradesTotal,
-                                stage = state.gradesStage,
-                                updatedAt = prefs.gradesCheckedAt,
-                                onRefresh = { vm.loadGrades(force = true) },
-                                needLogin = vm.loginExpired,
-                                onOpenLogin = {
-                                    showSettings = true
-                                    focusRelogin = true
-                                },
-                            )
+                        Tab.Workbench -> {
+                            if (showGradesFromWorkbench) {
+                                LaunchedEffect(Unit) { vm.loadGrades() }
+                                GradesScreen(
+                                    grades = state.grades,
+                                    levels = state.levels,
+                                    fitness = state.fitness,
+                                    loading = state.gradesLoading,
+                                    progressDone = state.gradesDone,
+                                    progressTotal = state.gradesTotal,
+                                    stage = state.gradesStage,
+                                    updatedAt = prefs.gradesCheckedAt,
+                                    onRefresh = { vm.loadGrades(force = true) },
+                                    needLogin = vm.loginExpired,
+                                    onOpenLogin = {
+                                        showSettings = true
+                                        focusRelogin = true
+                                    },
+                                    onBack = { showGradesFromWorkbench = false },
+                                )
+                            } else {
+                                com.gzucm.pocket.ui.workbench.WorkbenchScreen(
+                                    studentName = state.studentCard?.name,
+                                    gradeCount = state.grades.size,
+                                    onOpenGrades = { showGradesFromWorkbench = true },
+                                    onOpenApp = { app -> openCampusApp = app },
+                                )
+                            }
                         }
 
                         Tab.Power -> {
@@ -732,6 +752,17 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
      * 保存/删除只走 ViewModel，state.sessions 一个字都不动 ——
      * 提醒排程、同步、缓存失效都看不到日程。
      */
+    /*
+     * 学校服务的内嵌网页。
+     *
+     * 挂在这一层而不是工作台内部：它是全屏覆盖，切 Tab 时也该跟着关掉 ——
+     * 挂在工作台里的话，用户切到课表再切回来，网页会自己「复活」。
+     */
+    com.gzucm.pocket.ui.workbench.CampusWebSheet(
+        app = openCampusApp,
+        onDismiss = { openCampusApp = null },
+    )
+
     com.gzucm.pocket.ui.schedule.AgendaListSheet(
         visible = showAgendaList,
         semester = state.semester,

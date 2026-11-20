@@ -76,6 +76,14 @@ fun GradesScreen(
     needLogin: Boolean = false,
     onOpenLogin: () -> Unit = {},
     /**
+     * 非空时在顶部显示「← 工作台」。
+     *
+     * 成绩原来是底部 Tab 之一，点一下直达、没有返回这回事；
+     * 2026-11-21 收进工作台的一张卡片之后，它是从一个二级入口进去的，
+     * 必须给一条明确的退路 —— 否则用户只能靠系统返回手势猜。
+     */
+    onBack: (() -> Unit)? = null,
+    /**
      * 初始标签页索引：0=课程成绩 1=考级 2=体测。
      *
      * 用 Int 而不是 Tab：Tab 是 private enum，公开函数的参数不能用它
@@ -91,6 +99,30 @@ fun GradesScreen(
             .fillMaxSize()
             .statusBarsPadding(),
     ) {
+        if (onBack != null) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 14.dp, top = 6.dp)
+                    .clip(G3CornerShape(10.dp))
+                    .clickable(onClick = onBack)
+                    .padding(horizontal = 6.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                androidx.compose.material3.Icon(
+                    com.gzucm.pocket.ui.icons.AppIcons.ArrowBack,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(17.dp),
+                )
+                Spacer(Modifier.width(5.dp))
+                Text(
+                    "工作台",
+                    fontSize = 12.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         Row(
             Modifier
                 .fillMaxWidth()
@@ -1001,6 +1033,14 @@ private fun LevelTab(
     levels: List<LevelGrade>,
     needLogin: Boolean = false,
     onOpenLogin: () -> Unit = {},
+    /**
+     * 非空时在顶部显示「← 工作台」。
+     *
+     * 成绩原来是底部 Tab 之一，点一下直达、没有返回这回事；
+     * 2026-11-21 收进工作台的一张卡片之后，它是从一个二级入口进去的，
+     * 必须给一条明确的退路 —— 否则用户只能靠系统返回手势猜。
+     */
+    onBack: (() -> Unit)? = null,
 ) {
     if (levels.isEmpty()) {
         EmptyBox("暂无考级成绩", needLogin, onOpenLogin)
@@ -1067,6 +1107,14 @@ private fun FitnessTab(
     fitness: List<FitnessGrade>,
     needLogin: Boolean = false,
     onOpenLogin: () -> Unit = {},
+    /**
+     * 非空时在顶部显示「← 工作台」。
+     *
+     * 成绩原来是底部 Tab 之一，点一下直达、没有返回这回事；
+     * 2026-11-21 收进工作台的一张卡片之后，它是从一个二级入口进去的，
+     * 必须给一条明确的退路 —— 否则用户只能靠系统返回手势猜。
+     */
+    onBack: (() -> Unit)? = null,
 ) {
     if (fitness.isEmpty()) {
         EmptyBox("暂无体测成绩", needLogin, onOpenLogin)
@@ -1191,6 +1239,14 @@ private fun EmptyBox(
     text: String,
     needLogin: Boolean = false,
     onOpenLogin: () -> Unit = {},
+    /**
+     * 非空时在顶部显示「← 工作台」。
+     *
+     * 成绩原来是底部 Tab 之一，点一下直达、没有返回这回事；
+     * 2026-11-21 收进工作台的一张卡片之后，它是从一个二级入口进去的，
+     * 必须给一条明确的退路 —— 否则用户只能靠系统返回手势猜。
+     */
+    onBack: (() -> Unit)? = null,
 ) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
