@@ -89,7 +89,9 @@ val CampusApps: List<CampusApp> = listOf(
          * 一声不响地不挂载。同一个地址在 Chrome 里完全正常（蓝色登录页）。
          *
          * 试过并排除的：
-         * - `#/home` vs `/base/wz/login/pc?type=h5`（CAS 入口）—— 都白屏
+         * - `#/home` vs `/base/wz/login/pc` vs `?type=h5` —— 三个入口都白屏。
+         *   致辉那边还看到过「没带 auth」的提示，说明学校的 CAS 集成没能把
+         *   `id_token` 传给这套系统（HTML 里就在找 `getQueryString("id_token")`）
          * - 关掉算法暗化                —— 无效
          * - 打开 mixedContentMode 允许混合内容 —— 无效
          * - 清空 cookie                —— 无效
@@ -97,13 +99,16 @@ val CampusApps: List<CampusApp> = listOf(
          * - 厂商模板里还留着 `sysglxt.pdsu.edu.cn`（平顶山学院）的注释，
          *   说明这是定制产品的残留，WebView 兼容性大概率没人测过
          *
-         * 所以只能用浏览器。代价是跳出 App，但**总比白屏强**；
-         * 而且它本来就是独立账号体系，浏览器 cookie 池反而更干净。
+         * **入口必须走 CAS**（`/base/wz/login/pc`），不是那个蓝色账密页 ——
+         * 致辉 2026-11-21 明确纠正过：这套系统是统一身份认证进的，
+         * 蓝色登录页（`gz_h5/#/home` 直开）是错的路径。
+         *
+         * 所以只能用浏览器 + CAS 入口。代价是跳出 App，但**总比白屏强**。
          *
          * 卡角标标「外链」，点之前就知道会跳出去。
          */
         "实验室平台",
-        "https://sysgl.gzucm.edu.cn:8080/gz_h5/#/home",
+        "https://sysgl.gzucm.edu.cn:8080/base/wz/login/pc",
         external = true,
         badge = "外链",
     ),
