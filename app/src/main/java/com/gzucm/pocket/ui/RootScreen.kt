@@ -451,7 +451,6 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
     var showTodaySections by remember { mutableStateOf(false) }
     // 工作台：从成绩卡片进去的那一层，以及正在用内嵌网页打开的学校服务
     var showGradesFromWorkbench by remember { mutableStateOf(false) }
-    var openCampusApp by remember { mutableStateOf<com.gzucm.pocket.core.CampusApp?>(null) }
     /*
      * 学校服务的打开次数。
      *
@@ -673,9 +672,18 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                                             // 只能在浏览器里跑（实验室平台）
                                             app.external -> com.gzucm.pocket.ui.workbench
                                                 .openInBrowser(ctx0, app.url.orEmpty())
-                                            // 能直连的走内嵌 WebView
+                                            /*
+                                             * 能直连的：开一个全屏网页页。
+                                             *
+                                             * 以前是弹 ModalBottomSheet，但它和网页滚动抢
+                                             * 同一个下滑手势，手指一划就把页面关了
+                                             * （2026-11-21 致辉报的）。独立 Activity 没这问题。
+                                             */
                                             app.kind == com.gzucm.pocket.core.CampusAppKind.WEB ->
-                                                openCampusApp = app
+                                                ctx0.startActivity(
+                                                    com.gzucm.pocket.ui.workbench.CampusWebActivity
+                                                        .intent(ctx0, app.url.orEmpty(), app.name),
+                                                )
                                             // 企业微信专属 / 已知坏的：Toast + 跳转，不在这里开
                                             else -> com.gzucm.pocket.ui.workbench.openOutsideApp(
                                                 ctx0,
@@ -789,11 +797,6 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
      * 挂在这一层而不是工作台内部：它是全屏覆盖，切 Tab 时也该跟着关掉 ——
      * 挂在工作台里的话，用户切到课表再切回来，网页会自己「复活」。
      */
-    com.gzucm.pocket.ui.workbench.CampusWebSheet(
-        app = openCampusApp,
-        onDismiss = { openCampusApp = null },
-    )
-
     com.gzucm.pocket.ui.schedule.AgendaListSheet(
         visible = showAgendaList,
         semester = state.semester,

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    明文流量白名单。
+
+    Android 9 起默认禁止 http。学校有几个系统是 https 页面里又跳回 http 的，
+    全部放开等于允许任意中间人改写 App 的所有请求（包括登录教务那条链路），
+    所以这里按域名逐个放行。
+
+    已知需要放行的：
+    - i.gzucm.edu.cn：办事大厅登录后会重定向到 http://i.gzucm.edu.cn/portal/
+      （2026-11-21 实测，线上就是 http，不是本地写错）
+
+    以后再加一律走这里，不要图省事改成全局 usesCleartextTraffic="true"。
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">i.gzucm.edu.cn</domain>
+    </domain-config>
+</network-security-config>

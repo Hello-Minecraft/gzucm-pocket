@@ -27,7 +27,19 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:usesCleartextTraffic="false"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/Theme.GzucmPocket">
+
+        <!--
+            学校服务的全屏网页。独立 Activity 而不是弹窗：网页要上下滑动，
+            挂在 ModalBottomSheet 上时「翻页」和「下拉关闭」是同一个手势，
+            一划就把页面关了（2026-11-21 致辉报的）。
+        -->
+        <activity
+            android:name=".ui.workbench.CampusWebActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+            android:theme="@style/Theme.GzucmPocket" />
 
         <activity
             android:name=".MainActivity"
