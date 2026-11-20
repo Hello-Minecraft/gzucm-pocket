@@ -452,6 +452,13 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
     // 工作台：从成绩卡片进去的那一层，以及正在用内嵌网页打开的学校服务
     var showGradesFromWorkbench by remember { mutableStateOf(false) }
     /*
+     * 「工作台默认打开成绩页」。
+     *
+     * 单独存一份 state：SharedPreferences 不是可观察对象，
+     * 用户在成绩页拨了开关，页面上那个 Switch 不会自己跟着变。
+     */
+    var gradesDefault by remember { mutableStateOf(prefs.workbenchOpenGrades) }
+    /*
      * 学校服务的打开次数。
      *
      * 存一份 state 而不是每次现读 prefs：SharedPreferences 不是可观察对象，
@@ -527,7 +534,20 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
 
             else -> MainScaffold(
                 tab = tab,
-                onSelect = { tab = it },
+                onSelect = { next ->
+                    // 先记下「是不是真的换了 tab」，再改 tab —— 顺序反了就永远是 false
+                    val switched = next != tab
+                    tab = next
+                    /*
+                     * 切到工作台时，如果用户选了「默认打开成绩页」就直接落在成绩上。
+                     *
+                     * 只在真的从别的 tab 切过来时触发：已经在工作台时再点一次，
+                     * 不该把用户从「← 工作台」退回来的首页又弹回成绩。
+                     */
+                    if (switched && next == Tab.Workbench && gradesDefault) {
+                        showGradesFromWorkbench = true
+                    }
+                },
                 campus = vm.campus,
                 /*
                  * 宽屏侧栏底部的两个动作。
@@ -646,6 +666,11 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                                     stage = state.gradesStage,
                                     updatedAt = prefs.gradesCheckedAt,
                                     onRefresh = { vm.loadGrades(force = true) },
+                                    defaultOpenGrades = gradesDefault,
+                                    onDefaultOpenChange = { on ->
+                                        gradesDefault = on
+                                        prefs.workbenchOpenGrades = on
+                                    },
                                     needLogin = vm.loginExpired,
                                     onOpenLogin = {
                                         showSettings = true

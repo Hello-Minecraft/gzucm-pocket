@@ -6,17 +6,22 @@ import android.graphics.Bitmap
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
+import android.webkit.WebChromeClient
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -29,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -142,14 +148,25 @@ internal fun shouldBlockNavigation(url: android.net.Uri): Boolean {
  *
  * 顶栏是必需的：网页自己也会吃 BACK，没有明确的关闭入口用户会困在里面。
  */
+/**
+ * 全屏网页界面：顶部一条返回栏 + 真实进度条 + 占满剩余空间的 WebView。
+ *
+ * ## 加载态为什么做得这么啰嗦
+ *
+ * 学校有几个系统是「HTML 秒回、内容十几秒才出来」的 SPA（杏林教学实测 18 秒）。
+ * 只靠 `onPageFinished` 判断的话，那个回调在 2 秒就触发了，剩下 16 秒用户对着
+ * 一片白，不知道是卡死还是没加载 —— 2026-11-21 致辉说「看到黑屏觉得这很奇怪」。
+ *
+ * 所以这里做了三件事：
+ * 1. WebView 底色刷成主题背景色（不刷的话深色模式下先闪一块纯黑）
+ * 2. `onProgressChanged` 驱动真实百分比进度条
+ * 3. `onPageFinished` 之后再轮询 `document.body.innerText.length`，
+ *    真的读到内容才算加载完 —— SPA 挂载完的那一刻遮罩才撤
+ */
 @Composable
-fun CampusWebScreen(
-    url: String,
-    title: String,
-    onClose: () -> Unit,
-    desktopMode: Boolean = false,
-) {
+fun CampusWebScreen(url: String, title: String, onClose: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
+    var progress by remember { mutableStateOf(0) }
     var loading by remember { mutableStateOf(true) }
     var canGoBack by remember { mutableStateOf(false) }
     val web = remember { mutableStateOf<WebView?>(null) }
@@ -187,42 +204,134 @@ fun CampusWebScreen(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            // 占位，让标题不贴右边
             Spacer(Modifier.size(38.dp))
         }
+
+        // 进度条：加载中显示真实百分比，加载完变成一条细的完成线再淡出
         if (loading) {
             LinearProgressIndicator(
+                progress = { progress / 100f },
                 modifier = Modifier.fillMaxWidth(),
                 color = scheme.primary,
+                trackColor = scheme.primary.copy(alpha = 0.15f),
             )
         }
-        AndroidView(
-            factory = { ctx ->
-                buildCampusWebView(ctx, desktopMode).apply {
-                    webViewClient = object : WebViewClient() {
-                        override fun onPageStarted(v: WebView?, u: String?, favicon: Bitmap?) {
-                            loading = true
-                            canGoBack = v?.canGoBack() == true
-                        }
 
-                        override fun onPageFinished(v: WebView?, u: String?) {
-                            loading = false
-                            canGoBack = v?.canGoBack() == true
-                        }
-
-                        override fun shouldOverrideUrlLoading(
-                            v: WebView,
-                            request: WebResourceRequest,
-                        ): Boolean = shouldBlockNavigation(request.url)
-                    }
-                    loadUrl(url)
-                    web.value = this
-                }
-            },
-            modifier = Modifier
+        Box(
+            Modifier
                 .fillMaxWidth()
-                .weight(1f)
-                .navigationBarsPadding(),
-        )
+                .weight(1f),
+        ) {
+            AndroidView(
+                factory = { ctx ->
+                    buildCampusWebView(ctx).apply {
+                        /*
+                         * 底色必须显式设。
+                         *
+                         * WebView 默认背景是白的，但硬加速下的合成层在深色主题里
+                         * 会先显示一块纯黑 —— 用户看到的就是「打开先黑一下」。
+                         */
+                        setBackgroundColor(scheme.background.toArgb())
+
+                        webChromeClient = object : WebChromeClient() {
+                            override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                                progress = newProgress
+                            }
+                        }
+
+                        webViewClient = object : WebViewClient() {
+                            override fun onPageStarted(v: WebView?, u: String?, favicon: Bitmap?) {
+                                progress = 0
+                                loading = true
+                                canGoBack = v?.canGoBack() == true
+                            }
+
+                            override fun onPageFinished(v: WebView?, u: String?) {
+                                canGoBack = v?.canGoBack() == true
+                                if (v == null) {
+                                    loading = false
+                                    return
+                                }
+                                /*
+                                 * 轮询到真的有内容为止（最多约 25 秒）。
+                                 *
+                                 * 判断依据是 `innerText.length`：SPA 挂载完成后正文
+                                 * 一定有几十个字符；白屏时是 0。比固定延时可靠 ——
+                                 * 固定 3 秒对杏林教学完全不够，对图书馆又白等。
+                                 */
+                                var attempt = 0
+                                fun checkReady() {
+                                    if (attempt++ > 25) {
+                                        loading = false
+                                        return
+                                    }
+                                    v.postDelayed({
+                                        v.evaluateJavascript(
+                                            "(document.body ? document.body.innerText.length : 0)",
+                                        ) { raw ->
+                                            val len = raw?.trim('"')?.toIntOrNull() ?: 0
+                                            if (len > 20) {
+                                                progress = 100
+                                                loading = false
+                                            } else {
+                                                // 还没内容，进度条卡在 90% 等着，别让它满格骗人
+                                                if (progress > 90) progress = 90
+                                                checkReady()
+                                            }
+                                        }
+                                    }, 900)
+                                }
+                                checkReady()
+                            }
+
+                            override fun shouldOverrideUrlLoading(
+                                v: WebView,
+                                request: WebResourceRequest,
+                            ): Boolean = shouldBlockNavigation(request.url)
+                        }
+                        loadUrl(url)
+                        web.value = this
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .navigationBarsPadding(),
+            )
+
+            /*
+             * 加载遮罩：不是黑屏，也不是白屏，是一张说明卡片。
+             *
+             * 用户至少知道「在加载、加载到哪、要等多久」，不会以为 App 挂了直接退。
+             */
+            if (loading) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(scheme.background),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(34.dp),
+                            color = scheme.primary,
+                            strokeWidth = 3.dp,
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            "正在加载 $title",
+                            fontSize = 13.sp,
+                            color = scheme.onSurface,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            if (progress >= 100) "页面已就绪，正在渲染内容…"
+                            else "已加载 $progress%",
+                            fontSize = 11.5.sp,
+                            color = scheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
     }
 }

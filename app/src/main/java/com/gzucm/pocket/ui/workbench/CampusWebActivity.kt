@@ -52,7 +52,6 @@ class CampusWebActivity : ComponentActivity() {
 
         val url = intent.getStringExtra(EXTRA_URL).orEmpty()
         val title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
-        val desktop = intent.getBooleanExtra(EXTRA_DESKTOP, false)
         if (url.isBlank()) {
             finish()
             return
@@ -70,7 +69,6 @@ class CampusWebActivity : ComponentActivity() {
                         url = url,
                         title = title.ifBlank { "学校服务" },
                         onClose = { finish() },
-                        desktopMode = desktop,
                     )
                 }
             }

@@ -60,6 +60,17 @@ class SessionStore(context: Context) {
      * 存整段 JSON 而不是拆成五个字段：以后要取「培养层次」「学制」时，
      * 不用再动 SharedPreferences 的键，也不用写迁移。
      */
+    /**
+     * 工作台默认直接打开成绩页。
+     *
+     * 成绩原来是一级 Tab，收进工作台之后有些用户（尤其天天看绩点的）会嫌多一次点击。
+     * 开关放在成绩页顶部，选了就每次切到工作台直接落在成绩上，
+     * 「← 工作台」照样能退回。
+     */
+    var workbenchOpenGrades: Boolean
+        get() = sp.getBoolean(KEY_WORKBENCH_GRADES, false)
+        set(v) = sp.edit().putBoolean(KEY_WORKBENCH_GRADES, v).apply()
+
     var studentCardJson: String?
         get() = sp.getString(KEY_STUDENT_CARD, null)
         set(v) = sp.edit().putString(KEY_STUDENT_CARD, v).apply()
@@ -530,6 +541,7 @@ class SessionStore(context: Context) {
         const val KEY_COOKIES = "cookies"
         const val KEY_SEMESTER = "semester"
         const val KEY_STUDENT_CARD = "student_card"
+        const val KEY_WORKBENCH_GRADES = "workbench_open_grades"
         const val KEY_CAMPUS_COUNTS = "campus_open_counts"
         const val KEY_SYNC_AT = "sync_at"
         const val KEY_CACHE_SEM = "cache_semester"

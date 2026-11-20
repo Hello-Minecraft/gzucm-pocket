@@ -34,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -83,6 +84,9 @@ fun GradesScreen(
      * 必须给一条明确的退路 —— 否则用户只能靠系统返回手势猜。
      */
     onBack: (() -> Unit)? = null,
+    /** 「工作台默认打开成绩页」开关的当前值 */
+    defaultOpenGrades: Boolean = false,
+    onDefaultOpenChange: (Boolean) -> Unit = {},
     /**
      * 初始标签页索引：0=课程成绩 1=考级 2=体测。
      *
@@ -120,6 +124,25 @@ fun GradesScreen(
                     "工作台",
                     fontSize = 12.5.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.weight(1f))
+                /*
+                 * 「默认打开」开关放在这一行右边，不额外占高度。
+                 *
+                 * 只在从工作台进来时才出现（onBack != null）—— 老的一级 Tab 形态没有这个概念。
+                 */
+                Text(
+                    "默认打开",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(2.dp))
+                androidx.compose.material3.Switch(
+                    checked = defaultOpenGrades,
+                    onCheckedChange = onDefaultOpenChange,
+                    modifier = Modifier
+                        .scale(0.72f)
+                        .padding(end = 0.dp),
                 )
             }
         }
@@ -1041,6 +1064,9 @@ private fun LevelTab(
      * 必须给一条明确的退路 —— 否则用户只能靠系统返回手势猜。
      */
     onBack: (() -> Unit)? = null,
+    /** 「工作台默认打开成绩页」开关的当前值 */
+    defaultOpenGrades: Boolean = false,
+    onDefaultOpenChange: (Boolean) -> Unit = {},
 ) {
     if (levels.isEmpty()) {
         EmptyBox("暂无考级成绩", needLogin, onOpenLogin)
@@ -1115,6 +1141,9 @@ private fun FitnessTab(
      * 必须给一条明确的退路 —— 否则用户只能靠系统返回手势猜。
      */
     onBack: (() -> Unit)? = null,
+    /** 「工作台默认打开成绩页」开关的当前值 */
+    defaultOpenGrades: Boolean = false,
+    onDefaultOpenChange: (Boolean) -> Unit = {},
 ) {
     if (fitness.isEmpty()) {
         EmptyBox("暂无体测成绩", needLogin, onOpenLogin)
@@ -1247,6 +1276,9 @@ private fun EmptyBox(
      * 必须给一条明确的退路 —— 否则用户只能靠系统返回手势猜。
      */
     onBack: (() -> Unit)? = null,
+    /** 「工作台默认打开成绩页」开关的当前值 */
+    defaultOpenGrades: Boolean = false,
+    onDefaultOpenChange: (Boolean) -> Unit = {},
 ) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
