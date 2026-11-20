@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
@@ -302,6 +303,9 @@ private fun AppGrid(
 @Composable
 private fun AppTile(app: CampusApp, onOpen: () -> Unit, modifier: Modifier = Modifier) {
     val scheme = MaterialTheme.colorScheme
+    // 打不开的（证书过期等）整格降透明度：看得见、知道有这东西，但一眼能看出不能用
+    val broken = app.kind == com.gzucm.pocket.core.CampusAppKind.BROKEN
+    val fg = if (broken) scheme.onSurfaceVariant.copy(alpha = 0.5f) else scheme.onSurface
     Column(
         modifier
             .clip(G3CornerShape(14.dp))
@@ -310,26 +314,52 @@ private fun AppTile(app: CampusApp, onOpen: () -> Unit, modifier: Modifier = Mod
             .padding(horizontal = 8.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(
-            Modifier
-                .size(36.dp)
-                .clip(G3CornerShape(11.dp))
-                .background(scheme.primary.copy(alpha = 0.13f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                app.name.take(1),
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-                color = scheme.primary,
-            )
+        Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .clip(G3CornerShape(11.dp))
+                    .background(
+                        if (broken) scheme.surfaceVariant.copy(alpha = 0.4f)
+                        else scheme.primary.copy(alpha = 0.13f),
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    app.name.take(1),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = if (broken) fg else scheme.primary,
+                )
+            }
+            /*
+             * 角标挂在方块右上角、稍微探出去一点。
+             *
+             * 「企微」= 这格点了是跳企业微信，不是在 App 里打开（见 CampusApps 的注释）；
+             * 「http」= 明文地址，提醒一下。
+             * 字号压到 8sp 是刻意的：它只是提示，不该比应用名还抢眼。
+             */
+            if (app.badge.isNotEmpty()) {
+                Text(
+                    app.badge,
+                    fontSize = 8.sp,
+                    lineHeight = 10.sp,
+                    color = if (broken) fg else scheme.primary,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 7.dp, y = (-5).dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(micaPanelColor())
+                        .padding(horizontal = 3.dp, vertical = 1.dp),
+                )
+            }
         }
         Spacer(Modifier.height(7.dp))
         Text(
             app.name,
             fontSize = 11.sp,
             lineHeight = 14.sp,
-            color = scheme.onSurface,
+            color = fg,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,

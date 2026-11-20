@@ -96,11 +96,29 @@ fun CampusWebSheet(app: CampusApp?, onDismiss: () -> Unit) {
                         )
                     }
                 }
-                CampusWebView(url = url)
+                /*
+                 * key(url)：换一个应用就换一个 WebView。
+                 *
+                 * 不加的话 AndroidView 复用同一个实例，from A to B 时页面还停在 A 上
+                 * （factory 只跑一次，loadUrl 也只在第一次调用）。
+                 */
+                androidx.compose.runtime.key(url) {
+                    CampusWebView(url = url)
+                }
             }
         }
     }
 }
+
+/**
+ * 是不是校内域名。
+ *
+ * 必须带那个点：直接 `endsWith("gzucm.edu.cn")` 会连
+ * `notgzucm.edu.cn`、`evil-gzucm.edu.cn` 一起放行 —— 这种仿冒域名
+ * 加上一个「统一身份认证」的假登录页，就能把学号密码骗走。
+ */
+private fun isCampusHost(host: String): Boolean =
+    host == "gzucm.edu.cn" || host.endsWith(".gzucm.edu.cn")
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -133,6 +151,41 @@ private fun CampusWebView(url: String) {
                     // 学校服务不需要读本地文件，关掉少一类攻击面
                     settings.allowFileAccess = false
                     settings.allowContentAccess = false
+                    /*
+                     * 关掉「算法暗化」。
+                     *
+                     * Android 13 起 WebView 默认跟随系统深色，把浅色网页**强行反色**。
+                     * 学校的系统大多只有浅色版，反色之后：
+                     * - 实验室平台 → 白底白字，整页看着像白屏（其实字在那儿）
+                     * - 智慧宿管 → 纯黑一片，连标题都看不见
+                     * 这两个 2026-11-21 都实测复现过。
+                     *
+                     * 用的是 androidx.webkit 的兼容 API：API 33+ 的
+                     * `settings.forceDark` 已经废弃且不生效，只有
+                     * `setAlgorithmicDarkeningAllowed(false)` 管用。
+                     */
+                    if (
+                        androidx.webkit.WebViewFeature.isFeatureSupported(
+                            androidx.webkit.WebViewFeature.ALGORITHMIC_DARKENING,
+                        )
+                    ) {
+                        androidx.webkit.WebSettingsCompat.setAlgorithmicDarkeningAllowed(
+                            settings,
+                            false,
+                        )
+                    }
+                    /*
+                     * 允许混合内容。
+                     *
+                     * 学校这套系统是 https + 8080，但页面内部的接口请求写的是 http
+                     * （厂商模板没改干净，HTML 里还留着 `sysglxt.pdsu.edu.cn` 的注释）。
+                     * WebView 默认阻止 https 页面加载 http 资源，于是 Vue 挂载到一半
+                     * 就停了 —— 表现是整页白屏、`<div id=app>` 空的、无障碍读不到任何文字
+                     * （2026-11-21 实测）。Chrome 因为有 HTTPS-First 会自动升级，
+                     * 所以同一个地址在浏览器里是好的。
+                     */
+                    settings.mixedContentMode =
+                        android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                     webViewClient = object : WebViewClient() {
                         override fun onPageStarted(v: WebView?, u: String?, favicon: Bitmap?) {
                             loading = true
@@ -146,8 +199,18 @@ private fun CampusWebView(url: String) {
                             v: WebView,
                             request: WebResourceRequest,
                         ): Boolean {
-                            val host = request.url.host ?: return true
-                            return if (host.endsWith("gzucm.edu.cn")) {
+                            val uri = request.url
+                            /*
+                             * 只放 http / https。
+                             *
+                             * 学校页面里混着 intent://、wxwork://、tel: 这类跳转，
+                             * 交给 WebView 处理会直接 ERR_UNKNOWN_URL_SCHEME
+                             * （表现为整页白屏），所以一律拦掉。
+                             */
+                            val scheme = uri.scheme
+                            if (scheme != "http" && scheme != "https") return true
+                            val host = uri.host ?: return true
+                            return if (isCampusHost(host)) {
                                 // 校内：留在 WebView 里继续走
                                 false
                             } else {

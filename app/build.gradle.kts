@@ -154,6 +154,15 @@ dependencies {
     implementation("androidx.compose.material3:material3")
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    /*
+     * WebView 的「算法暗化」开关。
+     *
+     * Android 13 起 WebView 默认跟随系统深色，把浅色网页强行反色 ——
+     * 学校的实验室平台、智慧宿管在深色模式下直接变成黑底黑字/白屏
+     * （2026-11-21 实测）。这个库的 WebSettingsCompat.setAlgorithmicDarkeningAllowed
+     * 是唯一能在 API 33+ 关掉它的正规入口（旧的 settings.forceDark 已经废弃且无效）。
+     */
+    implementation("androidx.webkit:webkit:1.12.1")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     // ???????????orkManager ????????????????

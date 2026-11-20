@@ -9,6 +9,16 @@
     <!-- 今日页拖动排序长按抓手时的那一下「嗒」。普通权限，装好就有，不弹窗 -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!--
+        Android 11 起 App 默认看不到别的包。
+
+        「智慧宿管」这类只能企业微信打开的服务，要靠 wxwork:// 把用户送过去 ——
+        不声明这一条，startActivity 会以为没人能处理，直接失败。
+    -->
+    <queries>
+        <package android:name="com.tencent.wework" />
+    </queries>
+
     <application
         android:name=".App"
         android:allowBackup="true"

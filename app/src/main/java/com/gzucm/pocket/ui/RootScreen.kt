@@ -660,9 +660,28 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                                     gradeCount = state.grades.size,
                                     onOpenGrades = { showGradesFromWorkbench = true },
                                     onOpenApp = { app ->
-                                        prefs.recordCampusOpen(app.id)
-                                        campusCounts = prefs.campusOpenCounts
-                                        openCampusApp = app
+                                        /*
+                                         * 打不开的（证书过期）不记打开次数 ——
+                                         * 否则「常用」区会天天把它顶到前面，
+                                         * 而用户其实一次都没成功打开过。
+                                         */
+                                        if (app.kind != com.gzucm.pocket.core.CampusAppKind.BROKEN) {
+                                            prefs.recordCampusOpen(app.id)
+                                            campusCounts = prefs.campusOpenCounts
+                                        }
+                                        when {
+                                            // 只能在浏览器里跑（实验室平台）
+                                            app.external -> com.gzucm.pocket.ui.workbench
+                                                .openInBrowser(ctx0, app.url.orEmpty())
+                                            // 能直连的走内嵌 WebView
+                                            app.kind == com.gzucm.pocket.core.CampusAppKind.WEB ->
+                                                openCampusApp = app
+                                            // 企业微信专属 / 已知坏的：Toast + 跳转，不在这里开
+                                            else -> com.gzucm.pocket.ui.workbench.openOutsideApp(
+                                                ctx0,
+                                                app,
+                                            )
+                                        }
                                     },
                                     openCounts = campusCounts,
                                 )
