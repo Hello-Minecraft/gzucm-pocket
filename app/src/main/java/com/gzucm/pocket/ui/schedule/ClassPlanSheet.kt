@@ -483,10 +483,18 @@ private fun TaskRow(
             )
             Spacer(Modifier.height(2.dp))
             Text(
-                listOfNotNull(
-                    task.course.takeIf { it.isNotBlank() },
-                    dueLabel(task.dueAt),
-                ).joinToString(" · "),
+                if (task.isEvent) {
+                    listOfNotNull(
+                        task.course.takeIf { it.isNotBlank() },
+                        "${dayLabel(task.day)} ${hhmm(task.startMinute)}-${hhmm(task.endMinute)}",
+                        task.place.takeIf { it.isNotBlank() },
+                    ).joinToString(" · ")
+                } else {
+                    listOfNotNull(
+                        task.course.takeIf { it.isNotBlank() },
+                        dueLabel(task.dueAt),
+                    ).joinToString(" · ")
+                },
                 fontSize = 11.5.sp,
                 color = scheme.onSurfaceVariant,
             )
@@ -533,6 +541,8 @@ private fun TaskEditView(
     var showCalendar by remember { mutableStateOf(false) }
     var note by rememberSaveable { mutableStateOf(source?.note.orEmpty()) }
     var error by remember { mutableStateOf<String?>(null) }
+    /** 编辑的是一条从日程导入的条目（时间只读） */
+    val isEventTask = source?.isEvent == true
 
     /*
      * 左右只留 10dp：M3 的 DatePicker 内部是固定 360dp，外面留 20dp 的话
@@ -587,97 +597,137 @@ private fun TaskEditView(
          * Dialog 窗口，BACK 被内层吃掉之后 Activity 又收到一次，直接退回桌面
          * （项目里踩过，见 PITFALLS）。所以改成在这张表单里内联展开。
          */
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .border(
-                    1.dp,
-                    if (showCalendar) scheme.primary else scheme.outline,
-                    RoundedCornerShape(12.dp),
-                )
-                .clickable { showCalendar = !showCalendar }
-                .padding(horizontal = if (showCalendar) 0.dp else 14.dp, vertical = 13.dp),
-        ) {
-            Row(
-                Modifier.padding(horizontal = if (showCalendar) 14.dp else 0.dp),
-                verticalAlignment = Alignment.CenterVertically,
+        if (isEventTask) {
+            /*
+             * 从日程导入的条目：时间和地点只读。
+             *
+             * 不在这里给「改时间」的入口 —— 清单里的日程只是「顺手带过来」的，
+             * 真要调时间该回日程里改。两边都放开会造出两份互相打架的时间。
+             */
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(scheme.surfaceVariant.copy(alpha = 0.35f))
+                    .padding(horizontal = 14.dp, vertical = 13.dp),
             ) {
                 Text(
-                    if (dueMillis == null) "截止日期（选填）" else "截止日期",
-                    fontSize = 11.5.sp,
-                    color = scheme.onSurfaceVariant,
+                    listOfNotNull(
+                        source?.day?.takeIf { it.isNotBlank() }?.let { dayLabel(it) },
+                        source?.let { "${hhmm(it.startMinute)} — ${hhmm(it.endMinute)}" },
+                        source?.place?.takeIf { it.isNotBlank() },
+                    ).joinToString(" · "),
+                    fontSize = 12.5.sp,
+                    color = scheme.onSurface,
                 )
-                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.height(3.dp))
                 Text(
-                    if (dueMillis == null) "长期待办" else dayLabel(dueMillis!!),
-                    fontSize = 13.sp,
-                    color = if (dueMillis == null) scheme.onSurfaceVariant else scheme.onSurface,
+                    "从日程导入，时间和地点保持原样；要改请回日程里改",
+                    fontSize = 11.sp,
+                    color = scheme.onSurfaceVariant.copy(alpha = 0.75f),
                 )
             }
-            if (showCalendar) {
-                val pickerState = androidx.compose.material3.rememberDatePickerState(
-                    initialSelectedDateMillis = dueMillis,
-                )
+            Spacer(Modifier.height(10.dp))
+        } else {
+            /*
+             * 截止日期：点开就是系统日历（M3 DatePicker），**不用文本输入**。
+             *
+             * 但**不能**用 DatePickerDialog —— 那会在 AdaptiveSheet 上再叠一个
+             * Dialog 窗口，BACK 被内层吃掉之后 Activity 又收到一次，直接退回桌面
+             * （项目里踩过，见 PITFALLS）。所以改成在这张表单里内联展开。
+             */
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .border(
+                        1.dp,
+                        if (showCalendar) scheme.primary else scheme.outline,
+                        RoundedCornerShape(12.dp),
+                    )
+                    .clickable { showCalendar = !showCalendar }
+                    .padding(horizontal = if (showCalendar) 0.dp else 14.dp, vertical = 13.dp),
+            ) {
                 Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
+                    Modifier.padding(horizontal = if (showCalendar) 14.dp else 0.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        "清除",
-                        fontSize = 12.5.sp,
+                        if (dueMillis == null) "截止日期（选填）" else "截止日期",
+                        fontSize = 11.5.sp,
                         color = scheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { dueMillis = null; showCalendar = false }
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
                     )
-                    Spacer(Modifier.width(4.dp))
+                    Spacer(Modifier.weight(1f))
                     Text(
-                        "确定",
-                        fontSize = 12.5.sp,
-                        color = scheme.primary,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable {
-                                pickerState.selectedDateMillis?.let { dueMillis = it }
-                                showCalendar = false
-                            }
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        if (dueMillis == null) "长期待办" else dayLabel(dueMillis!!),
+                        fontSize = 13.sp,
+                        color = if (dueMillis == null) scheme.onSurfaceVariant else scheme.onSurface,
                     )
                 }
-                androidx.compose.material3.DatePicker(
-                    state = pickerState,
-                    // 默认标题是英文（M3 没带中文资源），这里覆盖掉
-                    title = {
+                if (showCalendar) {
+                    val pickerState = androidx.compose.material3.rememberDatePickerState(
+                        initialSelectedDateMillis = dueMillis,
+                    )
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
                         Text(
-                            "选择截止日期",
+                            "清除",
                             fontSize = 12.5.sp,
                             color = scheme.onSurfaceVariant,
-                            modifier = Modifier.padding(start = 24.dp, top = 16.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { dueMillis = null; showCalendar = false }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
                         )
-                    },
-                    headline = {
+                        Spacer(Modifier.width(4.dp))
                         Text(
-                            pickerState.selectedDateMillis?.let { dayLabel(it) } ?: "未选择",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = scheme.onSurface,
-                            modifier = Modifier.padding(start = 24.dp, bottom = 12.dp),
+                            "确定",
+                            fontSize = 12.5.sp,
+                            color = scheme.primary,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    pickerState.selectedDateMillis?.let { dueMillis = it }
+                                    showCalendar = false
+                                }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
                         )
-                    },
-                    // 关掉「切换为输入模式」：那个模式会切出英文的日期输入框
-                    showModeToggle = false,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                    }
+                    androidx.compose.material3.DatePicker(
+                        state = pickerState,
+                        // 默认标题是英文（M3 没带中文资源），这里覆盖掉
+                        title = {
+                            Text(
+                                "选择截止日期",
+                                fontSize = 12.5.sp,
+                                color = scheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 24.dp, top = 16.dp),
+                            )
+                        },
+                        headline = {
+                            Text(
+                                pickerState.selectedDateMillis?.let { dayLabel(it) } ?: "未选择",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = scheme.onSurface,
+                                modifier = Modifier.padding(start = 24.dp, bottom = 12.dp),
+                            )
+                        },
+                        // 关掉「切换为输入模式」：那个模式会切出英文的日期输入框
+                        showModeToggle = false,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "留空就是长期待办，没有截止时间",
+                fontSize = 11.sp,
+                color = scheme.onSurfaceVariant.copy(alpha = 0.75f),
+            )
         }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "留空就是长期待办，没有截止时间",
-            fontSize = 11.sp,
-            color = scheme.onSurfaceVariant.copy(alpha = 0.75f),
-        )
         Spacer(Modifier.height(10.dp))
 
         OutlinedTextField(
@@ -721,7 +771,12 @@ private fun TaskEditView(
                             },
                             title = t,
                             course = course.trim(),
-                            dueAt = dueAt,
+                            // 日程形态把时间字段原样带回去；DDL 用日历选的那个
+                            day = source?.day.orEmpty(),
+                            startMinute = source?.startMinute ?: 0,
+                            endMinute = source?.endMinute ?: 0,
+                            place = source?.place.orEmpty(),
+                            dueAt = if (isEventTask) null else dueAt,
                             note = note.trim(),
                             updatedAt = System.currentTimeMillis(),
                         ),
@@ -895,8 +950,24 @@ private fun HintBox(text: String, ok: Boolean, scheme: androidx.compose.material
 
 private fun sortedTasks(plan: ClassPlan): List<ClassTaskDto> =
     plan.tasks.sortedWith(
-        compareBy({ it.dueAt ?: Long.MAX_VALUE }, { it.title }),
+        compareBy({ it.sortKey() }, { it.title }),
     )
+
+/** 排序键：日程按当天零点，DDL 按截止时刻；都没有的排最后 */
+private fun ClassTaskDto.sortKey(): Long = when {
+    isEvent -> runCatching { LocalDate.parse(day).toEpochDay() * 86_400_000L }
+        .getOrDefault(Long.MAX_VALUE)
+    else -> dueAt ?: Long.MAX_VALUE
+}
+
+/** 「11月25日 周二」 */
+private fun dayLabel(iso: String): String {
+    val d = runCatching { LocalDate.parse(iso) }.getOrNull() ?: return iso
+    val dow = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")[d.dayOfWeek.value - 1]
+    return "${d.monthValue}月${d.dayOfMonth}日 $dow"
+}
+
+private fun hhmm(minute: Int): String = "%02d:%02d".format(minute / 60, minute % 60)
 
 private fun epochToDay(ms: Long): LocalDate =
     Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()

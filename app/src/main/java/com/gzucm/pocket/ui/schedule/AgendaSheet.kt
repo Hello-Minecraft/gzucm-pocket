@@ -155,7 +155,8 @@ private data class EditDraft(
     val place: String,
     val note: String,
     val colorIndex: Int,
-    val weekly: Boolean,
+    /** 0 = 不重复，1 = 每天，2 = 每周 */
+    val repeatMode: Int,
     val byUnit: Boolean,
     val unitStart: Int,
     val unitEnd: Int,
@@ -269,7 +270,12 @@ private fun buildDraft(
         place = initial?.place ?: "",
         note = initial?.note ?: "",
         colorIndex = initial?.colorIndex ?: -1,
-        weekly = initial?.weekly ?: false,
+        repeatMode = when {
+            initial == null -> 0
+            initial.daily -> 1
+            initial.weekly -> 2
+            else -> 0
+        },
         byUnit = byUnit,
         unitStart = unitStart,
         unitEnd = unitEnd,
@@ -803,7 +809,10 @@ private fun AgendaRow(
                             error = overdue,
                         )
                     }
-                    if (agenda.weekly) {
+                    if (agenda.daily) {
+                        Spacer(Modifier.width(6.dp))
+                        Tag("每天")
+                    } else if (agenda.weekly) {
                         Spacer(Modifier.width(6.dp))
                         Tag("每周")
                     }
@@ -1402,24 +1411,54 @@ fun AgendaEditSheet(
                 hint = "可选，例如 图书馆",
             )
 
-            // 每周重复
+            /*
+             * 重复：三选一（2026-11-21 致辉要的「每天」）。
+             *
+             * 原来只有一个「每周重复」开关，做连着几天的见习轮转时只能建三条。
+             * 用胶囊不用 RadioButton：和上面「按节次 / 按时间」是同一套视觉，
+             * 而且三个选项一行放得下。
+             */
             Spacer(Modifier.height(18.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("每周重复", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                    Spacer(Modifier.height(3.dp))
-                    Text(
-                        "从所选日期起，每周同一天都出现，直到学期结束",
-                        fontSize = 10.5.sp,
-                        lineHeight = 14.sp,
-                        color = scheme.onSurfaceVariant.copy(alpha = 0.7f),
-                    )
+            Text("重复", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(3.dp))
+            Text(
+                when (draft.repeatMode) {
+                    2 -> "从所选日期起，每周同一天都出现，直到学期结束"
+                    1 -> "从所选日期起，每天都出现，直到学期结束"
+                    else -> "只在所选那一天出现"
+                },
+                fontSize = 10.5.sp,
+                lineHeight = 14.sp,
+                color = scheme.onSurfaceVariant.copy(alpha = 0.7f),
+            )
+            Spacer(Modifier.height(9.dp))
+            Row {
+                listOf(0 to "不重复", 1 to "每天", 2 to "每周").forEach { (mode, label) ->
+                    val on = draft.repeatMode == mode
+                    Box(
+                        Modifier
+                            .clip(G3CornerShape(9.dp))
+                            .background(
+                                if (on) scheme.primary.copy(alpha = 0.18f)
+                                else scheme.surfaceVariant.copy(alpha = 0.40f),
+                            )
+                            .border(
+                                if (on) 1.dp else 0.dp,
+                                if (on) scheme.primary.copy(alpha = 0.75f) else androidx.compose.ui.graphics.Color.Transparent,
+                                G3CornerShape(9.dp),
+                            )
+                            .clickable { draft = draft.copy(repeatMode = mode) }
+                            .padding(horizontal = 14.dp, vertical = 7.dp),
+                    ) {
+                        Text(
+                            label,
+                            fontSize = 12.sp,
+                            fontWeight = if (on) FontWeight.Medium else FontWeight.Normal,
+                            color = if (on) scheme.primary else scheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
                 }
-                Spacer(Modifier.width(12.dp))
-                Switch(
-                    checked = draft.weekly,
-                    onCheckedChange = { draft = draft.copy(weekly = it) },
-                )
             }
             } // end if (!draft.isTask)
 
@@ -1614,7 +1653,8 @@ fun AgendaEditSheet(
                                 place = if (draft.isTask) "" else draft.place.trim(),
                                 note = draft.note.trim(),
                                 colorIndex = draft.colorIndex,
-                                weekly = if (draft.isTask) false else draft.weekly,
+                                daily = if (draft.isTask) false else draft.repeatMode == 1,
+                                weekly = if (draft.isTask) false else draft.repeatMode == 2,
                                 unitStart = if (!draft.isTask && draft.byUnit) draft.unitStart else 0,
                                 unitEnd = if (!draft.isTask && draft.byUnit) draft.unitEnd else 0,
                                 /*

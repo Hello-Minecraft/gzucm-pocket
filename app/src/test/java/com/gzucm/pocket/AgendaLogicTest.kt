@@ -33,6 +33,7 @@ class AgendaLogicTest {
         start: Int = 8 * 60 + 30,
         end: Int = 9 * 60 + 10,
         weekly: Boolean = false,
+        daily: Boolean = false,
         title: String = "测试日程",
         place: String = "",
         note: String = "",
@@ -50,6 +51,7 @@ class AgendaLogicTest {
         note = note,
         colorIndex = colorIndex,
         weekly = weekly,
+        daily = daily,
         unitStart = unitStart,
         unitEnd = unitEnd,
         remindLeads = remindLeads,
@@ -178,6 +180,43 @@ class AgendaLogicTest {
         assertTrue("weekday 与锚点一致", got.all { it.weekday == anchor.dayOfWeek.value })
         for (i in 1 until got.size) {
             assertEquals("相邻实例应相隔 7 天", got[i - 1].date.plusDays(7L), got[i].date)
+        }
+    }
+
+    /**
+     * 每天重复（2026-11-21 加的）。
+     *
+     * 致辉要的是「连着几天的见习轮转」不用一天建一条。展开逻辑和每周同构，
+     * 但步长是 1 天 —— 很容易写成加 7 然后所有实例都落在同一个 weekday。
+     */
+    @Test
+    fun `每天重复的相邻实例相隔一天`() {
+        val rule = agenda(id = "daily", date = "2026-11-02", daily = true)
+        val got = AgendaLogic.expand(sem, listOf(rule))
+
+        assertTrue("应有展开结果", got.isNotEmpty())
+        assertTrue("结果全部落在学期内", got.all { AgendaLogic.inSemester(sem, it.date) })
+        for (i in 1 until got.size) {
+            assertEquals("每天重复必须隔一天", got[i - 1].date.plusDays(1L), got[i].date)
+        }
+    }
+
+    /** 锚点在开学前时一天天顺延，不能像每周那样加 7（会错位到别的 weekday） */
+    @Test
+    fun `每天重复锚点在学期前也能对齐`() {
+        val rule = agenda(id = "pre-daily", date = "2026-08-01", daily = true)
+        val got = AgendaLogic.expand(sem, listOf(rule))
+        val first = AgendaLogic.firstDay(sem)
+        assertEquals("第一天就该是学期第一天", first, got.first().date)
+    }
+
+    /** daily 和 weekly 同时为 true 时按「每天」算，别让老数据打架 */
+    @Test
+    fun `daily 优先于 weekly`() {
+        val rule = agenda(id = "both", date = "2026-11-02", weekly = true).copy(daily = true)
+        val got = AgendaLogic.expand(sem, listOf(rule))
+        for (i in 1 until got.size) {
+            assertEquals(got[i - 1].date.plusDays(1L), got[i].date)
         }
     }
 

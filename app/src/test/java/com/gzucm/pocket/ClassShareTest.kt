@@ -222,41 +222,53 @@ class ClassShareTest {
     }
 
     /**
-     * 普通日程没有 `deadlineAt`，但「那天什么时候结束」就是天然的截止。
-     * 不补这一手，把见习导进清单再导出来，同学那边会变成「长期待办」。
+     * 普通日程导入清单时**保持日程形态**（2026-11-21 致辉纠正的）。
+     *
+     * 第一版把它硬转成「以结束时刻为截止」的任务 —— 会丢掉时长和地点，
+     * 还会在同学首页变成一个「今天要完成的事」。见习这种本来就是某天某时段。
      */
     @Test
-    fun `普通日程导入清单时用结束时刻当截止`() {
+    fun `普通日程导入清单时保持日程形态`() {
         val event = Agenda(
             id = "ev-1",
             title = "针灸见习",
             date = "2026-11-25",
             startMinute = 14 * 60,
             endMinute = 16 * 60,
+            place = "针灸科",
         )
         val dto = event.toClassTask(now = 1L)
-        val expected = java.time.LocalDate.of(2026, 11, 25)
-            .atTime(16, 0)
-            .atZone(java.time.ZoneId.systemDefault())
-            .toInstant().toEpochMilli()
-        assertEquals(expected, dto.dueAt)
+        assertTrue("应该保持日程形态", dto.isEvent)
+        assertEquals("2026-11-25", dto.day)
+        assertEquals(14 * 60, dto.startMinute)
+        assertEquals(16 * 60, dto.endMinute)
+        assertEquals("针灸科", dto.place)
+        assertNull("日程不写截止时间", dto.dueAt)
     }
 
-    /** 没填时间的日程按当天 23:59 收口，不能补成凌晨 0 点 */
+    /** 日程形态导回来还是日程，而且**不自动带提醒**（提醒是个人偏好） */
     @Test
-    fun `没填时间的日程按当天最后一分钟收口`() {
-        val event = Agenda(
-            id = "ev-2",
-            title = "交材料",
-            date = "2026-11-25",
-            startMinute = 0,
-            endMinute = 0,
+    fun `日程形态导回来还是日程且没有提醒`() {
+        val p = ClassPlan(
+            key = "张三",
+            tasks = listOf(
+                ClassTaskDto(
+                    id = "e1",
+                    title = "针灸见习",
+                    day = "2026-11-25",
+                    startMinute = 14 * 60,
+                    endMinute = 16 * 60,
+                    place = "针灸科",
+                    updatedAt = 1,
+                ),
+            ),
         )
-        val dto = event.toClassTask(now = 1L)
-        val expected = java.time.LocalDate.of(2026, 11, 25)
-            .atTime(23, 59)
-            .atZone(java.time.ZoneId.systemDefault())
-            .toInstant().toEpochMilli()
-        assertEquals(expected, dto.dueAt)
+        val (list, _) = mergeClassTasks(emptyList(), p, today)
+        val a = list.single()
+        org.junit.Assert.assertFalse("不该变成截止任务", a.isTask)
+        assertEquals("2026-11-25", a.date)
+        assertEquals(14 * 60, a.startMinute)
+        assertEquals("针灸科", a.place)
+        assertTrue("学委的提醒不该塞给同学", a.remindLeads.isEmpty())
     }
 }

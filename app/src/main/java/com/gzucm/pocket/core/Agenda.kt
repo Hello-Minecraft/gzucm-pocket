@@ -42,6 +42,14 @@ data class Agenda(
     /** -1 = 自动取色；>=0 对应 CoursePalette 下标（颜色解析放在 ui 层，core 不碰 Compose） */
     val colorIndex: Int = -1,
     val weekly: Boolean = false,
+    /**
+     * 每天都重复（2026-11-21 加）。
+     *
+     * 和 [weekly] 互斥：两个都 true 时按「每天」算（表单不允许并存，
+     * 但老数据/手改 JSON 可能撞上，这里定一个优先级，别让它俩打架）。
+     * 典型用途：连着几天的见习轮转、每天背单词这种。
+     */
+    val daily: Boolean = false,
     val unitStart: Int = 0,
     val unitEnd: Int = 0,
     /**
@@ -257,9 +265,25 @@ object AgendaLogic {
             val start = r.startMinute.coerceIn(0, 1439)
             val end = r.endMinute.coerceIn(start + 1, 1440)
 
-            if (!r.weekly) {
+            if (!r.weekly && !r.daily) {
                 if (anchor.isBefore(from) || anchor.isAfter(to)) continue
                 out += occurrence(r, anchor, start, end, semester)
+                continue
+            }
+
+            /*
+             * 每天重复：从锚点起一天一条，直到学期末。
+             *
+             * 锚点在开学前就一天天顺延到学期内 —— 不能像每周那样加 7，
+             * 那样会错位（锚点周日、学期周一开始，加 7 天永远落在周日）。
+             */
+            if (r.daily) {
+                var d = anchor
+                while (d.isBefore(from)) d = d.plusDays(1)
+                while (!d.isAfter(to)) {
+                    out += occurrence(r, d, start, end, semester)
+                    d = d.plusDays(1)
+                }
                 continue
             }
 

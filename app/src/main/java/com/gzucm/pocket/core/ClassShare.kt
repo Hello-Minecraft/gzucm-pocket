@@ -43,13 +43,34 @@ data class ClassTaskDto(
      * 这个字段留给「标题不想带科目、又想按科目看」的人。
      */
     val course: String = "",
-    /** 截止时间（epoch millis）。null = 长期待办 */
+    /** 截止时间（epoch millis）。DDL 用；null = 长期待办 */
     val dueAt: Long? = null,
+    /**
+     * 日程形态：起始日期 `yyyy-MM-dd`。**空串 = 这条是 DDL/待办，不是日程**。
+     *
+     * 2026-11-21 加的。原来清单只认「截止时间」，从日程导入时只能硬塞一个
+     * 结束时刻当 DDL —— 致辉指出这是错的：见习、上课这种本来就是「某天某时段」，
+     * 转成截止任务会丢掉时长、地点，还会在今日页变成一个「今天要完成的事」。
+     *
+     * 现在两种形态并存：DDL（[dueAt] 有值）和日程（[day] 非空）。
+     * **提醒不跟着清单走**：提醒是每个人的偏好，学委不该替全班决定
+     * 什么时候响（致辉 2026-11-21 明确说的）。
+     */
+    val day: String = "",
+    /** 日程形态的开始分钟（当天第几分钟）。只在 [day] 非空时有意义 */
+    val startMinute: Int = 0,
+    /** 日程形态的结束分钟 */
+    val endMinute: Int = 0,
+    /** 日程形态的地点 */
+    val place: String = "",
     /** 详细要求（选填）。作业要求长的时候就写这里 */
     val note: String = "",
     /** 这一条的修改时间。合并时只认更新的那份，避免旧串把新内容盖回去 */
     val updatedAt: Long,
-)
+) {
+    /** 这条是「某天某时段」的日程，还是「有个截止时间」的任务 */
+    val isEvent: Boolean get() = day.isNotBlank()
+}
 
 /** 一个学委维护的整份清单 */
 @Serializable
@@ -293,19 +314,42 @@ fun mergeClassTasks(
 }
 
 /**
- * 一条班级作业 → 本地截止任务。
+ * 一条班级作业 → 本地日程。
  *
- * 没填截止时间的按「长期待办」处理（`deadlineAt = null`）——
- * 和本地建的长期待办语义一致，首页会把它排在最后而不是标逾期。
+ * **两种形态分开走**（2026-11-21）：
+ *   · 日程（[ClassTaskDto.day] 非空）→ 普通日程，保留时长和地点；
+ *   · DDL → 截止任务，没填时间的按长期待办。
+ *
+ * 提醒一律留空：清单只是「有什么作业」，什么时候响是每个人自己的事。
+ * 学委设了「提前一天」不代表全班都想要 —— 硬塞过去，同学还得逐条关掉。
  */
 private fun ClassTaskDto.toAgenda(key: String, today: LocalDate): Agenda {
-    val day = dueAt?.let {
+    val localId = taskId(key, this.id)
+    if (isEvent) {
+        val start = startMinute.coerceIn(0, 1439)
+        return Agenda(
+            id = localId,
+            title = title,
+            date = day,
+            startMinute = start,
+            endMinute = endMinute.coerceIn(start + 1, 1440),
+            place = place,
+            note = note,
+            isTask = false,
+            // 导入的日程一律单次：学委那边是单次，重复规则不该凭空生成
+            daily = false,
+            weekly = false,
+            origin = classOrigin(key),
+            remoteUpdatedAt = updatedAt,
+        )
+    }
+    val date = dueAt?.let {
         Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate()
     } ?: today
     return Agenda(
-        id = taskId(key, id),
+        id = localId,
         title = title,
-        date = day.toString(),
+        date = date.toString(),
         // 截止任务不占时段，这两个值只用来通过校验
         startMinute = 23 * 60 + 59,
         endMinute = 23 * 60 + 59,
@@ -320,34 +364,33 @@ private fun ClassTaskDto.toAgenda(key: String, today: LocalDate): Agenda {
 /**
  * 一条本地日程 → 班级清单里的条目。
  *
- * 「从我的日程导入」用：把已经建好的截止任务搬进清单，不用重新敲一遍。
+ * 「从我的日程导入」用：把已经建好的条目搬进清单，不用重新敲一遍。
  * id 原样保留（本地 id 是 UUID，不会和别的条目撞）。
  *
- * **普通日程也有截止时间**：它没有 `deadlineAt`，但「那天什么时候结束」是天然的 DDL。
- * 不补这一手，把「周三下午的见习」导进清单再导出来，同学那边会变成「无截止时间」的
- * 长期待办 —— 排在列表最后，等于丢了这个信息。
+ * **普通日程保持日程形态**（带日期和起止时间、地点），
+ * 不硬转成截止任务 —— 见 [ClassTaskDto.day] 的说明。
+ * 提醒不在清单里存（[ClassTaskDto] 压根没有这个字段）。
  */
-fun Agenda.toClassTask(now: Long = System.currentTimeMillis()): ClassTaskDto = ClassTaskDto(
-    id = id,
-    title = title,
-    // 本地日程没有单独存科目，标题里已经带了；这里留空
-    course = "",
-    dueAt = deadlineAt ?: eventEndMillis(),
-    note = note,
-    updatedAt = now,
-)
-
-/**
- * 普通日程结束的时刻。
- *
- * `endMinute` 为 0（用户没填时间）时按当天 23:59 算 ——
- * 补一个 0 点会变成「当天凌晨截止」，比不填还误导。
- */
-private fun Agenda.eventEndMillis(): Long? {
-    val day = runCatching { LocalDate.parse(date) }.getOrNull() ?: return null
-    val minute = if (endMinute > 0) endMinute else 23 * 60 + 59
-    return day.atStartOfDay(ZoneId.systemDefault())
-        .plusMinutes(minute.toLong())
-        .toInstant()
-        .toEpochMilli()
-}
+fun Agenda.toClassTask(now: Long = System.currentTimeMillis()): ClassTaskDto =
+    if (!isTask) {
+        ClassTaskDto(
+            id = id,
+            title = title,
+            course = "",
+            day = date,
+            startMinute = startMinute,
+            endMinute = endMinute,
+            place = place,
+            note = note,
+            updatedAt = now,
+        )
+    } else {
+        ClassTaskDto(
+            id = id,
+            title = title,
+            course = "",
+            dueAt = deadlineAt,
+            note = note,
+            updatedAt = now,
+        )
+    }
