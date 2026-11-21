@@ -46,6 +46,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -84,6 +86,9 @@ import com.gzucm.pocket.ui.components.rememberHazeState
 import com.gzucm.pocket.ui.grades.GradesScreen
 import com.gzucm.pocket.ui.login.LoginScreen
 import com.gzucm.pocket.ui.power.PowerScreen
+import com.gzucm.pocket.ui.schedule.ClassPlanClaimDialog
+import com.gzucm.pocket.ui.schedule.ClassPlanDeletedDialog
+import com.gzucm.pocket.ui.schedule.ClassPlanUpdateDialog
 import com.gzucm.pocket.ui.schedule.ScheduleScreen
 import com.gzucm.pocket.ui.schedule.SessionSheet
 import com.gzucm.pocket.ui.theme.ThemeState
@@ -640,7 +645,8 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 ) { t ->
                     stateHolder.SaveableStateProvider(t.name) {
                     when (t) {
-                        Tab.Today -> TodayScreen(
+                        Tab.Today -> {
+                        TodayScreen(
                             semester = state.semester,
                             currentWeek = vm.currentWeek,
                             sessions = state.sessions,
@@ -678,7 +684,18 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                             progressTotal = state.progressTotal,
                             hasUpdate = vm.hasUpdate,
                             notice = state.message,
+                            /*
+                             * 班级日程那行绑在「待办与日程」卡里，不单独成块
+                             * （致辉 2026-11-22 定的：状态 + 入口合在一张卡里，
+                             * 条目本身仍混在日程时间线上，靠角标区分）。
+                             */
+                            classPlan = vm.classPlanHint?.bar,
+                            classPlanOrphaned = vm.classPlanHint?.orphaned ?: 0,
+                            onClassPlanAction = { vm.requestClassPlanPrompt() },
+                            onClassPlanResolveGone = { tab = Tab.Schedule },
                         )
+                        ClassPlanSyncDialogs(vm)
+                        }
 
                         Tab.Schedule -> ScheduleScreen(
                             semester = state.semester,
@@ -906,6 +923,17 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
         // 学籍里的姓名，预填班级清单的密钥（学委一般就用自己的名字）
         studentName = state.studentCard?.name,
         studentClass = state.studentCard?.className,
+        /*
+         * 云端：发布 / 手动拉取（2026-11-22）。
+         * 没配 FC 时 vm 里这两个回调也照传 —— 面板自己会看 onPublish 是否可用，
+         * 真正发出请求时 ClassSyncApi 会返回 NOT_CONFIGURED，提示一句就完了。
+         */
+        onPublish = { plan ->
+            vm.publishClassPlan(plan) { msg ->
+                Toast.makeText(ctx0, msg, Toast.LENGTH_SHORT).show()
+            }
+        },
+        onFetchFromClass = { vm.requestClassPlanPrompt() },
         onAdd = { date, minute ->
             editingAgenda = null
             draftAgendaDate = date
@@ -1453,5 +1481,57 @@ private fun FloatingBar(
                 }
             }
         }
+    }
+}
+
+/**
+ * 班级日程的三个居中弹窗。
+ *
+ * 只在首页渲染：在日程页、设置页同步出结果时不弹 —— 用户正忙着别的事，
+ * 这时候弹「学委更新了作业」只会让他关掉，等于白白消耗掉当天那一次弹窗额度。
+ * 攒着，回首页再问。
+ *
+ * 为什么不是底部面板：致辉 2026-11-22 明确否掉了从下往上那种
+ * （下滑容易误触关闭，网页也是同一个原因改成整页的）。
+ */
+@Composable
+private fun ClassPlanSyncDialogs(vm: AppViewModel) {
+    val ctx = LocalContext.current
+
+    // 导入结果用系统 Toast：一句话、几秒、不挡操作
+    LaunchedEffect(vm.classPlanToast) {
+        val msg = vm.classPlanToast ?: return@LaunchedEffect
+        Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
+        vm.clearClassPlanToast()
+    }
+
+    when (val p = vm.classPlanHint?.prompt) {
+        is ClassPlanPrompt.Claim -> ClassPlanClaimDialog(
+            plans = p.plans,
+            onClaim = { vm.claimClassPlan(it) },
+            onDismiss = { vm.dismissClassPlanPrompt() },
+        )
+
+        is ClassPlanPrompt.Update -> ClassPlanUpdateDialog(
+            key = p.key,
+            added = p.added,
+            updated = p.updated,
+            /*
+             * 不预览标题：弹窗这一刻手上只有 index（摘要），正文还没拉。
+             * 为了三行标题多打一次请求不划算 —— 点「查看并导入」之后，
+             * 日程列表里能看到完整内容，比在弹窗里读强。
+             */
+            previewTitles = emptyList(),
+            onOpen = { vm.claimClassPlan(p.id) },
+            onLater = { vm.dismissClassPlanPrompt() },
+        )
+
+        // 清单被删不是「打扰」，不记忽略次数 —— 否则三次之后连真正的更新都不弹了
+        is ClassPlanPrompt.Deleted -> ClassPlanDeletedDialog(
+            key = p.key,
+            onDismiss = { vm.dismissClassPlanPrompt(countAsIgnore = false) },
+        )
+
+        null -> Unit
     }
 }

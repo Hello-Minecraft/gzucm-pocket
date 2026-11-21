@@ -402,6 +402,10 @@ fun AgendaListSheet(
     studentName: String? = null,
     /** 学籍里的行政班，班级日程里显示「自动识别到你的班级为…」 */
     studentClass: String? = null,
+    /** 发布班级清单到云端（null = 没配 FC，按钮不显示） */
+    onPublish: ((com.gzucm.pocket.core.ClassPlan) -> Unit)? = null,
+    /** 从本班拉取清单（手动兜底） */
+    onFetchFromClass: (() -> Unit)? = null,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -473,6 +477,8 @@ fun AgendaListSheet(
                 onClose = { showClassShare = false },
                 maintainer = studentName,
                 studentClass = studentClass,
+                onPublish = onPublish,
+                onFetchFromClass = onFetchFromClass,
             )
             return@AdaptiveSheet
         }

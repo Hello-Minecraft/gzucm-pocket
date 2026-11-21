@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -22,6 +23,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import com.gzucm.pocket.ui.components.G3CornerShape
+import com.gzucm.pocket.ui.components.isDarkSurface
 import com.gzucm.pocket.ui.components.micaPanel
 import com.gzucm.pocket.ui.components.micaPanelColor
 import androidx.compose.foundation.verticalScroll
@@ -58,6 +60,9 @@ import com.gzucm.pocket.core.Weather
 import com.gzucm.pocket.ui.components.Fmt
 import com.gzucm.pocket.ui.components.LocalFloatingBarInset
 import com.gzucm.pocket.ui.icons.AppIcons
+import com.gzucm.pocket.ui.schedule.ClassPlanBarState
+import com.gzucm.pocket.ui.schedule.classPlanPatchText
+import com.gzucm.pocket.ui.schedule.classPlanSyncTime
 import com.gzucm.pocket.ui.theme.courseColor
 import java.time.LocalDate
 import java.time.LocalTime
@@ -118,6 +123,23 @@ fun TodayScreen(
     weatherError: String? = null,
     /** 长按任意卡片、或从设置进来：打开「今日页显示」面板 */
     onOpenSections: () -> Unit = {},
+    /**
+     * 「班级日程」那一行的状态；**null = 不显示这一行**。
+     *
+     * 它**不是**一个新的 TodayBlock —— 致辉明确要求绑在「待办与日程」里面，
+     * 所以这里只往下传，最终画在 TasksSection 那张卡的顶部。
+     *
+     * 默认 null 是刻意的：接上 core/ClassSync 之前，各调用点保持原样，
+     * 今日页一个像素都不变（截图测试也不会动）。集成时把 ClassSyncState
+     * 映射成 [ClassPlanBarState] 传进来即可。
+     */
+    classPlan: ClassPlanBarState? = null,
+    /** 学委删掉、本地还留着的条数；>0 时行下面叠一行橙色提示 */
+    classPlanOrphaned: Int = 0,
+    /** 点「去认领」/「查看」 */
+    onClassPlanAction: () -> Unit = {},
+    /** 点橙色提示里的「处理」 */
+    onClassPlanResolveGone: () -> Unit = {},
 ) {
     // today 也挂在同一个 tick 上：停在首页跨过 0 点后要切到新的一天，
     // 下面 remember(…, today) 那几处才会重算
@@ -177,6 +199,14 @@ fun TodayScreen(
             // 同一天里必须再按开考/开始时间排一次，否则上午的考试会落到晚上的日程下面
             .sortedWith(compareBy({ it.startMinute }, { it.title }))
     }
+
+    /*
+     * 「待办与日程」整块画不画。
+     *
+     * 班级日程那一行也算内容：它自己就是入口，只因为它一条都没有就把入口藏起来，
+     * 用户永远发现不了这个功能。没有任何待办但这一行在的话，块里就只剩这一行。
+     */
+    val hasTaskSection = taskCards.isNotEmpty() || shownAgenda.isNotEmpty() || classPlan != null
 
     /*
      * 按可用宽度分两套排版。
@@ -305,7 +335,7 @@ fun TodayScreen(
                          * 两栏布局本身是固定的，目前只在栏内按顺序排
                          * （2026-11-22 致辉指出这样排序等于没用，待定改法）。
                          */
-                        if (taskCards.isNotEmpty() || shownAgenda.isNotEmpty()) {
+                        if (hasTaskSection) {
                             item {
                                 Spacer(Modifier.height(18.dp))
                                 TasksSection(
@@ -313,6 +343,10 @@ fun TodayScreen(
                                     agenda = shownAgenda,
                                     onAgendaClick = onAgendaClick,
                                     onTaskCheck = onTaskCheck,
+                                    classPlan = classPlan,
+                                    classPlanOrphaned = classPlanOrphaned,
+                                    onClassPlanAction = onClassPlanAction,
+                                    onClassPlanResolveGone = onClassPlanResolveGone,
                                 )
                             }
                         }
@@ -370,12 +404,10 @@ fun TodayScreen(
                  */
                 /*
                  * 「待办与日程」今天没内容就整块跳过（连那 18dp 间距也不留）——
-                 * 空着的一块比不画更让人困惑。
+                 * 空着的一块比不画更让人困惑。班级日程那一行在参数里算作有内容。
                  */
-                val hasTasks = taskCards.isNotEmpty() || shownAgenda.isNotEmpty()
-
                 sections.order.forEach { block ->
-                    if (block == TodayBlock.TASKS && !hasTasks) return@forEach
+                    if (block == TodayBlock.TASKS && !hasTaskSection) return@forEach
                     when (block) {
                         TodayBlock.COURSE -> CourseSection(
                             title = if (showingTomorrow) "明日课程" else "今日课程",
@@ -395,6 +427,10 @@ fun TodayScreen(
                             agenda = shownAgenda,
                             onAgendaClick = onAgendaClick,
                             onTaskCheck = onTaskCheck,
+                            classPlan = classPlan,
+                            classPlanOrphaned = classPlanOrphaned,
+                            onClassPlanAction = onClassPlanAction,
+                            onClassPlanResolveGone = onClassPlanResolveGone,
                         )
                         else -> TodayBlockCard(
                             block = block,
@@ -643,6 +679,15 @@ private fun TasksSection(
     agenda: List<AgendaOccurrence>,
     onAgendaClick: (AgendaOccurrence) -> Unit,
     onTaskCheck: (AgendaOccurrence) -> Unit,
+    /**
+     * 班级日程那一行；null = 不画。
+     *
+     * 带默认值：老调用点（含测试）不用改，行为跟加这一行之前完全一样。
+     */
+    classPlan: ClassPlanBarState? = null,
+    classPlanOrphaned: Int = 0,
+    onClassPlanAction: () -> Unit = {},
+    onClassPlanResolveGone: () -> Unit = {},
 ) {
     val scheme = MaterialTheme.colorScheme
     /*
@@ -650,16 +695,37 @@ private fun TasksSection(
      * 否则有考试叫「日程与考试」，都没有才是「我的日程」。
      */
     val hasPendingTask = taskCards.any { it.doneAt == null }
-    Text(
-        when {
-            hasPendingTask -> "待办与日程"
-            agenda.any { it.colorIndex == com.gzucm.pocket.core.EXAM_COLOR_INDEX } -> "日程与考试"
-            else -> "我的日程"
-        },
-        fontSize = 12.sp,
-        color = scheme.onSurfaceVariant,
-    )
-    Spacer(Modifier.height(6.dp))
+    val hasItems = taskCards.isNotEmpty() || agenda.isNotEmpty()
+
+    /*
+     * 第一行永远是班级日程。
+     *
+     * 致辉 2026-11-22 定：不做成新的卡片、不做成按钮，就绑在「待办与日程」这一块里 ——
+     * 它和下面的待办是同一件事（都是「今天要交什么」），分开放反而要用户自己拼。
+     */
+    if (classPlan != null) {
+        ClassPlanBar(
+            state = classPlan,
+            orphaned = classPlanOrphaned,
+            onAction = onClassPlanAction,
+            onResolveGone = onClassPlanResolveGone,
+        )
+        Spacer(Modifier.height(10.dp))
+    }
+
+    // 底下一条待办都没有时，标题也就不写了 —— 否则只剩一个光秃秃的分类名
+    if (hasItems) {
+        Text(
+            when {
+                hasPendingTask -> "待办与日程"
+                agenda.any { it.colorIndex == com.gzucm.pocket.core.EXAM_COLOR_INDEX } -> "日程与考试"
+                else -> "我的日程"
+            },
+            fontSize = 12.sp,
+            color = scheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(6.dp))
+    }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         /*
          * 顺序：未完成任务 → 日程 → 已完成任务（变淡沉底）。
@@ -695,6 +761,173 @@ private fun TasksSection(
                 )
             }
         }
+    }
+}
+
+/** 橙色提示：浅色下压深一档，11sp 的小字才不会发飘 */
+private val WarnOrangeLight = Color(0xFFB2620C)
+private val WarnOrangeDark = Color(0xFFF2AC66)
+
+/**
+ * 「班级日程」那一行：绑在「待办与日程」顶部的一条信息条。
+ *
+ * ## 为什么不是按钮
+ *
+ * 它要能表达四种状态（没有 / 未认领 / 已认领 / 有更新），按钮只能表达一种。
+ * 所以是「图标 + 两行字 + 右侧动作」的信息条，只有右侧动作可点（整行也可点，
+ * 便于命中）；底色用 `surfaceVariant` 的 40%，跟下面的白色日程卡区分开，
+ * 底部一条 1dp 细线把它和待办列表切开 —— 它们是同一块里的两段，不是两张卡。
+ *
+ * ## 文案
+ *
+ * 严格照 `docs/CLASSPLAN_CLOUD.md` 第 7 节：
+ * 「还没有班级日程 / 学委上传后会自动出现在这里」
+ * 「本班有 N 份班级日程 / 张三 12 条 · 王五 5 条」
+ * 「{key}的清单 · {count} 条 / 今天 08:12 同步」
+ * 「{key}更新了：新增 2 条、改了 1 条 / 今天 08:12」
+ * 不要在这里换说法，别处（弹窗）也用的是同一套措辞。
+ */
+@Composable
+private fun ClassPlanBar(
+    state: ClassPlanBarState,
+    orphaned: Int,
+    onAction: () -> Unit,
+    onResolveGone: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val warn = if (isDarkSurface()) WarnOrangeDark else WarnOrangeLight
+
+    val (title, sub) = when (state) {
+        ClassPlanBarState.Empty ->
+            Pair("还没有班级日程", "学委上传后会自动出现在这里")
+
+        // 只列前 3 份：一行装不下第 4 个名字，兜底交给省略号
+        is ClassPlanBarState.Unclaimed -> Pair(
+            "本班有 ${state.plans.size} 份班级日程",
+            state.plans.take(3).joinToString(" · ") { "${it.key} ${it.count} 条" },
+        )
+
+        is ClassPlanBarState.Claimed -> Pair(
+            "${state.key.ifBlank { "学委" }}的清单 · ${state.count} 条",
+            "${classPlanSyncTime(state.syncedAt)} 同步",
+        )
+
+        // 「更新了：新增 2 条、改了 1 条」——顿号是首页那一行的口径，弹窗里用逗号
+        is ClassPlanBarState.Updated -> Pair(
+            "${state.key.ifBlank { "学委" }}更新了：" +
+                classPlanPatchText(state.added, state.updated, "、"),
+            classPlanSyncTime(state.syncedAt),
+        )
+    }
+
+    val actionLabel = when (state) {
+        is ClassPlanBarState.Unclaimed -> "去认领"
+        is ClassPlanBarState.Updated -> "查看"
+        else -> null
+    }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(G3CornerShape(12.dp))
+            .background(scheme.surfaceVariant.copy(alpha = 0.4f)),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 44.dp)
+                // 有动作时整行可点：右侧那两个字的命中区太小，手指容易点空
+                .then(if (actionLabel != null) Modifier.clickable(onClick = onAction) else Modifier)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                AppIcons.EventNote,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = scheme.primary.copy(alpha = 0.9f),
+            )
+            Spacer(Modifier.width(9.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = scheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    sub,
+                    fontSize = 11.sp,
+                    color = scheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (actionLabel != null) {
+                Spacer(Modifier.width(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (state is ClassPlanBarState.Updated) {
+                        Box(
+                            Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(scheme.error),
+                        )
+                        Spacer(Modifier.width(5.dp))
+                    }
+                    Text(
+                        actionLabel,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = scheme.primary,
+                    )
+                }
+            }
+        }
+
+        /*
+         * 学委删掉的条目：本地还留着（见契约第 5 节 mergeClassTasks 的口径）。
+         * 橙色、一行小字、带「处理」入口 —— 红点太吵，这些条目还没丢，只是需要用户拍板。
+         */
+        if (orphaned > 0) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 12.dp, end = 12.dp)
+                    .padding(bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "学委删了 $orphaned 条，你本地还留着",
+                    fontSize = 11.sp,
+                    color = warn,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Text(
+                    " · 处理",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = warn,
+                    modifier = Modifier
+                        .clip(G3CornerShape(6.dp))
+                        .clickable(onClick = onResolveGone)
+                        .padding(horizontal = 2.dp, vertical = 2.dp),
+                )
+            }
+        }
+
+        // 和下面待办列表的分界线。画在条内、贴着底边，圆角会把它两端收进去
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(scheme.outlineVariant.copy(alpha = 0.6f)),
+        )
     }
 }
 

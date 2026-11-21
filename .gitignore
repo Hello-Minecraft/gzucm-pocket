@@ -42,3 +42,6 @@ miniprogram/
 
 # WorkBuddy 项目数据（不是代码）
 .workbuddy/
+
+# 本地凭证（阿里云 AK 等，绝不入库）
+.secrets/

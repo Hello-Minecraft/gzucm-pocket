@@ -12,8 +12,14 @@ import com.gzucm.pocket.core.Agenda
 import com.gzucm.pocket.core.AgendaLogic
 import com.gzucm.pocket.core.AgendaOccurrence
 import com.gzucm.pocket.core.AgendaStore
+import com.gzucm.pocket.core.CLASS_SYNC_INTERVAL_MS
 import com.gzucm.pocket.core.Campus
+import com.gzucm.pocket.core.ClassPlanIndex
+import com.gzucm.pocket.core.ClassPrompt
 import com.gzucm.pocket.core.ClassReminder
+import com.gzucm.pocket.core.ClassSubscription
+import com.gzucm.pocket.core.ClassSyncApi
+import com.gzucm.pocket.core.ClassSyncStore
 import com.gzucm.pocket.core.CourseGrade
 import com.gzucm.pocket.core.CourseSession
 import com.gzucm.pocket.core.EXAM_COLOR_INDEX
@@ -28,9 +34,22 @@ import com.gzucm.pocket.core.PowerInfo
 import com.gzucm.pocket.core.Semester
 import com.gzucm.pocket.core.TodaySections
 import com.gzucm.pocket.core.Weather
+import com.gzucm.pocket.core.canManualSync
+import com.gzucm.pocket.core.detachFromClass
+import com.gzucm.pocket.core.mergeClassSync
+import com.gzucm.pocket.core.newVersions
+import com.gzucm.pocket.core.promptIgnored
+import com.gzucm.pocket.core.promptShown
+import com.gzucm.pocket.core.shouldPrompt
+import com.gzucm.pocket.core.shouldSync
+import com.gzucm.pocket.core.subOf
+import com.gzucm.pocket.core.syncedAt
+import com.gzucm.pocket.core.withSub
 import com.gzucm.pocket.data.Ecard
 import com.gzucm.pocket.data.Jw
 import com.gzucm.pocket.data.Yjs
+import com.gzucm.pocket.ui.schedule.ClassPlanBarState
+import com.gzucm.pocket.ui.schedule.ClaimablePlan
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
@@ -39,6 +58,31 @@ import kotlinx.coroutines.withContext
 import java.time.LocalDate
 
 enum class Phase { Loading, NeedLogin, Ready }
+
+/**
+ * 首页「待办与日程」卡顶部那一行，外加一个待弹的居中窗。
+ *
+ * [bar] 一定是四态之一（没有清单时是 Empty），[prompt] 只有「该打扰用户」时才非空。
+ * 两者分开是因为它们生命周期不同：bar 是常驻的，prompt 关掉就该消失。
+ */
+data class ClassPlanHint(
+    val bar: ClassPlanBarState,
+    val prompt: ClassPlanPrompt? = null,
+    /** 被学委删掉、本地还留着的条数。>0 时那行下面叠一条橙色提示 */
+    val orphaned: Int = 0,
+)
+
+/** 居中弹窗的三种场景（对应 ui/schedule 里的三个 Dialog） */
+sealed interface ClassPlanPrompt {
+    /** 首次发现本班有清单，让用户挑一份认领 */
+    data class Claim(val plans: List<ClaimablePlan>) : ClassPlanPrompt
+
+    /** 已认领的清单有新版本 */
+    data class Update(val id: String, val key: String, val added: Int, val updated: Int) : ClassPlanPrompt
+
+    /** 学委把整份清单删了 */
+    data class Deleted(val key: String) : ClassPlanPrompt
+}
 
 data class UiState(
     val phase: Phase = Phase.Loading,
@@ -261,6 +305,297 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun saveClassPlan(plan: com.gzucm.pocket.core.ClassPlan) {
         classPlanStore.save(plan)
         state = state.copy(classPlan = plan)
+    }
+
+    // ── 班级日程：云端同步（2026-11-22） ──────────────────────────
+    //
+    // 分工：这里只负责「串起来」—— 什么时候发请求、结果往哪写。
+    // 判断全在 core/ClassSync.kt 的纯函数里（能单测），显示全在 ui 层。
+    //
+    // 为什么不放在后台 Worker：国产 ROM 会把 Worker 杀掉（OPPO 上实测过），
+    // 所以「每天一次」靠前台检查 —— 打开 App 时看距上次多久，超 24h 才发。
+    // Worker 只当兜底，不指望它。
+
+    private val classSyncStore = ClassSyncStore(getApplication())
+    private val classSyncApi = ClassSyncApi()
+
+    /** 首页「待办与日程」卡顶部那一行 + 待弹的窗。null = 功能不可用 */
+    var classPlanHint by mutableStateOf<ClassPlanHint?>(null)
+        private set
+
+    /** 同步 / 导入后的一句话提示，UI 显示几秒就清掉 */
+    var classPlanToast by mutableStateOf<String?>(null)
+        private set
+
+    fun clearClassPlanToast() { classPlanToast = null }
+
+    /**
+     * 从本地缓存算出那一行。**不联网**。
+     *
+     * 三个数据源：index（本班有哪些清单）、state（我认领了哪份、同步到哪一版）、
+     * agenda（有没有被学委删掉的条目）。任何一步缺数据都退化成 Empty，不抛。
+     */
+    private fun rebuildClassPlanHint(prompt: ClassPlanPrompt? = null) {
+        /*
+         * 没配云函数、或者还没登录拿不到班级 → 整块不出现。
+         *
+         * 不要退化成 Empty 态：那会让每个没用这个功能的同学，
+         * 都在首页看到一行「还没有班级日程」—— 一个他既没听过也没法用的功能。
+         */
+        if (!classSyncApi.enabled || state.studentCard == null) {
+            classPlanHint = null
+            return
+        }
+        val idx = classSyncStore.loadIndex()
+        val st = classSyncStore.loadState()
+        val orphaned = state.agenda.count { it.classRemoteGone }
+        val bar: ClassPlanBarState = when {
+            idx == null || idx.plans.isEmpty() -> ClassPlanBarState.Empty
+            st.subs.isEmpty() -> ClassPlanBarState.Unclaimed(
+                idx.plans.map { ClaimablePlan(it.id, it.key, it.count, it.updatedAt) },
+            )
+            else -> {
+                // 认领了多份时只拿最新那份做代表 —— 首页一行放不下两份
+                val sub = st.subs.maxByOrNull { it.importedUpdatedAt }!!
+                val brief = idx.plans.firstOrNull { it.id == sub.id }
+                when {
+                    brief == null -> ClassPlanBarState.Claimed(sub.key, 0, st.lastSyncAt)
+                    brief.updatedAt > sub.importedUpdatedAt ->
+                        ClassPlanBarState.Updated(sub.key, 0, 0, st.lastSyncAt)
+                    else -> ClassPlanBarState.Claimed(sub.key, brief.count, st.lastSyncAt)
+                }
+            }
+        }
+        classPlanHint = ClassPlanHint(bar, prompt, orphaned)
+
+        /*
+         * 本班一份清单都没有时不显示这一行。
+         *
+         * 「还没有班级日程」对着一个从没听过这功能的人，只是一行噪音 ——
+         * 他既不知道学委是谁、也没有可点的东西。等真有人发布了，
+         * 同步到就会弹窗 + 出现这一行，那时候它才有意义。
+         */
+        if (bar is ClassPlanBarState.Empty) classPlanHint = null
+    }
+
+    /**
+     * 该同步就同步。
+     *
+     * @param force 手动入口（点那行 / 设置里点同步）传 true —— 跳过 24h 限制，
+     *              但仍受 60 秒防连点约束，免得手抖点五下打五轮请求。
+     */
+    fun syncClassPlan(force: Boolean = false) {
+        val card = state.studentCard ?: return
+        if (!classSyncApi.enabled) return
+        val st = classSyncStore.loadState()
+        val now = System.currentTimeMillis()
+        if (force) {
+            if (!canManualSync(st.lastSyncAt, now)) return
+        } else if (!shouldSync(st.lastSyncAt, now)) {
+            rebuildClassPlanHint()
+            return
+        }
+
+        viewModelScope.launch {
+            when (val r = classSyncApi.index(card.classKey)) {
+                is ClassSyncApi.Result.Ok -> {
+                    classSyncStore.saveIndex(r.value)
+                    classSyncStore.updateState { it.syncedAt(System.currentTimeMillis()) }
+                    decideClassPlanPrompt(r.value)
+                }
+                // 失败一律静默：班级日程不是主功能，断网时不该弹个红字骂人
+                is ClassSyncApi.Result.Failed -> rebuildClassPlanHint()
+            }
+        }
+    }
+
+    /**
+     * 拉到 index 之后决定「要不要打扰用户」。
+     *
+     * 优先级：有新版 > 还没认领 > 清单被删。同一时刻只弹一个窗。
+     */
+    private fun decideClassPlanPrompt(index: ClassPlanIndex) {
+        val st = classSyncStore.loadState()
+        val now = System.currentTimeMillis()
+
+        // ① 已认领、远端有新版
+        val fresh = newVersions(index, st).firstOrNull()
+        if (fresh != null) {
+            val sub = st.subOf(fresh.id)
+            when (shouldPrompt(fresh, sub, st, now)) {
+                ClassPrompt.DIALOG -> {
+                    classSyncStore.updateState { it.promptShown(now) }
+                    rebuildClassPlanHint(ClassPlanPrompt.Update(fresh.id, fresh.key, 0, 0))
+                    return
+                }
+                ClassPrompt.BANNER -> {
+                    rebuildClassPlanHint()
+                    return
+                }
+                ClassPrompt.NONE -> Unit
+            }
+        }
+
+        // ② 从没认领过，本班有清单 —— 一天最多问一次
+        if (st.subs.isEmpty() && index.plans.isNotEmpty()) {
+            val due = st.lastPromptAt == 0L || now - st.lastPromptAt > CLASS_SYNC_INTERVAL_MS
+            if (due) {
+                classSyncStore.updateState { it.promptShown(now) }
+                rebuildClassPlanHint(
+                    ClassPlanPrompt.Claim(
+                        index.plans.map { ClaimablePlan(it.id, it.key, it.count, it.updatedAt) },
+                    ),
+                )
+                return
+            }
+        }
+
+        // ③ 认领过的清单在云端没了（学委整份删了）
+        //    notifiedUpdatedAt 抬到 MAX 当「已经提示过」的标记，避免每次同步都弹
+        val missing = st.subs.firstOrNull { sub ->
+            sub.notifiedUpdatedAt != Long.MAX_VALUE && index.plans.none { it.id == sub.id }
+        }
+        if (missing != null) {
+            classSyncStore.updateState {
+                it.withSub(missing.copy(notifiedUpdatedAt = Long.MAX_VALUE))
+            }
+            rebuildClassPlanHint(ClassPlanPrompt.Deleted(missing.key))
+            return
+        }
+
+        rebuildClassPlanHint()
+    }
+
+    /** 认领一份清单：拉正文 → 合并进日程 → 记订阅 */
+    fun claimClassPlan(id: String) {
+        val card = state.studentCard ?: return
+        viewModelScope.launch {
+            when (val r = classSyncApi.plan(card.classKey, id)) {
+                is ClassSyncApi.Result.Ok -> {
+                    val plan = r.value
+                    val (merged, result) = mergeClassSync(state.agenda, plan)
+                    // 一次导入可能几十条，走 replaceAgendas 只写一次盘、只重排一次闹钟
+                    replaceAgendas(merged)
+                    classSyncStore.updateState {
+                        it.withSub(
+                            ClassSubscription(
+                                id = id,
+                                key = plan.key,
+                                importedUpdatedAt = plan.updatedAt,
+                                notifiedUpdatedAt = plan.updatedAt,
+                                claimedAt = System.currentTimeMillis(),
+                                lastAdded = result.added,
+                                lastUpdated = result.updated,
+                            ),
+                        )
+                    }
+                    classPlanHint = null
+                    classPlanToast = result.summary()
+                    rebuildClassPlanHint()
+                }
+                is ClassSyncApi.Result.Failed -> classPlanToast = r.message.ifBlank { "下载清单失败" }
+            }
+        }
+    }
+
+    /** 手动把弹窗叫出来（点首页那一行的「去认领」/「查看」） */
+    fun requestClassPlanPrompt() {
+        val idx = classSyncStore.loadIndex()
+        val st = classSyncStore.loadState()
+        when {
+            idx == null || idx.plans.isEmpty() -> syncClassPlan(force = true)
+            st.subs.isEmpty() -> rebuildClassPlanHint(
+                ClassPlanPrompt.Claim(
+                    idx.plans.map { ClaimablePlan(it.id, it.key, it.count, it.updatedAt) },
+                ),
+            )
+            else -> {
+                val fresh = newVersions(idx, st)
+                if (fresh.isNotEmpty()) {
+                    // 点「查看」就是要看新版，直接当用户已选「查看」处理：拉正文导入
+                    claimClassPlan(fresh.first().id)
+                } else {
+                    // 没有新版：把这份清单重新拉一遍（学委可能改了但没抬 updatedAt）
+                    val sub = st.subs.maxByOrNull { it.importedUpdatedAt }
+                    if (sub != null) claimClassPlan(sub.id) else syncClassPlan(force = true)
+                }
+            }
+        }
+    }
+
+    /** 关掉弹窗。记一次「忽略」——连续 3 次之后只留首页横幅，不再弹 */
+    fun dismissClassPlanPrompt(countAsIgnore: Boolean = true) {
+        if (countAsIgnore) classSyncStore.updateState { it.promptIgnored() }
+        rebuildClassPlanHint()
+    }
+
+    /** 学委删了这条，本地保留：转成普通本地日程，此后不再跟云端比对 */
+    fun keepDeletedAgenda(id: String) {
+        val target = state.agenda.firstOrNull { it.id == id } ?: return
+        saveAgenda(detachFromClass(target))
+        rebuildClassPlanHint()
+    }
+
+    /** 学委删了这条，本地也不要了 */
+    fun dropDeletedAgenda(id: String) {
+        deleteAgenda(id)
+        rebuildClassPlanHint()
+    }
+
+    /** 首页那行点「处理」：把第一条被删的条目交给调用方展开 */
+    fun firstDeletedAgendaId(): String? = state.agenda.firstOrNull { it.classRemoteGone }?.id
+
+    /**
+     * 把清单发布到本班（学委侧）。回调给一句人话，UI 直接 Toast。
+     *
+     * [plan] 由面板传进来而不是从 `state.classPlan` 读：用户刚填的密钥、
+     * 学籍里的班级这时候可能还没回写进 state，读旧值会发一份 key 为空的清单上去。
+     */
+    fun publishClassPlan(plan: com.gzucm.pocket.core.ClassPlan, onResult: (String) -> Unit) {
+        val card = state.studentCard ?: return
+        if (card.studentId.isBlank()) {
+            onResult("学籍里没有学号，没法发布")
+            return
+        }
+        if (plan.tasks.isEmpty()) {
+            onResult("清单是空的，先加几条作业")
+            return
+        }
+        if (plan.key.isBlank()) {
+            onResult("先填密钥（学委名字）")
+            return
+        }
+        viewModelScope.launch {
+            when (val r = classSyncApi.publish(card.classKey, card.studentId, plan)) {
+                is ClassSyncApi.Result.Ok -> {
+                    // 发布者自己也记一条订阅：这样首页会显示「已发布 · N 条」，
+                    // 而且同学改了别人的清单时能看到「有新版」（学委多设备时有用）
+                    classSyncStore.updateState {
+                        it.withSub(
+                            ClassSubscription(
+                                id = r.value.id,
+                                key = plan.key,
+                                importedUpdatedAt = r.value.updatedAt,
+                                notifiedUpdatedAt = r.value.updatedAt,
+                                claimedAt = System.currentTimeMillis(),
+                            ),
+                        )
+                    }
+                    onResult("已发布，本班同学下次打开 App 就会看到")
+                    syncClassPlan(force = true)
+                }
+                is ClassSyncApi.Result.Failed -> onResult(r.message.ifBlank { "发布失败" })
+            }
+        }
+    }
+
+    /** 清掉一条的未读（打开详情、勾完成时调） */
+    fun markClassPlanSeen(id: String) {
+        val target = state.agenda.firstOrNull { it.id == id } ?: return
+        if (!target.classUnread) return
+        state = state.copy(
+            agenda = agendaStore.upsert(target.copy(classUnread = false)),
+        )
     }
 
     /** 删除一条日程（每周重复会整条删掉，v1 不支持单天例外） */
@@ -689,6 +1024,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         readStudentCardCache()?.let { state = state.copy(studentCard = it) }
 
         /*
+         * 班级日程：先用本地缓存把首页那行画出来，再决定要不要联网。
+         *
+         * 顺序不能反 —— 如果先联网再画，冷启动时那一行会空一下。
+         * syncClassPlan 里自带 24 小时节流，所以每次启动都调是安全的。
+         */
+        rebuildClassPlanHint()
+        syncClassPlan()
+
+        /*
          * 学籍：启动时顺手补一次。
          *
          * 只在「还没拉到」时真请求，所以正常情况下开机就是空跑一跳 ——
@@ -1055,6 +1399,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     Net.json.encodeToString(com.gzucm.pocket.core.StudentCard.serializer(), card)
             }
             state = state.copy(studentCard = card)
+            // 新拿到的班级写进同步存储：它是云端查询的主索引（契约 §1）
+            classSyncStore.className = card.classKey
+            syncClassPlan()
         }
     }
 

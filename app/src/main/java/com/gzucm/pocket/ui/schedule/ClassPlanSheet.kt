@@ -53,6 +53,9 @@ import com.gzucm.pocket.core.encodeClassToken
 import com.gzucm.pocket.core.mergeClassTasks
 import com.gzucm.pocket.core.toClassTask
 import com.gzucm.pocket.ui.adaptive.LocalIsWidePane
+import com.gzucm.pocket.ui.components.CenterDialog
+import com.gzucm.pocket.ui.components.DialogPrimaryButton
+import com.gzucm.pocket.ui.components.DialogSecondaryButton
 import com.gzucm.pocket.ui.components.G3CornerShape
 import com.gzucm.pocket.ui.icons.AppIcons
 import com.gzucm.pocket.core.ClassImportResult
@@ -82,6 +85,16 @@ internal fun ClassPlanContent(
     maintainer: String? = null,
     /** 学籍里的行政班，只用于显示「你是哪个班的」，不参与密钥 */
     studentClass: String? = null,
+    /**
+     * 发布到本班云端（2026-11-22）。null = 这版功能不可用（没配 FC），
+     * 按钮就不出现 —— 而不是点了报错。
+     *
+     * 参数带整份 plan 而不是让调用方自己从 state 里取：这里刚填的密钥、
+     * 学籍里的班级都可能还没回写到 ViewModel，传值比读 state 稳。
+     */
+    onPublish: ((ClassPlan) -> Unit)? = null,
+    /** 从本班拉取清单（手动兜底，和粘分享串并列）。null 时不显示 */
+    onFetchFromClass: (() -> Unit)? = null,
 ) {
     val ctx = LocalContext.current
     val scheme = MaterialTheme.colorScheme
@@ -99,6 +112,9 @@ internal fun ClassPlanContent(
      * 维护人是另一个字段，那个才自动填。
      */
     var key by rememberSaveable { mutableStateOf(plan.key) }
+
+    /** 「发布到本班」的确认框。每次发布都要过一次，不是只第一次 */
+    var showPublishConfirm by remember { mutableStateOf(false) }
 
     fun persist(next: ClassPlan) {
         /*
@@ -150,6 +166,49 @@ internal fun ClassPlanContent(
         )
         clipboard.setPrimaryClip(ClipData.newPlainText("班级日程分享串", token))
         hint = "已复制 ${plan.tasks.size} 条作业的分享串（${token.length} 字），发到班级群里就行" to true
+    }
+
+    if (showPublishConfirm) {
+        val who = studentClass?.takeIf { it.isNotBlank() }
+        CenterDialog(
+            title = "发布到本班？",
+            onDismiss = { showPublishConfirm = false },
+            buttons = {
+                DialogPrimaryButton(
+                    text = "确认发布",
+                    onClick = {
+                        showPublishConfirm = false
+                        val outgoing = plan.copy(
+                            key = key.trim(),
+                            className = who ?: plan.className,
+                            maintainer = maintainer?.takeIf { it.isNotBlank() } ?: plan.maintainer,
+                            updatedAt = System.currentTimeMillis(),
+                        )
+                        persist(outgoing)
+                        onPublish?.invoke(outgoing)
+                    },
+                )
+                DialogSecondaryButton(
+                    text = "再改改",
+                    onClick = { showPublishConfirm = false },
+                )
+            },
+        ) {
+            Text(
+                "上传后${if (who != null) "「$who」全班" else "本班所有"}同学都会收到提醒，" +
+                    "这不是你一个人的备忘。请确认这是全班都需要的作业，不要上传个人笔记。",
+                fontSize = 12.5.sp,
+                lineHeight = 19.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "共 ${plan.tasks.size} 条 · 发布后可以删除，但不能改别人发布的清单",
+                fontSize = 11.5.sp,
+                lineHeight = 16.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 
     when (val m = mode) {
@@ -346,16 +405,59 @@ internal fun ClassPlanContent(
 
             Row(Modifier.fillMaxWidth()) {
                 Button(
+                    onClick = {
+                        val name = key.trim()
+                        if (name.isEmpty()) {
+                            hint = "先填密钥 —— 填全班都知道的那个名字，通常是学委" to false
+                        } else if (plan.tasks.isEmpty()) {
+                            hint = "清单还是空的，先加几条作业再发布" to false
+                        } else if (plan.tasks.size > CLASS_PLAN_MAX_TASKS) {
+                            hint = "一份清单最多 $CLASS_PLAN_MAX_TASKS 条，现在 ${plan.tasks.size} 条" to false
+                        } else {
+                            /*
+                             * 每次发布都确认（不是只第一次）：
+                             * 这是唯一会让全班手机响一次的动作，手滑的成本比多点一下高得多。
+                             */
+                            showPublishConfirm = true
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp),
+                    enabled = onPublish != null,
+                ) { Text("发布到本班", fontSize = 12.5.sp) }
+                Spacer(Modifier.width(9.dp))
+                OutlinedButton(
                     onClick = { share() },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
                 ) { Text("分享给同学", fontSize = 12.5.sp) }
+            }
+
+            Spacer(Modifier.height(9.dp))
+
+            Row(Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    onClick = { onFetchFromClass?.invoke() },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp),
+                    enabled = onFetchFromClass != null,
+                ) { Text("从本班获取", fontSize = 12.5.sp) }
                 Spacer(Modifier.width(9.dp))
                 OutlinedButton(
                     onClick = { importFromClip() },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
-                ) { Text("导入同学的", fontSize = 12.5.sp) }
+                ) { Text("粘贴分享串", fontSize = 12.5.sp) }
+            }
+
+            if (onPublish != null) {
+                Spacer(Modifier.height(7.dp))
+                Text(
+                    "发布后本班会收到提醒 · 每人最多 2 份清单，每份 $CLASS_PLAN_MAX_TASKS 条",
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    color = scheme.onSurfaceVariant.copy(alpha = 0.75f),
+                )
             }
 
             hint?.let { (text, ok) ->
@@ -994,3 +1096,6 @@ private fun dueLabel(ms: Long?): String =
             "${d.year}-%02d-%02d".format(d.monthValue, d.dayOfMonth)
         }
     }
+
+/** 一份清单最多几条。和云函数 `bad_count` 的阈值必须一致（契约 §2.3） */
+private const val CLASS_PLAN_MAX_TASKS = 80

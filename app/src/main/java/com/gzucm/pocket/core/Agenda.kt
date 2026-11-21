@@ -87,6 +87,22 @@ data class Agenda(
      * 学委连发两次串，先导的旧串不能把新内容盖回去。本地建的是 0。
      */
     val remoteUpdatedAt: Long = 0L,
+    /*
+     * ── 云端版（2026-11-22）：四个标记，全部带默认值 ──
+     *
+     * 这四个字段只是**状态标记**，不参与内容比较，也不改上面任何字段的顺序。
+     * 老 JSON 缺这几个键时反序列化补默认值，行为和以前完全一样。
+     * 语义见 docs/CLASSPLAN_CLOUD.md §4 / §5。
+     */
+
+    /** 来自班级清单且用户还没看过 */
+    val classUnread: Boolean = false,
+    /** 学委在清单里删掉了这条，本地保留中 */
+    val classRemoteGone: Boolean = false,
+    /** 学委改了、而本地也手动改过 → 冲突，等用户选 */
+    val classConflict: Boolean = false,
+    /** 用户最后一次手动编辑的时间；0 = 没动过 */
+    val localEditedAt: Long = 0L,
 )
 
 /** 截止任务的展示档：逾期 / 临近 / 一般 / 长期待办 */

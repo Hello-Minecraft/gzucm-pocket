@@ -128,6 +128,13 @@ data class ClassImportResult(
      * 或者学委删错了还会加回来。真要清理让他自己在日程里删。
      */
     val orphaned: Int = 0,
+    /**
+     * 学委改过、本地也改过，两边撞车的条数（云端版）。
+     *
+     * 这些条目**内容一个字都没动**，只标了 `classConflict`，等用户在
+     * 详情里并排对比后自己选。默认 0，老的分享串导入用不到它。
+     */
+    val conflicts: Int = 0,
 ) {
     /** 这次有没有真的产生变化（决定「确认导入」按钮是不是灰的） */
     val hasChanges: Boolean get() = added > 0 || updated > 0
@@ -141,6 +148,10 @@ data class ClassImportResult(
         if (keptDone > 0) {
             if (isNotEmpty()) append("，")
             append("$keptDone 条已完成的保持不变")
+        }
+        if (conflicts > 0) {
+            if (isNotEmpty()) append("，")
+            append("$conflicts 条学委也改过，需要你确认")
         }
         if (isEmpty()) append("没有新内容，都是已有的")
         if (orphaned > 0) {
@@ -267,11 +278,21 @@ fun Agenda.originClass(): String =
  * 2. **只认更新的那份**。学委连发两次串时，先导的旧串不能把新内容盖回去。
  * 3. **本地完成状态永远保留**。学委改了个错别字，不能把你已经勾掉的作业
  *    重新变回未完成 —— 那等于让全班的进度倒退。
+ *
+ * 云端版（2026-11-22）在这三条之上按契约 §5 加了两个标记位：
+ *   · 本地也手动改过（`localEditedAt > 远端 updatedAt`）→ 不覆盖，标 `classConflict`；
+ *   · 远端已经没有这条 → 不删，标 `classRemoteGone`，计入 `orphaned`。
+ * 这两个标记是**事实记录**，和是不是云端来的无关，所以不设开关。
+ *
+ * @param markUnread 是否把新增 / 覆盖的条目标成 `classUnread`。
+ *   默认 `false` —— 保持老路径（粘贴分享串、确认导入前的那次预览）行为不变；
+ *   云端自动同步请走 [mergeClassSync]，它会把这条打开。
  */
 fun mergeClassTasks(
     existing: List<Agenda>,
     plan: ClassPlan,
     today: LocalDate = LocalDate.now(),
+    markUnread: Boolean = false,
 ): Pair<List<Agenda>, ClassImportResult> {
     val list = existing.toMutableList()
     val indexById = existing.withIndex().associate { (i, a) -> a.id to i }.toMutableMap()
@@ -280,23 +301,51 @@ fun mergeClassTasks(
     var updated = 0
     var unchanged = 0
     var keptDone = 0
+    var conflicts = 0
 
     plan.tasks.forEach { dto ->
-        val incoming = dto.toAgenda(plan.key, today)
+        val incoming = dto.toClassAgenda(plan.key, today)
         val at = indexById[incoming.id]
         if (at == null) {
-            list += incoming
+            list += incoming.copy(classUnread = markUnread)
             indexById[incoming.id] = list.lastIndex
             added++
             return@forEach
         }
         val old = list[at]
         if (dto.updatedAt > old.remoteUpdatedAt) {
-            /* 完成状态保留；其余字段以远程为准 */
-            list[at] = incoming.copy(doneAt = old.doneAt)
-            if (old.doneAt != null) keptDone++
-            updated++
+            if (old.localEditedAt > dto.updatedAt) {
+                /*
+                 * 冲突：学委改了，本地也改过 —— **一个字都不覆盖**。
+                 *
+                 * 这里不能「谁的更新时间晚就听谁的」：localEditedAt 是本地时钟，
+                 * 和服务端的 updatedAt 不是一个钟，比大小只能判断「本地动过」，
+                 * 不能判断谁更权威。所以交回给用户选（见 resolveConflictBy*）。
+                 * 顺手清掉「已删除」：远端又出现了这条，说明学委加回来了。
+                 */
+                list[at] = old.copy(classConflict = true, classRemoteGone = false)
+                conflicts++
+            } else {
+                /* 完成状态保留；其余字段以远程为准 */
+                list[at] = incoming.copy(
+                    doneAt = old.doneAt,
+                    classUnread = markUnread,
+                    classConflict = false,
+                    classRemoteGone = false,
+                    // 本地那点改动已被远端覆盖，标记归零，免得下次又判成冲突
+                    localEditedAt = 0L,
+                )
+                if (old.doneAt != null) keptDone++
+                updated++
+            }
         } else {
+            /*
+             * 更新更早或相同 → 内容不动。
+             *
+             * 唯一例外：清掉上一次留下的「已删除」标记 —— 学委删了又加回来
+             * （或者用户换了另一份更新的清单）时，橙色竖线不能一直挂着。
+             */
+            list[at] = if (old.classRemoteGone) old.copy(classRemoteGone = false) else old
             unchanged++
         }
     }
@@ -304,13 +353,19 @@ fun mergeClassTasks(
     /*
      * 本地还留着、这份清单里已经没有的 —— 学委删过东西。
      * 只统计**同一个 key** 导进来的条目，别把另一个学委的清单算成「被删了」。
+     *
+     * 只标记不删：用户可能已经写了笔记，或者学委删错了还会加回来。
      */
     val incomingIds = plan.tasks.mapTo(HashSet()) { taskId(plan.key, it.id) }
-    val orphaned = existing.count {
-        it.origin == classOrigin(plan.key) && it.id !in incomingIds
+    var orphaned = 0
+    for (i in list.indices) {
+        val a = list[i]
+        if (a.origin != classOrigin(plan.key) || a.id in incomingIds) continue
+        orphaned++
+        if (!a.classRemoteGone) list[i] = a.copy(classRemoteGone = true)
     }
 
-    return list to ClassImportResult(added, updated, unchanged, keptDone, orphaned)
+    return list to ClassImportResult(added, updated, unchanged, keptDone, orphaned, conflicts)
 }
 
 /**
@@ -323,7 +378,7 @@ fun mergeClassTasks(
  * 提醒一律留空：清单只是「有什么作业」，什么时候响是每个人自己的事。
  * 学委设了「提前一天」不代表全班都想要 —— 硬塞过去，同学还得逐条关掉。
  */
-private fun ClassTaskDto.toAgenda(key: String, today: LocalDate): Agenda {
+internal fun ClassTaskDto.toClassAgenda(key: String, today: LocalDate): Agenda {
     val localId = taskId(key, this.id)
     if (isEvent) {
         val start = startMinute.coerceIn(0, 1439)
