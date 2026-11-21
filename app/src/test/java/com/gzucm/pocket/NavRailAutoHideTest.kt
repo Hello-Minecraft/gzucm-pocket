@@ -1,12 +1,18 @@
 package com.gzucm.pocket
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import com.gzucm.pocket.ui.MainScaffold
+import com.gzucm.pocket.ui.adaptive.LocalContentLeadingInset
 import com.gzucm.pocket.ui.adaptive.NavRailAlphaKey
 import com.gzucm.pocket.ui.Tab
 import com.gzucm.pocket.ui.theme.GzucmTheme
@@ -76,6 +82,50 @@ class NavRailAutoHideTest {
         render(Tab.Workbench)
         settle(4200L)
         assertEquals("工作台侧栏不该渐隐", 1f, railAlpha(), 0.02f)
+    }
+
+    @Test
+    fun `课表页内容让开侧栏而背景仍铺满全屏`() {
+        var bg: androidx.compose.ui.geometry.Rect? = null
+        var content: androidx.compose.ui.geometry.Rect? = null
+        rule.setContent {
+            GzucmTheme {
+                MainScaffold(tab = Tab.Schedule, onSelect = {}) {
+                    val inset = LocalContentLeadingInset.current
+                    // 复刻课表页的两层：壁纸铺满，内容列右移
+                    Box(Modifier.fillMaxSize()) {
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .background(Color.Blue)
+                                .onGloballyPositioned { bg = it.boundsInRoot() },
+                        )
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .padding(start = inset)
+                                .background(Color.Red)
+                                .onGloballyPositioned { content = it.boundsInRoot() },
+                        )
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+
+        val density = rule.density.density
+        val b = bg ?: error("背景层没布局")
+        val c = content ?: error("内容区没布局")
+
+        assertEquals("壁纸必须从屏幕最左边开始", 0f, b.left / density, 1f)
+        assertEquals("壁纸宽度是整个窗口", 1280f, b.width / density, 2f)
+        assertEquals("内容要让开侧栏 76dp", 76f, c.left / density, 1f)
+        assertEquals(
+            "内容右边界不该被撑出屏幕",
+            1280f,
+            (c.right) / density,
+            2f,
+        )
     }
 
     @Test

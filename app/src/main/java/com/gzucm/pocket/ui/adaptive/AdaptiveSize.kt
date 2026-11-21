@@ -72,3 +72,22 @@ val NavigationRailItemHeight: Dp = 64.dp
  */
 @Composable
 fun rememberLayout(width: Dp): AppLayout = resolveLayout(width)
+
+/**
+ * 内容区左侧被别的东西占掉的宽度。
+ *
+ * 平板走 [AppNavigationRail] 时是 [NavigationRailWidth]，手机是 0。
+ *
+ * ## 它是干什么用的
+ *
+ * 课表页的壁纸要**铺到侧栏底下**（致辉 2026-11-21 定）：侧栏静置渐隐之后，
+ * 露出来的应该是壁纸，而不是一条纯色窗口底 —— 否则「隐藏」只隐藏了图标，
+ * 那 76dp 还是明显不一样的一块。
+ *
+ * 但侧栏宽度不能让内容跟着缩：课表左侧节次列本来就窄，再缩就挤没了。
+ * 所以分工是「**壁纸跨过去，内容不过去**」—— 页面读这个值，把自己的背景层
+ * 向左多画这么多、宽度也补上，布局位置一动不动。
+ *
+ * 注意它只影响绘制，不参与测量约束，别拿它去改 padding。
+ */
+val LocalContentLeadingInset = androidx.compose.runtime.compositionLocalOf { 0.dp }

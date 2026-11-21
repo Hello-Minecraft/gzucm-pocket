@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import com.gzucm.pocket.core.Campus
 import com.gzucm.pocket.ui.adaptive.AppNavigationRail
+import com.gzucm.pocket.ui.adaptive.LocalContentLeadingInset
 import com.gzucm.pocket.ui.adaptive.NavRailItem
 import com.gzucm.pocket.ui.adaptive.rememberLayout
 import com.gzucm.pocket.ui.adaptive.usesNavigationRail
@@ -53,6 +54,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -190,47 +192,93 @@ private fun WideScaffold(
 ) {
     // 研究生学段没有电费 Tab（一卡通是另一套登录，拿不到会话）
     val tabs = tabsOf(campus)
+
+    /*
+     * 侧栏抽成 lambda，两套布局共用。
+     *
+     * 课表页要「内容铺满全屏 + 侧栏浮在上面」，其余页仍是「左右分栏」——
+     * 两种结构的侧栏一模一样，复制一份迟早会漂移（少个角标、少个 autoHide）。
+     */
+    val rail: @Composable (Modifier) -> Unit = { railModifier ->
+        AppNavigationRail(
+            items = tabs.map { NavRailItem(it.label, it.icon) },
+            selected = tabs.indexOf(tab),
+            onSelect = { onSelect(tabs[it]) },
+            /*
+             * 课表页静置自动渐隐，其余页面永远全亮 —— 和手机端底栏同一条策略。
+             *
+             * 今日 / 成绩 / 电费三页的侧栏是主要入口，淡下去会让人以为导航没了；
+             * 课表页是纯阅读场景，导航常年压在左边只是干扰。
+             */
+            autoHide = tab == Tab.Schedule,
+            bottomInset = 0.dp,
+            bottomActions = {
+                /*
+                 * 同步 / 设置从首页标题栏搬到这里。
+                 *
+                 * 首页的标题栏在宽屏下就只剩日期和红点位置，干净很多；
+                 * 侧栏底部是拇指最容易够到的地方（平板握持在两侧）。
+                 */
+                com.gzucm.pocket.ui.adaptive.RailActionButton(
+                    icon = AppIcons.Refresh,
+                    label = "同步",
+                    spinning = syncing,
+                    onClick = onSyncClick,
+                )
+                com.gzucm.pocket.ui.adaptive.RailActionButton(
+                    icon = AppIcons.Settings,
+                    label = "设置",
+                    badge = hasUpdate,
+                    onClick = onSettingsClick,
+                )
+            },
+            modifier = railModifier,
+        )
+    }
+
     /*
      * 底部 inset 置 0：平板的导航条在左侧，内容区可以一直铺到屏幕底边。
      * 之前给底部 Tab 留的那一截在这里是纯浪费 —— 课表会因此少显示半节课。
      */
-    CompositionLocalProvider(LocalFloatingBarInset provides 0.dp) {
-        Row(Modifier.fillMaxSize()) {
-            AppNavigationRail(
-                items = tabs.map { NavRailItem(it.label, it.icon) },
-                selected = tabs.indexOf(tab),
-                onSelect = { onSelect(tabs[it]) },
-                /*
-                 * 课表页静置自动渐隐，其余页面永远全亮 —— 和手机端底栏同一条策略。
-                 *
-                 * 今日 / 成绩 / 电费三页的侧栏是主要入口，淡下去会让人以为导航没了；
-                 * 课表页是纯阅读场景，导航常年压在左边只是干扰。
-                 */
-                autoHide = tab == Tab.Schedule,
-                bottomInset = 0.dp,
-                bottomActions = {
-                    /*
-                     * 同步 / 设置从首页标题栏搬到这里。
-                     *
-                     * 首页的标题栏在宽屏下就只剩日期和红点位置，干净很多；
-                     * 侧栏底部是拇指最容易够到的地方（平板握持在两侧）。
-                     */
-                    com.gzucm.pocket.ui.adaptive.RailActionButton(
-                        icon = AppIcons.Refresh,
-                        label = "同步",
-                        spinning = syncing,
-                        onClick = onSyncClick,
-                    )
-                    com.gzucm.pocket.ui.adaptive.RailActionButton(
-                        icon = AppIcons.Settings,
-                        label = "设置",
-                        badge = hasUpdate,
-                        onClick = onSettingsClick,
-                    )
-                },
-            )
-            Box(Modifier.weight(1f).fillMaxHeight()) {
+    CompositionLocalProvider(
+        LocalFloatingBarInset provides 0.dp,
+        /*
+         * 侧栏占了左边 76dp，页面自己要知道。
+         *
+         * 课表页拿它给自己**内容列**加左内边距（壁纸不受影响，仍然铺满全屏），
+         * 这样侧栏渐隐之后露出来的是一整片壁纸，而不是一条纯色窗口底
+         * （致辉 2026-11-21 报的「只隐藏了字和图标，侧栏底色没隐藏」）。
+         */
+        LocalContentLeadingInset provides com.gzucm.pocket.ui.adaptive.NavigationRailWidth,
+    ) {
+        if (tab == Tab.Schedule) {
+            /*
+             * 课表页：内容铺满全屏，侧栏浮在上面。
+             *
+             * ## 为什么这一页不能用左右分栏
+             *
+             * 分栏时壁纸只铺在右半边，侧栏底下是**纯色窗口底**。
+             * 侧栏渐隐到 15% 之后，那 76dp 仍然是一块明显不同的竖条 ——
+             * 用户看到的是「只有字和图标消失了，底色还在」。
+             *
+             * 改成「全屏铺内容 + 侧栏浮层」之后，壁纸自然铺到侧栏底下，
+             * 淡出就是真的淡出。代价是侧栏会盖住最左边一列，所以课表页
+             * 自己读了 [LocalContentLeadingInset] 把内容列右移。
+             *
+             * 其余三页没有壁纸、侧栏也不隐藏，保持左右分栏（结构更简单，
+             * 也不会有内容被浮层压住的风险）。
+             */
+            Box(Modifier.fillMaxSize()) {
                 content()
+                // zIndex 必须给：Box 里后声明的在上层，而 content 是后声明的
+                rail(Modifier.align(Alignment.CenterStart).zIndex(1f))
+            }
+        } else {
+            Row(Modifier.fillMaxSize()) {
+                rail(Modifier)
+                Box(Modifier.weight(1f).fillMaxHeight()) {
+                    content()
+                }
             }
         }
     }

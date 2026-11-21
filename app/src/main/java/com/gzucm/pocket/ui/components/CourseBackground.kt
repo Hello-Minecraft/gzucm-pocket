@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import java.io.File
 
 /**

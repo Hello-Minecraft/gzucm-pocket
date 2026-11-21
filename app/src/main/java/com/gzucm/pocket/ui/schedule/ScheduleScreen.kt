@@ -380,6 +380,13 @@ fun ScheduleScreen(
         var bgBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
         val blurredBg = com.gzucm.pocket.ui.components.rememberBlurredWallpaper(bgPath)
 
+        /*
+         * 平板上整页铺满全屏（壁纸也会盖到左侧导航栏底下），
+         * 内容列自己向右让出侧栏那一条 —— 见 WideScaffold 里的说明。
+         * 手机上是 0.dp，padding 不起作用。
+         */
+        val railInset = com.gzucm.pocket.ui.adaptive.LocalContentLeadingInset.current
+
         // 自定义背景在最底层，课程块浮在上面
         CourseBackground(
             path = bgPath,
@@ -406,6 +413,8 @@ fun ScheduleScreen(
         Column(
             Modifier
                 .fillMaxSize()
+                // 平板：让开左侧导航栏。壁纸不动，只有内容右移
+                .padding(start = railInset)
                 .statusBarsPadding(),
         ) {
         WeekHeader(
