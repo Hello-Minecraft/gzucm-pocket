@@ -15,7 +15,22 @@ import java.time.LocalDate
  *
  * [key] 是写进 SharedPreferences 的稳定标识，**改名会丢用户已存的顺序**。
  */
-enum class TodayBlock(val key: String, val label: String, val removable: Boolean = true) {
+enum class TodayBlock(
+    val key: String,
+    val label: String,
+    val removable: Boolean = true,
+    /**
+     * 是否「这一版才新增的块」。
+     *
+     * 老配置里必然没有它。`normalized()` 把缺失的块补进 [TodaySections.allOrder] 时，
+     * 默认会把这些块记进 `hiddenSet`（语义是「老配置里没提到 = 用户关掉了」）——
+     * 那条规则对早就存在的块是对的，对**新块**就成了 bug：
+     * 用户升级上来会凭空少一块，而且他不会知道有这一块可以打开。
+     *
+     * 所以新块打这个标记，补齐时**不**记进 hiddenSet，直接出现在页面上。
+     */
+    val addedInThisVersion: Boolean = false,
+) {
     WEATHER("weather", "天气"),
     POWER("power", "宿舍电量"),
     UPCOMING("upcoming", "接下来"),
@@ -23,6 +38,15 @@ enum class TodayBlock(val key: String, val label: String, val removable: Boolean
 
     /** 今日课程。永远显示，但位置可以拖 —— 有人喜欢课程在最上面 */
     COURSE("course", "今日课程", removable = false),
+
+    /**
+     * 今天的截止任务 / 待办 + 今天的日程（2026-11-22 从课程块里拆出来）。
+     *
+     * 原来它挂在「今日课程」下面，跟着课程一起移动、也不能减 ——
+     * 致辉问「排序里少了待办与日程，它现在算在哪」。答案就是「算在课程里」，
+     * 但那不合理：它是独立的一块内容，有自己的标题，凭什么都听课程的。
+     */
+    TASKS("tasks", "待办与日程", addedInThisVersion = true),
     ;
 
     companion object {
@@ -170,7 +194,8 @@ data class TodaySections(
                 DefaultOrder.indexOf(it).let { i -> i >= 0 && i > rank }
             }
             list.add(if (anchor < 0) list.size else anchor, block)
-            if (block.removable) extraHidden += block
+            // 新块不是「用户关掉的」，别让他升级上来就少一块
+            if (block.removable && !block.addedInThisVersion) extraHidden += block
         }
         return copy(allOrder = list, hiddenSet = extraHidden)
     }
@@ -189,6 +214,7 @@ data class TodaySections(
             TodayBlock.WEATHER,
             TodayBlock.POWER,
             TodayBlock.COURSE,
+            TodayBlock.TASKS,
             TodayBlock.UPCOMING,
             TodayBlock.WEEK_OVERVIEW,
         )

@@ -8,13 +8,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 今日页五块的「增删 + 排序」。
+ * 今日页六块的「增删 + 排序」。
+ *
+ * 2026-11-22 新增 [TodayBlock.TASKS]（待办与日程，从课程块里拆出来的），
+ * 所以下面所有期望值都多一项。它的 [TodayBlock.addedInThisVersion] = true，
+ * 「老配置迁移」那几条要特别看：它**不该**被当成「用户关掉的」。
  *
  * 2026-11-20 白天把配置从一个字段一个布尔改成了「一个有序列表」，
  * 晚上又改了一次，因为致辉发现 **「减掉项目再加回去没有回到原来的位置」**。
  *
  * 现在是「**全量顺序 + 隐藏集合**」：
- *   · [TodaySections.allOrder] 永远含五块，被减掉的也在里面；
+ *   · [TodaySections.allOrder] 永远含全部块，被减掉的也在里面；
  *   · [TodaySections.hiddenSet] 只记谁不显示，减掉不动顺序；
  *   · [TodaySections.order] 是两者的组合视图，界面读的是它。
  *
@@ -27,12 +31,13 @@ import org.junit.Test
 class TodaySectionsOrderTest {
 
     @Test
-    fun `默认顺序还原改动前那个页面`() {
+    fun `默认顺序与老页面一致，新块排在课程后面`() {
         assertEquals(
             listOf(
                 TodayBlock.WEATHER,
                 TodayBlock.POWER,
                 TodayBlock.COURSE,
+                TodayBlock.TASKS,
                 TodayBlock.UPCOMING,
                 TodayBlock.WEEK_OVERVIEW,
             ),
@@ -48,6 +53,7 @@ class TodaySectionsOrderTest {
             listOf(
                 TodayBlock.WEATHER,
                 TodayBlock.COURSE,
+                TodayBlock.TASKS,
                 TodayBlock.UPCOMING,
                 TodayBlock.WEEK_OVERVIEW,
             ),
@@ -96,7 +102,7 @@ class TodaySectionsOrderTest {
             .hide(TodayBlock.UPCOMING)
             .hide(TodayBlock.WEEK_OVERVIEW)
         assertEquals(
-            listOf(TodayBlock.WEATHER, TodayBlock.COURSE),
+            listOf(TodayBlock.WEATHER, TodayBlock.COURSE, TodayBlock.TASKS),
             s.order,
         )
 
@@ -120,10 +126,10 @@ class TodaySectionsOrderTest {
     }
 
     @Test
-    fun `四块都减掉是合法状态`() {
+    fun `可减的块全减掉是合法状态`() {
         val s = TodaySections.DefaultOrder.fold(TodaySections()) { acc, b -> acc.hide(b) }
         assertEquals("今日页只剩课程也是允许的", listOf(TodayBlock.COURSE), s.order)
-        assertEquals(4, s.hidden.size)
+        assertEquals("除课程外全部可减", TodayBlock.entries.size - 1, s.hidden.size)
     }
 
     @Test
@@ -134,6 +140,7 @@ class TodaySectionsOrderTest {
                 TodayBlock.POWER,
                 TodayBlock.COURSE,
                 TodayBlock.WEATHER,
+                TodayBlock.TASKS,
                 TodayBlock.UPCOMING,
                 TodayBlock.WEEK_OVERVIEW,
             ),
@@ -150,13 +157,14 @@ class TodaySectionsOrderTest {
      */
     @Test
     fun `拖动不会挤掉隐藏块的位置`() {
-        // 默认 [天气, 电费, 课程, 接下来, 概览]，减掉电费 → 看见 4 个
+        // 默认 [天气, 电费, 课程, 待办, 接下来, 概览]，减掉电费 → 看见 5 个
         val s = TodaySections().hide(TodayBlock.POWER)
         // 把天气拖到最后
-        val moved = s.move(0, 3)
+        val moved = s.move(0, 4)
         assertEquals(
             listOf(
                 TodayBlock.COURSE,
+                TodayBlock.TASKS,
                 TodayBlock.UPCOMING,
                 TodayBlock.WEEK_OVERVIEW,
                 TodayBlock.WEATHER,
@@ -173,6 +181,7 @@ class TodaySectionsOrderTest {
             listOf(
                 TodayBlock.COURSE,
                 TodayBlock.POWER,
+                TodayBlock.TASKS,
                 TodayBlock.UPCOMING,
                 TodayBlock.WEEK_OVERVIEW,
                 TodayBlock.WEATHER,
@@ -210,7 +219,7 @@ class TodaySectionsOrderTest {
     fun `课程不能被减`() {
         val s = TodaySections().hide(TodayBlock.COURSE)
         assertTrue("课程卡必须一直在", s.order.contains(TodayBlock.COURSE))
-        assertEquals(5, s.order.size)
+        assertEquals(TodayBlock.entries.size, s.order.size)
         assertTrue("课程不会出现在隐藏组里", TodayBlock.COURSE !in s.hidden)
     }
 
@@ -228,7 +237,14 @@ class TodaySectionsOrderTest {
             allOrder = listOf(TodayBlock.WEATHER, TodayBlock.UPCOMING),
         ).normalized()
         assertEquals(
-            listOf(TodayBlock.WEATHER, TodayBlock.COURSE, TodayBlock.UPCOMING),
+            listOf(
+                TodayBlock.WEATHER,
+                TodayBlock.COURSE,
+                // 新块按默认顺序插在课程后面，且**不能**被当成「用户关掉的」——
+                // 老配置里必然没有它，藏起来等于升级后凭空少一块
+                TodayBlock.TASKS,
+                TodayBlock.UPCOMING,
+            ),
             onlyWeatherAndUpcoming.order,
         )
         assertEquals(
@@ -238,10 +254,13 @@ class TodaySectionsOrderTest {
         )
 
         val empty = TodaySections(allOrder = emptyList()).normalized()
-        assertEquals(listOf(TodayBlock.COURSE), empty.order)
+        assertEquals(listOf(TodayBlock.COURSE, TodayBlock.TASKS), empty.order)
 
         val onlyWeek = TodaySections(allOrder = listOf(TodayBlock.WEEK_OVERVIEW)).normalized()
-        assertEquals(listOf(TodayBlock.COURSE, TodayBlock.WEEK_OVERVIEW), onlyWeek.order)
+        assertEquals(
+            listOf(TodayBlock.COURSE, TodayBlock.TASKS, TodayBlock.WEEK_OVERVIEW),
+            onlyWeek.order,
+        )
     }
 
     @Test

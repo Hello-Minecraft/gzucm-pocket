@@ -257,7 +257,11 @@ fun TodayScreen(
                          * 平板的两栏布局本身是固定的，排序只在栏内生效。
                          */
                         sections.order
-                            .filter { it != TodayBlock.UPCOMING && it != TodayBlock.COURSE }
+                            .filter {
+                                it != TodayBlock.UPCOMING &&
+                                    it != TodayBlock.COURSE &&
+                                    it != TodayBlock.TASKS
+                            }
                             .forEach { block ->
                                 TodayBlockCard(
                                     block = block,
@@ -289,16 +293,28 @@ fun TodayScreen(
                             CourseSection(
                                 title = if (showingTomorrow) "明日课程" else "今日课程",
                                 sessions = if (showingTomorrow) tomorrowSessions else todaySessions,
-                                agenda = shownAgenda,
-                                taskCards = taskCards,
-                                onAgendaClick = onAgendaClick,
-                                onTaskCheck = onTaskCheck,
                                 syncing = syncing,
                                 allEmpty = sessions.isEmpty(),
                                 progressDone = progressDone,
                                 progressTotal = progressTotal,
                                 onCourseClick = onCourseClick,
                             )
+                        }
+                        /*
+                         * 待办与日程在宽屏仍然固定跟在课程后面：
+                         * 两栏布局本身是固定的，目前只在栏内按顺序排
+                         * （2026-11-22 致辉指出这样排序等于没用，待定改法）。
+                         */
+                        if (taskCards.isNotEmpty() || shownAgenda.isNotEmpty()) {
+                            item {
+                                Spacer(Modifier.height(18.dp))
+                                TasksSection(
+                                    taskCards = taskCards,
+                                    agenda = shownAgenda,
+                                    onAgendaClick = onAgendaClick,
+                                    onTaskCheck = onTaskCheck,
+                                )
+                            }
                         }
                         if (sections.upcoming) {
                             item {
@@ -352,23 +368,35 @@ fun TodayScreen(
                  * （课表、日程、进度、勾选…）比另外四块加起来还多，
                  * 传进去只会让那个函数变成一个参数搬运工。
                  */
+                /*
+                 * 「待办与日程」今天没内容就整块跳过（连那 18dp 间距也不留）——
+                 * 空着的一块比不画更让人困惑。
+                 */
+                val hasTasks = taskCards.isNotEmpty() || shownAgenda.isNotEmpty()
+
                 sections.order.forEach { block ->
-                    if (block == TodayBlock.COURSE) {
-                        CourseSection(
+                    if (block == TodayBlock.TASKS && !hasTasks) return@forEach
+                    when (block) {
+                        TodayBlock.COURSE -> CourseSection(
                             title = if (showingTomorrow) "明日课程" else "今日课程",
                             sessions = if (showingTomorrow) tomorrowSessions else todaySessions,
-                            agenda = shownAgenda,
-                            taskCards = taskCards,
-                            onAgendaClick = onAgendaClick,
-                            onTaskCheck = onTaskCheck,
                             syncing = syncing,
                             allEmpty = sessions.isEmpty(),
                             progressDone = progressDone,
                             progressTotal = progressTotal,
                             onCourseClick = onCourseClick,
                         )
-                    } else {
-                        TodayBlockCard(
+                        /*
+                         * 待办与日程用 today 的 agenda，不跟「明日课程」走：
+                         * 明天的课表可以预览，但今天的作业不会因为点了「明日」就不用交了。
+                         */
+                        TodayBlock.TASKS -> TasksSection(
+                            taskCards = taskCards,
+                            agenda = shownAgenda,
+                            onAgendaClick = onAgendaClick,
+                            onTaskCheck = onTaskCheck,
+                        )
+                        else -> TodayBlockCard(
                             block = block,
                             weather = weather,
                             weatherRefreshing = weatherRefreshing,
@@ -537,16 +565,14 @@ private fun NoticeBar(notice: String, onOpenLogin: () -> Unit) {
  *
  * [allEmpty] 用来区分「真的今天没课」和「课表还没抓完」——
  * 同步中且一条数据都没有时说「今天没有课」是在骗人。
+ *
+ * 2026-11-22 起这里**只画课表**：待办与日程已经独立成 [TasksSection]，
+ * 进排序列表了（见 [com.gzucm.pocket.core.TodayBlock.TASKS]）。
  */
 @Composable
 private fun CourseSection(
     title: String,
     sessions: List<CourseSession>,
-    agenda: List<AgendaOccurrence>,
-    onAgendaClick: (AgendaOccurrence) -> Unit,
-    /** 截止任务卡（含已完成沉底项），单独渲染在这里，不受日期过滤 */
-    taskCards: List<AgendaOccurrence> = emptyList(),
-    onTaskCheck: (AgendaOccurrence) -> Unit,
     syncing: Boolean,
     allEmpty: Boolean,
     progressDone: Int,
@@ -565,86 +591,108 @@ private fun CourseSection(
     /*
      * 课程时间轴原样保留 —— 它的「正在上 / 已下课」判定和竖线连线
      * 都绑在 CourseSession 上，重做成混排会牵动一堆视觉细节。
-     * 日程追加在下面，用独立卡片区分来源。
      */
     if (sessions.isEmpty()) {
-        if (agenda.isEmpty()) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .micaPanel(14.dp)
-                    .padding(vertical = if (syncing && allEmpty) 26.dp else 30.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (syncing && allEmpty) {
-                    com.gzucm.pocket.ui.components.SyncPlaceholder(
-                        done = progressDone,
-                        total = progressTotal,
-                    )
-                } else {
-                    Text(
-                        "今天没有课，也没有日程",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = scheme.onSurfaceVariant,
-                    )
-                }
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .micaPanel(14.dp)
+                .padding(vertical = if (syncing && allEmpty) 26.dp else 30.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (syncing && allEmpty) {
+                com.gzucm.pocket.ui.components.SyncPlaceholder(
+                    done = progressDone,
+                    total = progressTotal,
+                )
+            } else {
+                Text(
+                    // 只说没课 —— 日程挪到单独的块去了，别在这里替它下结论
+                    "今天没有课",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = scheme.onSurfaceVariant,
+                )
             }
         }
     } else {
         Timeline(sessions = sessions, onCourseClick = onCourseClick)
     }
+}
 
-    if (taskCards.isNotEmpty() || agenda.isNotEmpty()) {
-        if (sessions.isNotEmpty()) Spacer(Modifier.height(14.dp))
+/**
+ * 「待办与日程」：今天的截止任务 / 待办 + 今天的日程。
+ *
+ * ## 为什么从课程块里拆出来（2026-11-22，致辉提的）
+ *
+ * 它原来画在 [CourseSection] 末尾，跟着课程块一起移动，也不在排序列表里。
+ * 致辉问「排序少了个待办与日程，现在算在哪」——答案就是「算在课程里」，
+ * 但这说不通：它有自己的标题、自己的内容，用户完全可能想把它拖到最上面
+ * （今天要交的作业比课表更要紧），也可能想暂时收起。
+ *
+ * 拆出来之后它是一个独立块，能拖、能减，位置由 [com.gzucm.pocket.core.TodaySections.order] 决定。
+ *
+ * ## 空的时候整块不画
+ *
+ * 调用方会先判断有没有内容；空着还占一块只会让人以为加载失败。
+ */
+@Composable
+private fun TasksSection(
+    /** 截止任务卡（含已完成沉底项），单独渲染，不受日期过滤 */
+    taskCards: List<AgendaOccurrence>,
+    /** 今天的日程 / 考试 */
+    agenda: List<AgendaOccurrence>,
+    onAgendaClick: (AgendaOccurrence) -> Unit,
+    onTaskCheck: (AgendaOccurrence) -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    /*
+     * 标题按内容写：有截止任务 / 待办就叫「待办与日程」（任务排在前面），
+     * 否则有考试叫「日程与考试」，都没有才是「我的日程」。
+     */
+    val hasPendingTask = taskCards.any { it.doneAt == null }
+    Text(
+        when {
+            hasPendingTask -> "待办与日程"
+            agenda.any { it.colorIndex == com.gzucm.pocket.core.EXAM_COLOR_INDEX } -> "日程与考试"
+            else -> "我的日程"
+        },
+        fontSize = 12.sp,
+        color = scheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.height(6.dp))
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         /*
-         * 标题按内容写：有截止任务 / 待办就叫「待办与日程」（任务排在前面），
-         * 否则有考试叫「日程与考试」，都没有才是「我的日程」。
+         * 顺序：未完成任务 → 日程 → 已完成任务（变淡沉底）。
+         *
+         * 完成后**不立刻消失**（致辉 2026-11-17 拍板）：卡片降到半透明留在最下方，
+         * 第二天才不见（过滤在 ViewModel 的 todayTaskOccurrences 里）。
+         * 想改回来直接再点一下勾 —— 比一闪而过的撤销条好用。
+         * key 仍然保留：已完成项还在列表里、位置会变，没 key 会串状态。
          */
-        val hasPendingTask = taskCards.any { it.doneAt == null }
-        Text(
-            when {
-                hasPendingTask -> "待办与日程"
-                agenda.any { it.colorIndex == com.gzucm.pocket.core.EXAM_COLOR_INDEX } -> "日程与考试"
-                else -> "我的日程"
-            },
-            fontSize = 12.sp,
-            color = scheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(6.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            /*
-             * 顺序：未完成任务 → 日程 → 已完成任务（变淡沉底）。
-             *
-             * 完成后**不立刻消失**（致辉 2026-11-17 拍板）：卡片降到半透明留在最下方，
-             * 第二天才不见（过滤在 ViewModel 的 todayTaskOccurrences 里）。
-             * 想改回来直接再点一下勾 —— 比一闪而过的撤销条好用。
-             * key 仍然保留：已完成项还在列表里、位置会变，没 key 会串状态。
-             */
-            taskCards.filter { it.doneAt == null }.forEach { o ->
-                key("task|" + o.key) {
-                    com.gzucm.pocket.ui.schedule.AgendaDayCard(
-                        occurrence = o,
-                        onClick = { onAgendaClick(o) },
-                        onTaskCheck = { onTaskCheck(o) },
-                    )
-                }
+        taskCards.filter { it.doneAt == null }.forEach { o ->
+            key("task|" + o.key) {
+                com.gzucm.pocket.ui.schedule.AgendaDayCard(
+                    occurrence = o,
+                    onClick = { onAgendaClick(o) },
+                    onTaskCheck = { onTaskCheck(o) },
+                )
             }
-            agenda.forEach { o ->
-                key("agenda|" + o.key) {
-                    com.gzucm.pocket.ui.schedule.AgendaDayCard(
-                        occurrence = o,
-                        onClick = { onAgendaClick(o) },
-                    )
-                }
+        }
+        agenda.forEach { o ->
+            key("agenda|" + o.key) {
+                com.gzucm.pocket.ui.schedule.AgendaDayCard(
+                    occurrence = o,
+                    onClick = { onAgendaClick(o) },
+                )
             }
-            taskCards.filter { it.doneAt != null }.forEach { o ->
-                key("done|" + o.key) {
-                    com.gzucm.pocket.ui.schedule.AgendaDayCard(
-                        occurrence = o,
-                        onClick = { onAgendaClick(o) },
-                        onTaskCheck = { onTaskCheck(o) },
-                    )
-                }
+        }
+        taskCards.filter { it.doneAt != null }.forEach { o ->
+            key("done|" + o.key) {
+                com.gzucm.pocket.ui.schedule.AgendaDayCard(
+                    occurrence = o,
+                    onClick = { onAgendaClick(o) },
+                    onTaskCheck = { onTaskCheck(o) },
+                )
             }
         }
     }
@@ -1174,6 +1222,7 @@ private fun TodayBlockCard(
         )
 
         // 课程卡由调用方就地展开（参数太多），这里不该被走到
-        TodayBlock.COURSE -> Unit
+        // 课程和待办都是整段自己渲染的，不走这个通用卡片
+    TodayBlock.COURSE, TodayBlock.TASKS -> Unit
     }
 }

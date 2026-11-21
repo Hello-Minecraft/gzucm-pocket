@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -80,11 +81,28 @@ fun TodaySectionsSheet(
         visible = visible,
         onDismiss = onDismiss,
         paneTitle = "今日页显示",
+        /*
+         * 侧栏里**不能带垂直滚动**。
+         *
+         * 这一页的主要内容是长按拖动排序，而行的手势是
+         * `detectDragGesturesAfterLongPress`：手指按下后的轻微抖动一旦超过
+         * touch slop，外层 `verticalScroll` 会先把手势拿去滚动，
+         * 长按检测当场被取消 —— 表现就是「平板上怎么按都拖不动」
+         * （2026-11-22 致辉报的）。手机端走 ModalBottomSheet，本来就没有滚动容器，
+         * 所以只有平板出问题。
+         *
+         * 去掉滚动之后内容必须放得下：下面 `showHeader = !isPane` 会把
+         * 侧栏里重复的大标题和说明省掉（顶栏已经写了标题），
+         * 剩下的列表 + 天数卡在 600dp 高的横屏上也装得下。
+         */
+        scrollable = false,
     ) {
         TodaySectionsContent(
             sections = sections,
             onChange = onChange,
             showBack = false,
+            // 侧栏顶栏已经有「今日页显示」，正文再来一遍是重复
+            showHeader = !com.gzucm.pocket.ui.adaptive.LocalIsWidePane.current,
         )
     }
 }
@@ -95,6 +113,13 @@ fun TodaySectionsContent(
     onChange: (TodaySections) -> Unit,
     /** 设置面板里作为子页面时显示「返回设置」；独立面板里不需要 */
     showBack: Boolean = true,
+    /**
+     * 是否渲染正文里的大标题和那段「关掉的块不会删除任何数据」的说明。
+     *
+     * 平板侧栏传 false：顶栏 [AdaptiveSheet] 的 paneTitle 已经写了「今日页显示」，
+     * 正文再重复一遍既啰嗦又白占高度（侧栏不滚动，高度得省着用）。
+     */
+    showHeader: Boolean = true,
     onBack: () -> Unit = {},
     /**
      * 这个构建里有没有天气服务（见 [com.gzucm.pocket.core.Weather.enabled]）。
@@ -132,20 +157,21 @@ fun TodaySectionsContent(
             }
         }
 
-        Text(
-            "今日页显示",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Medium,
-        )
-        Spacer(Modifier.height(3.dp))
-        Text(
-            "关掉的块不会删除任何数据，只是今日页不显示。长按今日页任意卡片也能打开这里。",
-            fontSize = 12.5.sp,
-            lineHeight = 18.sp,
-            color = scheme.onSurfaceVariant,
-        )
-
-        Spacer(Modifier.height(16.dp))
+        if (showHeader) {
+            Text(
+                "今日页显示",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Medium,
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                "关掉的块不会删除任何数据，只是今日页不显示。长按今日页任意卡片也能打开这里。",
+                fontSize = 12.5.sp,
+                lineHeight = 18.sp,
+                color = scheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(16.dp))
+        }
 
         SectionList(
             sections = sections,
@@ -396,7 +422,13 @@ private fun SectionList(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         DragHandle(
-                            modifier = Modifier.pointerInput(block) {
+                            /*
+                             * testTag 给单测用：平板侧栏里「长按拖动排序」要靠它定位。
+                             * 拖动条是 28×34dp 的小热区，按文字找节点再猜偏移量太脆。
+                             */
+                            modifier = Modifier
+                                .testTag("drag_${block.key}")
+                                .pointerInput(block) {
                                 detectDragGesturesAfterLongPress(
                                     onDragStart = {
                                         /*
@@ -637,6 +669,7 @@ private fun subtitleOf(
     TodayBlock.UPCOMING -> "未来几天还有哪些日程和考试"
     TodayBlock.WEEK_OVERVIEW -> "这周每天几节课，哪天最忙"
     TodayBlock.COURSE -> "这一页的主体，不能减；想放最上面或最下面直接拖"
+    TodayBlock.TASKS -> "今天要交的作业和日程；打勾后变淡留在最下面，第二天自动消失"
 }
 
 /** 行间那条极淡的线。比给每行套一张卡安静得多 */
