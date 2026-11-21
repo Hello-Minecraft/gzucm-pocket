@@ -212,12 +212,35 @@ private fun Modifier.micaTopEdge(): Modifier = drawBehind {
  *
  * [micaPanel] 的阴影是四周均匀的，用在整高侧栏上会变成"上下也发黑"，
  * 所以侧栏单独用这条。一次 drawRect，不开图层。
+ *
+ * ## 【2026-11-21 修正】渐变方向原来画反了
+ *
+ * 物理上，投影应该是**紧贴面板的地方最深，往外逐渐消散**。原来写的是
+ * `colors = [Black(alpha), Transparent]` + `startX = -w, endX = 0`，
+ * 也就是 **x=-w（远离面板）最黑、x=0（贴着面板）全透明** —— 反了。
+ *
+ * 实机截图上量出来的灰度（1046×1402，y=500 那一行）：
+ *
+ * ```
+ * x   0 ~ 205   遮罩下的课表        灰度 173
+ * x 206 ~ 243   这条渐变带          146 → 171   ← 远处最黑，贴面板处最亮
+ * x 244 起      面板                255
+ * ```
+ *
+ * 于是左边出现「一条明显的暗边（146）+ 靠面板反而亮回来（171）+ 白白的面板」，
+ * 三条灰度并排，看起来就是**双层阴影**。致辉两次报"双层阴影还在"，
+ * 根因是方向，而不是浓度 —— 上一版把 alpha 从 0.50 降到 0.34 当然没用，
+ * 反着的渐变降多少浓度都还是一条边。
+ *
+ * 现在改成左端透明、右端（贴面板）最深：暗带从面板边缘自然向外消散，
+ * 和底下那层 0.32 遮罩接得上，看不出第二条边。
  */
 fun Modifier.micaSideShadow(width: Dp = 18.dp, alpha: Float = 0.22f): Modifier = drawBehind {
     val w = width.toPx()
     drawRect(
         brush = Brush.horizontalGradient(
-            colors = listOf(Color.Black.copy(alpha = alpha), Color.Transparent),
+            // 顺序要紧：左（远）透明 → 右（贴面板）最深
+            colors = listOf(Color.Transparent, Color.Black.copy(alpha = alpha)),
             startX = -w,
             endX = 0f,
         ),

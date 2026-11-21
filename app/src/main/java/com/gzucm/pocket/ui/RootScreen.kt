@@ -200,6 +200,13 @@ private fun WideScaffold(
                 items = tabs.map { NavRailItem(it.label, it.icon) },
                 selected = tabs.indexOf(tab),
                 onSelect = { onSelect(tabs[it]) },
+                /*
+                 * 课表页静置自动渐隐，其余页面永远全亮 —— 和手机端底栏同一条策略。
+                 *
+                 * 今日 / 成绩 / 电费三页的侧栏是主要入口，淡下去会让人以为导航没了；
+                 * 课表页是纯阅读场景，导航常年压在左边只是干扰。
+                 */
+                autoHide = tab == Tab.Schedule,
                 bottomInset = 0.dp,
                 bottomActions = {
                     /*

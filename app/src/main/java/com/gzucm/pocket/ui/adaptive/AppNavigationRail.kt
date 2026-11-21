@@ -30,6 +30,27 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsPropertyKey
+import androidx.compose.ui.semantics.SemanticsPropertyReceiver
+import androidx.compose.ui.semantics.semantics
+import kotlinx.coroutines.delay
+import com.gzucm.pocket.ui.components.FloatingBarDimAlpha
+import com.gzucm.pocket.ui.components.FloatingBarIdleMs
 
 /**
  * 平板端的左侧导航栏。
@@ -58,13 +79,74 @@ fun AppNavigationRail(
      * 手机端不受影响 —— 那边还是原来的标题栏按钮。
      */
     bottomActions: @Composable () -> Unit = {},
+    /**
+     * 是否启用「静置自动渐隐」。只有课表页传 true。
+     *
+     * ## 为什么平板也要这个（2026-11-21 致辉要求）
+     *
+     * 手机端的悬浮底栏在课表页会静置 3 秒淡到 15%（见 `FloatingBar`）：
+     * 课表是拿来「看」的，导航常年占着就是一层干扰。平板横屏时侧栏虽然只占 76dp，
+     * 但整条竖着压在最左边，眼睛扫课表时总会被它拽一下。
+     *
+     * 策略和手机端**一模一样**，参数直接复用同一组常量，不另立一套：
+     * - 静置 [FloatingBarIdleMs]（3 秒）→ 淡到 [FloatingBarDimAlpha]（0.15）
+     * - 碰一下侧栏任意位置就唤醒，重新计时
+     * - 半透明时的第一次点击**只唤醒、不切页**（那时候字几乎看不清，
+     *   点下去大概率是「想把导航找回来」，直接切走就是误触）
+     *
+     * 侧栏仍然占 76dp 宽度，不做收起动画：课表横向要留出翻周手势的空间，
+     * 宽度一变整列课会跟着跳，比淡一点更烦人。
+     */
+    autoHide: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
+
+    /*
+     * 渐隐状态机。和 FloatingBar 里的写法保持逐行对应 ——
+     * 两处逻辑不一致的话，用户在手机和平板之间切换会觉得「手感变了」。
+     */
+    var wakeTick by remember { mutableIntStateOf(0) }
+    var dimmed by remember { mutableStateOf(false) }
+    var dimmedAtDown by remember { mutableStateOf(false) }
+    val currentDimmed by rememberUpdatedState(dimmed)
+    val currentAutoHide by rememberUpdatedState(autoHide)
+
+    LaunchedEffect(wakeTick, autoHide) {
+        dimmed = false
+        dimmedAtDown = false
+        if (autoHide) {
+            delay(FloatingBarIdleMs)
+            dimmed = true
+        }
+    }
+    val railAlpha by animateFloatAsState(
+        targetValue = if (autoHide && dimmed) FloatingBarDimAlpha else 1f,
+        animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing),
+        label = "navRailAlpha",
+    )
+
     Column(
         modifier = modifier
             .fillMaxHeight()
             .width(NavigationRailWidth)
+            /*
+             * 触摸热区放在整条侧栏上，不是某个 Tab 上 ——
+             * 点图标之间的空隙也算「操作侧栏」，和手机端底栏同一个做法。
+             * awaitFirstDown 不 consume，下面各项的 clickable 照常收到点击。
+             */
+            .pointerInput(autoHide) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    if (currentAutoHide) {
+                        dimmedAtDown = currentDimmed
+                        wakeTick++
+                    }
+                }
+            }
+            .graphicsLayer { alpha = railAlpha }
+            .semantics { navRailAlpha = railAlpha }
+            .testTag("nav_rail")
             // 极淡的一层底，跟内容区分开但不抢眼
             .background(scheme.surface.copy(alpha = 0.55f))
             /*
@@ -102,7 +184,16 @@ fun AppNavigationRail(
             NavRailEntry(
                 item = item,
                 selected = isSelected,
-                onClick = { onSelect(index) },
+                // 单测用：平板侧栏的渐隐/唤醒行为要能定位到具体某一项
+                modifier = Modifier.testTag("nav_item_$index"),
+                onClick = {
+                    /*
+                     * 半透明时第一次点击只唤醒，不切页 —— 和手机端底栏同一条规则。
+                     * 此时 alpha 0.15 的图标几乎看不清，点下去大概率是「想把导航找回来」。
+                     */
+                    if (!dimmedAtDown) onSelect(index)
+                    dimmedAtDown = false
+                },
             )
         }
 
@@ -113,6 +204,10 @@ fun AppNavigationRail(
         Spacer(Modifier.height(10.dp))
     }
 }
+
+/** 单测抓手：侧栏当前整体 alpha（渐隐过程中在 0.15~1 之间过渡） */
+internal val NavRailAlphaKey = SemanticsPropertyKey<Float>("NavRailAlpha")
+internal var SemanticsPropertyReceiver.navRailAlpha by NavRailAlphaKey
 
 /** 一个导航项需要的信息。 */
 @androidx.compose.runtime.Immutable
@@ -126,6 +221,7 @@ private fun NavRailEntry(
     item: NavRailItem,
     selected: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
     // 选中态用主题主色的低透明度底 —— 跟随换肤，不写死颜色
@@ -133,7 +229,7 @@ private fun NavRailEntry(
     val fg = if (selected) scheme.primary else scheme.onSurfaceVariant.copy(alpha = 0.75f)
 
     Column(
-        modifier = Modifier
+        modifier = modifier
             .width(NavigationRailWidth - 12.dp)
             .height(NavigationRailItemHeight)
             .clip(G3CornerShape(14.dp))
