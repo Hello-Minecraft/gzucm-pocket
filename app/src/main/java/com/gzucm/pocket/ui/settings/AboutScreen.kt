@@ -10,7 +10,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -85,6 +87,9 @@ fun AboutScreen(
     /** 更新说明。缓存里有就直接显示，省得再查一次 */
     var notes by remember { mutableStateOf(cached?.notes.orEmpty()) }
 
+    /** 包下好了但系统没允许安装 —— 显示「去允许」入口 */
+    var needPermission by remember { mutableStateOf(false) }
+
     fun openUrl(url: String) {
         if (url.isBlank()) return
         runCatching {
@@ -140,19 +145,50 @@ fun AboutScreen(
             return
         }
         if (downloading) return
+
+        /*
+         * 不预检查「安装未知应用」—— 直接下、下完直接调安装器，
+         * 由系统在安装界面问「是否允许」。这是大多数 App 的做法，
+         * 也比「先跳设置页」顺（2026-11-23 致辉指出的）。
+         */
         downloading = true
-        updateMsg = null
-        when (val r = com.gzucm.pocket.core.ApkDownloader.enqueue(ctx, url, newVersion ?: "new")) {
-            is com.gzucm.pocket.core.ApkDownloader.Result.Ok -> {
-                updateOk = true
-                updateMsg = "已开始下载 ${r.fileName}，完成后点通知栏安装"
+        updateOk = true
+        updateMsg = "正在下载… 0%"
+        scope.launch {
+            val r = withContext(Dispatchers.IO) {
+                com.gzucm.pocket.core.ApkInstaller.download(
+                    ctx,
+                    url,
+                    newVersion ?: "new",
+                ) { p ->
+                    // 回调在 IO 线程，切回主线程改状态
+                    scope.launch { updateMsg = "正在下载… ${(p * 100).toInt()}%" }
+                }
             }
-            is com.gzucm.pocket.core.ApkDownloader.Result.Failed -> {
-                updateOk = false
-                updateMsg = r.reason
+            downloading = false
+            when (r) {
+                is com.gzucm.pocket.core.ApkInstaller.Result.Ok -> {
+                    updateMsg = "下载完成，正在打开安装界面…"
+                    needPermission = false
+                    when (val ir = com.gzucm.pocket.core.ApkInstaller.install(ctx, r.file)) {
+                        com.gzucm.pocket.core.ApkInstaller.InstallResult.Launched -> Unit
+                        com.gzucm.pocket.core.ApkInstaller.InstallResult.NeedsPermission -> {
+                            updateOk = true
+                            updateMsg = "下好了，还差一步：允许「广中医口袋」安装应用"
+                            needPermission = true
+                        }
+                        is com.gzucm.pocket.core.ApkInstaller.InstallResult.Failed -> {
+                            updateOk = false
+                            updateMsg = ir.reason
+                        }
+                    }
+                }
+                is com.gzucm.pocket.core.ApkInstaller.Result.Failed -> {
+                    updateOk = false
+                    updateMsg = r.reason
+                }
             }
         }
-        downloading = false
     }
 
     Column(
@@ -271,12 +307,37 @@ fun AboutScreen(
                 )
             }
 
+            /*
+             * 系统挡了安装时补一个明确的入口。
+             *
+             * 小米的做法是弹一个一闪而过的 Toast 就完事，用户根本来不及反应；
+             * 这里留一个常驻的「去允许」，点完回来自动装（包已经在缓存里，
+             * 再点一次下载按钮会直接跳过下载）。
+             */
+            if (needPermission) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "去允许",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = scheme.surface,
+                    modifier = Modifier
+                        .clip(G3CornerShape(8.dp))
+                        .background(scheme.primary)
+                        .clickable {
+                            com.gzucm.pocket.core.ApkInstaller.openInstallSettings(ctx)
+                        }
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                )
+            }
+
             // 有新版本：给下载 / 打开浏览器两个入口
             if (newVersion != null) {
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "下载 v$newVersion",
+                        // 明确写「并安装」：下完会直接弹安装器，不用再去找文件
+                        if (downloading) "下载中…" else "下载并安装 v$newVersion",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium,
                         color = scheme.surface,

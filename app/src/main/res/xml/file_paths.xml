@@ -13,4 +13,10 @@
 -->
 <paths>
     <cache-path name="exports" path="exports/" />
+    <!--
+      应用内更新下载的 APK（2026-11-23）。
+      单独开一个目录而不是复用 exports：装包是一次性的临时文件，
+      单独放方便在每次下载前整目录清掉，不会误删用户要导出的表格。
+    -->
+    <cache-path name="updates" path="updates/" />
 </paths>

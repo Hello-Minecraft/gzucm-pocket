@@ -123,24 +123,35 @@ class TimetableExportFileTest {
     fun `file_paths 声明了 exports 目录且 provider 用得上`() {
         val ctx = RuntimeEnvironment.getApplication()
 
+        /*
+         * 收集**全部**映射再断言，不要只留最后一个。
+         *
+         * 2026-11-23 加「应用内更新」的 updates/ 之后，这里原来「取最后一个元素」
+         * 的写法立刻红了 —— 不是映射错了，是测试假设了文件里只有一个 path。
+         */
         val xml = ctx.resources.getXml(com.gzucm.pocket.R.xml.file_paths)
-        var tag: String? = null
-        var name: String? = null
-        var path: String? = null
+        val entries = mutableListOf<Triple<String, String, String>>()
         var event = xml.eventType
         while (event != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
             if (event == org.xmlpull.v1.XmlPullParser.START_TAG) {
-                tag = xml.name
-                name = xml.getAttributeValue(null, "name")
-                path = xml.getAttributeValue(null, "path")
+                entries += Triple(
+                    xml.name,
+                    xml.getAttributeValue(null, "name").orEmpty(),
+                    xml.getAttributeValue(null, "path").orEmpty(),
+                )
             }
             event = xml.next()
         }
         xml.close()
 
-        assertEquals("cache-path", tag)
-        assertEquals("exports", name)
-        assertEquals("exports/", path)
+        assertTrue(
+            "file_paths 里必须有 exports 映射（导出表格分享要用）",
+            entries.any { it.first == "cache-path" && it.second == "exports" && it.third == "exports/" },
+        )
+        assertTrue(
+            "file_paths 里必须有 updates 映射（应用内更新装包要用）",
+            entries.any { it.first == "cache-path" && it.second == "updates" && it.third == "updates/" },
+        )
 
         // 清单里 provider 的 authority 必须和代码里算的一致，否则分享时找不到 provider
         val pi = ctx.packageManager.resolveContentProvider(
