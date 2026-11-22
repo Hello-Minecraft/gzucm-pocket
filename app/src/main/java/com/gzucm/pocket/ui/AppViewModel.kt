@@ -389,7 +389,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val bar: ClassPlanBarState = when {
             idx == null || idx.plans.isEmpty() -> ClassPlanBarState.Empty
             st.subs.isEmpty() -> ClassPlanBarState.Unclaimed(
-                idx.plans.map { ClaimablePlan(it.id, it.key, it.count, it.updatedAt) },
+                idx.plans.map {
+                    ClaimablePlan(it.id, it.key, it.count, it.updatedAt, it.ownerName)
+                },
             )
             else -> {
                 // 认领了多份时只拿最新那份做代表 —— 首页一行放不下两份
@@ -636,7 +638,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             // 本班有多份：得先让用户选哪一份，这个弹窗躲不掉
             else -> rebuildClassPlanHint(
                 ClassPlanPrompt.Claim(
-                    idx.plans.map { ClaimablePlan(it.id, it.key, it.count, it.updatedAt) },
+                    idx.plans.map {
+                        ClaimablePlan(it.id, it.key, it.count, it.updatedAt, it.ownerName)
+                    },
                 ),
             )
         }

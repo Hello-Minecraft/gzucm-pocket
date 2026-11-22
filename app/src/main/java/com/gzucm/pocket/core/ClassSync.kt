@@ -22,7 +22,19 @@ import java.time.LocalDate
 data class ClassPlanBrief(
     val id: String,
     val key: String,
+    /**
+     * 发布者的**学号**。只用于服务端的配额计数和归属校验，
+     * 界面上不显示 —— 同学不认识别人的学号。
+     */
     val maintainer: String = "",
+    /**
+     * 发布者的**姓名**（2026-11-22 加）。给同学看「谁维护的」，出事知道找谁。
+     *
+     * 和 [maintainer] 分开存：合成一个字段的话，用学号展示没人看得懂，
+     * 用姓名做归属校验又会因为重名串号。老对象没有这个值，默认空串 ——
+     * 界面按「不显示」处理，不是「未知」。
+     */
+    val ownerName: String = "",
     val count: Int = 0,
     val updatedAt: Long = 0,
 )

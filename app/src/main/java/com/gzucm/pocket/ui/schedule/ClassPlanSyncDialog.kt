@@ -49,6 +49,8 @@ data class ClaimablePlan(
     val key: String,
     val count: Int,
     val updatedAt: Long,
+    /** 维护人姓名（学籍里的），空 = 老数据没有这个字段，界面上省略这一截 */
+    val ownerName: String = "",
 )
 
 /**
@@ -272,7 +274,13 @@ private fun ClaimRow(plan: ClaimablePlan, onClaimClick: () -> Unit) {
             )
             Spacer(Modifier.height(2.dp))
             Text(
-                "${plan.count} 条 · ${classPlanSyncTime(plan.updatedAt)}",
+                buildString {
+                    if (plan.ownerName.isNotBlank()) {
+                        append(plan.ownerName).append(" 维护 · ")
+                    }
+                    append("${plan.count} 条 · ")
+                    append(classPlanSyncTime(plan.updatedAt))
+                },
                 fontSize = 11.sp,
                 color = scheme.onSurfaceVariant,
             )

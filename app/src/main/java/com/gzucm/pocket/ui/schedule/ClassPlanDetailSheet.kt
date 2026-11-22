@@ -150,8 +150,19 @@ fun ClassPlanDetailSheet(
                     .padding(top = 8.dp, bottom = 4.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    /*
+                     * 主行是**清单标识**（同学核对用的那行字），副标题才是「谁维护」。
+                     * 原来这里写的是 `${key} 维护` —— 把标识当成了人名。
+                     * 维护人取自正文的 maintainer（学籍姓名），老数据没有就省略。
+                     */
+                    val owner = detail.plan.maintainer.trim()
+                    val title = if (owner.isBlank()) {
+                        "${detail.key.ifBlank { "班级清单" }} · ${tasks.size} 条"
+                    } else {
+                        "${detail.key.ifBlank { "班级清单" }} · $owner 维护 · ${tasks.size} 条"
+                    }
                     Text(
-                        "${detail.key.ifBlank { "学委" }} 维护 · ${tasks.size} 条",
+                        title,
                         modifier = Modifier.weight(1f),
                         fontSize = 12.5.sp,
                         fontWeight = FontWeight.Medium,

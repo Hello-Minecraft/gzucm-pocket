@@ -316,6 +316,9 @@ def _brief_from_head(key: str):
     # 学委名字是中文，HTTP 头只能放 ASCII —— 写的时候 quote 过，这里解回来
     key_name = urllib.parse.unquote(h.get("x-oss-meta-key", "") or "")
     maintainer = urllib.parse.unquote(h.get("x-oss-meta-maintainer", "") or "")
+    # 姓名（展示用）。老对象没有这个 meta —— 留空即可，不要为了它多打一次 GET：
+    # 重建一次最多 8 份，每份都补一次正文下载会把扩容时的冷启动拖长。
+    owner_name = urllib.parse.unquote(h.get("x-oss-meta-owner-name", "") or "")
     count = _as_int(h.get("x-oss-meta-count"), -1)
     updated = _as_int(h.get("x-oss-meta-updatedat"), 0)
 
@@ -333,11 +336,13 @@ def _brief_from_head(key: str):
             return None
         key_name = key_name or str(plan.get("key") or "")
         maintainer = maintainer or str(plan.get("maintainer") or "")
+        owner_name = owner_name or str(plan.get("maintainer") or "")
         tasks = plan.get("tasks")
         count = len(tasks) if isinstance(tasks, list) else 0
         updated = updated or _as_int(plan.get("updatedAt"), 0)
 
     return {"id": pid, "key": key_name, "maintainer": maintainer,
+            "ownerName": owner_name,
             "count": max(count, 0), "updatedAt": updated}
 
 
@@ -501,11 +506,14 @@ def h_index(payload: dict):
         print(f"[classplan] 取索引失败: {type(e).__name__}: {e}")
         return fail(502, "server_error", "清单列表暂时读不到，请稍后重试")
 
-    # 只回契约里那五个字段。索引里若以后加了内部字段，不能顺手漏出去
+    # 只回契约里列出的字段。索引里若以后加了内部字段，不能顺手漏出去。
+    # 加字段时**记得同步这里** —— 漏掉的话前端拿到的是 None，
+    # 表现成「字段明明写了却不显示」，很难查（2026-11-22 就踩了一次）。
     plans = [{
         "id": str(p.get("id") or ""),
         "key": str(p.get("key") or ""),
         "maintainer": str(p.get("maintainer") or ""),
+        "ownerName": str(p.get("ownerName") or ""),
         "count": _as_int(p.get("count")),
         "updatedAt": _as_int(p.get("updatedAt")),
     } for p in idx.get("plans") or []]
@@ -608,7 +616,12 @@ def h_publish(payload: dict):
     # 元数据是重建索引时的数据来源，必须和正文一致。学委名字是中文，
     # HTTP 头放不下，quote 成 ASCII；读的时候 unquote 回来。
     meta = {
+        # 学号：配额计数、覆盖/删除的归属校验都靠它，**不展示**
         "x-oss-meta-maintainer": urllib.parse.quote(uploader, safe=""),
+        # 姓名：只用于给同学看「谁维护的」（2026-11-22 加）。
+        # 和学号分成两个字段 —— 合成一个的话，重名会串、学号又没法读。
+        "x-oss-meta-owner-name": urllib.parse.quote(
+            str(plan.get("maintainer") or ""), safe=""),
         "x-oss-meta-key": urllib.parse.quote(key, safe=""),
         "x-oss-meta-count": str(len(tasks)),
         "x-oss-meta-updatedat": str(updated_at),
@@ -619,6 +632,7 @@ def h_publish(payload: dict):
         return fail(502, "server_error", "保存失败，请稍后重试")
 
     brief = {"id": pid, "key": key, "maintainer": uploader,
+             "ownerName": str(plan.get("maintainer") or ""),
              "count": len(tasks), "updatedAt": updated_at}
     plans = [p for p in plans if str(p.get("id")) != pid]
     plans.append(brief)
@@ -630,8 +644,15 @@ def h_publish(payload: dict):
 def h_delete(payload: dict):
     """POST /classplan/delete —— 只允许删自己发的。
 
-    归属靠**正文里的 maintainer** 比对 uploader（契约 2.4 原文）。
-    不信元数据：元数据是我自己写的，正文才是发布那一刻的原件。
+    归属比的是**发布时记下的学号**，不是正文里的 maintainer。
+
+    原来拿正文 `maintainer` 比 `uploader`，但 2026-11-22 起正文那个字段放的是
+    **姓名**（给同学看「谁维护」），拿名字比学号永远不相等 —— 表现成
+    「谁都不能删自己的清单」。学号在对象元数据 `x-oss-meta-maintainer` 里
+    （publish 写入，和 uploader 同源），从这里取；老对象没有元数据时才退回正文。
+
+    注意这一层本来就只是「防误删」，不是安全边界：`uploader` 是客户端传的，
+    真鉴权要靠登录态，那是二期的事。
     """
     name, err = _class_of(payload)
     if err:
@@ -643,19 +664,22 @@ def h_delete(payload: dict):
     uploader = str(payload.get("uploader") or "").strip()
     ch = class_hash(name)
 
-    status, _, raw = oss("GET", plan_key(ch, pid))
+    status, headers, raw = oss("GET", plan_key(ch, pid))
     if status == 404:
         return fail(404, "not_found", "这份清单不存在，可能已经被删掉了")
     if status != 200:
         return fail(502, "server_error", "清单暂时读不到，请稍后重试")
 
+    h = {k.lower(): v for k, v in (headers or {}).items()}
+    owner_meta = urllib.parse.unquote(h.get("x-oss-meta-maintainer", "") or "")
     try:
         plan = json.loads(raw.decode("utf-8"))
-        owner = str((plan or {}).get("maintainer") or "")
     except Exception as e:
         print(f"[classplan] 删除前解析正文失败 {pid}: {type(e).__name__}: {e}")
         return fail(502, "server_error", "清单内容损坏，无法删除")
 
+    # 优先元数据（学号）；老对象没有 meta 时退回正文（那时候正文存的也是学号）
+    owner = owner_meta or str((plan or {}).get("maintainer") or "")
     if owner != uploader:
         return fail(403, "not_owner", "只能删除自己发布的清单")
 
