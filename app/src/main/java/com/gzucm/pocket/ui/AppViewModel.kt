@@ -14,7 +14,9 @@ import com.gzucm.pocket.core.AgendaOccurrence
 import com.gzucm.pocket.core.AgendaStore
 import com.gzucm.pocket.core.CLASS_SYNC_INTERVAL_MS
 import com.gzucm.pocket.core.Campus
+import com.gzucm.pocket.core.ClassPlan
 import com.gzucm.pocket.core.ClassPlanIndex
+import com.gzucm.pocket.core.ClassTaskState
 import com.gzucm.pocket.core.ClassPrompt
 import com.gzucm.pocket.core.ClassReminder
 import com.gzucm.pocket.core.ClassSubscription
@@ -34,7 +36,11 @@ import com.gzucm.pocket.core.PowerInfo
 import com.gzucm.pocket.core.Semester
 import com.gzucm.pocket.core.TodaySections
 import com.gzucm.pocket.core.Weather
+import com.gzucm.pocket.core.autoImportIds
 import com.gzucm.pocket.core.canManualSync
+import com.gzucm.pocket.core.classTaskStates
+import com.gzucm.pocket.core.withDeclined
+import com.gzucm.pocket.core.withoutSub
 import com.gzucm.pocket.core.detachFromClass
 import com.gzucm.pocket.core.mergeClassSync
 import com.gzucm.pocket.core.newVersions
@@ -72,9 +78,31 @@ data class ClassPlanHint(
     val orphaned: Int = 0,
 )
 
+/**
+ * 清单详情面板要显示的全部内容（2026-11-22）。
+ *
+ * [states] 在这里算好再交给 UI，不让 UI 自己对照日程 ——
+ * `classTaskStates` 是 core 里的纯函数，能单测；UI 只管照着画。
+ * 导入之后状态会变（新增变已加入），所以每次确认都要重建一份。
+ */
+data class ClassPlanDetailUi(
+    val id: String,
+    /** 学委名字，也是这份清单的密钥 */
+    val key: String,
+    val plan: ClassPlan,
+    /** 键 = `ClassTaskDto.id` */
+    val states: Map<String, ClassTaskState>,
+    /** 是否已认领（有订阅）。没认领时底部按钮写「认领并导入」 */
+    val claimed: Boolean,
+    val syncedAt: Long,
+    /** 明确拒绝过的条目，详情页默认不勾 */
+    val declined: Set<String>,
+    /** 正文来自本地缓存、网络没拉通：顶部要写「可能不是最新」 */
+    val fromCache: Boolean = false,
+)
+
 /** 居中弹窗的三种场景（对应 ui/schedule 里的三个 Dialog） */
-sealed interface ClassPlanPrompt {
-    /** 首次发现本班有清单，让用户挑一份认领 */
+sealed interface ClassPlanPrompt {    /** 首次发现本班有清单，让用户挑一份认领 */
     data class Claim(val plans: List<ClaimablePlan>) : ClassPlanPrompt
 
     /** 已认领的清单有新版本 */
@@ -330,6 +358,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun clearClassPlanToast() { classPlanToast = null }
 
     /**
+     * 清单详情（点首页那一行打开）。null = 面板没开。
+     *
+     * 2026-11-22 加：原来点「认领」是**直接全量导入**，同学根本不知道
+     * 自己要吃进什么。现在改成先看清单、勾选、再导入。
+     */
+    var classPlanDetail by mutableStateOf<ClassPlanDetailUi?>(null)
+        private set
+
+    /**
      * 从本地缓存算出那一行。**不联网**。
      *
      * 三个数据源：index（本班有哪些清单）、state（我认领了哪份、同步到哪一版）、
@@ -359,10 +396,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val sub = st.subs.maxByOrNull { it.importedUpdatedAt }!!
                 val brief = idx.plans.firstOrNull { it.id == sub.id }
                 when {
-                    brief == null -> ClassPlanBarState.Claimed(sub.key, 0, st.lastSyncAt)
-                    brief.updatedAt > sub.importedUpdatedAt ->
-                        ClassPlanBarState.Updated(sub.key, 0, 0, st.lastSyncAt)
-                    else -> ClassPlanBarState.Claimed(sub.key, brief.count, st.lastSyncAt)
+                    brief == null -> ClassPlanBarState.Claimed(sub.id, sub.key, 0, st.lastSyncAt)
+                    brief.updatedAt > sub.importedUpdatedAt -> ClassPlanBarState.Updated(
+                        sub.id,
+                        sub.key,
+                        sub.lastAdded,
+                        sub.lastUpdated,
+                        st.lastSyncAt,
+                    )
+                    else -> ClassPlanBarState.Claimed(sub.id, sub.key, brief.count, st.lastSyncAt)
                 }
             }
         }
@@ -466,36 +508,108 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         rebuildClassPlanHint()
     }
 
-    /** 认领一份清单：拉正文 → 合并进日程 → 记订阅 */
-    fun claimClassPlan(id: String) {
+    /**
+     * 打开清单详情：拉正文 → 存缓存 → 交给面板。
+     *
+     * 2026-11-22 起「认领」不再是「直接全量导入」—— 同学要先看见有什么、
+     * 勾掉不想要的，再确认。所以这个函数只负责把内容取到，不碰日程。
+     *
+     * 有缓存先显示：同学点开时不该对着空白转圈，尤其刚同步过、内容其实
+     * 早就在本地了。网络回来之后再默默换成最新的（[ClassPlanDetailUi.fromCache] 变 false）。
+     */
+    fun openClassPlanDetail(id: String) {
         val card = state.studentCard ?: return
+        val cached = classSyncStore.loadPlanCache(id)
+        if (cached != null) classPlanDetail = buildClassPlanDetail(id, cached, fromCache = true)
+
         viewModelScope.launch {
             when (val r = classSyncApi.plan(card.classKey, id)) {
                 is ClassSyncApi.Result.Ok -> {
-                    val plan = r.value
-                    val (merged, result) = mergeClassSync(state.agenda, plan)
-                    // 一次导入可能几十条，走 replaceAgendas 只写一次盘、只重排一次闹钟
-                    replaceAgendas(merged)
-                    classSyncStore.updateState {
-                        it.withSub(
-                            ClassSubscription(
-                                id = id,
-                                key = plan.key,
-                                importedUpdatedAt = plan.updatedAt,
-                                notifiedUpdatedAt = plan.updatedAt,
-                                claimedAt = System.currentTimeMillis(),
-                                lastAdded = result.added,
-                                lastUpdated = result.updated,
-                            ),
-                        )
-                    }
-                    classPlanHint = null
-                    classPlanToast = result.summary()
-                    rebuildClassPlanHint()
+                    classSyncStore.savePlanCache(id, r.value)
+                    classPlanDetail = buildClassPlanDetail(id, r.value, fromCache = false)
                 }
-                is ClassSyncApi.Result.Failed -> classPlanToast = r.message.ifBlank { "下载清单失败" }
+                // 有缓存就闭嘴用缓存（面板顶部已经写了「可能不是最新」）；没缓存才报错
+                is ClassSyncApi.Result.Failed -> if (cached == null) {
+                    classPlanToast = r.message.ifBlank { "连不上云端，稍后再试" }
+                }
             }
         }
+    }
+
+    /** 关掉详情面板。不改任何数据 —— 用户只是点开看了眼 */
+    fun closeClassPlanDetail() { classPlanDetail = null }
+
+    private fun buildClassPlanDetail(
+        id: String,
+        plan: ClassPlan,
+        fromCache: Boolean,
+    ): ClassPlanDetailUi {
+        val st = classSyncStore.loadState()
+        val sub = st.subOf(id)
+        return ClassPlanDetailUi(
+            id = id,
+            key = plan.key,
+            plan = plan,
+            states = classTaskStates(plan, state.agenda),
+            claimed = sub != null,
+            syncedAt = st.lastSyncAt,
+            declined = sub?.declinedIds.orEmpty().toSet(),
+            fromCache = fromCache,
+        )
+    }
+
+    /**
+     * 确认导入勾选的那几条（详情页底部按钮）。
+     *
+     * 这里是**唯一**把班级清单灌进日程的入口 —— 自动同步只发提醒、不动数据，
+     * 因为「要不要这条作业」得用户自己说了算（2026-11-22 定的）。
+     */
+    fun confirmClassPlanImport(selected: Set<String>) {
+        val detail = classPlanDetail ?: return
+        if (selected.isEmpty()) {
+            classPlanToast = "一条都没勾，那就先不导入"
+            return
+        }
+        val plan = detail.plan
+        val (merged, result) = mergeClassSync(state.agenda, plan, onlyIds = selected)
+        // 一次导入可能几十条，走 replaceAgendas 只写一次盘、只重排一次闹钟
+        replaceAgendas(merged)
+
+        /*
+         * 没勾的全记成「明确不要」。
+         *
+         * 不记的话，用户下次同步会被告知「新增 3 条」—— 而那 3 条正是他
+         * 刚亲手否掉的东西。详情页永远列全部条目，想反悔随时回去勾。
+         */
+        val declined = plan.tasks.map { it.id }.filterNot { it in selected }
+        val now = System.currentTimeMillis()
+        classSyncStore.updateState { st ->
+            val oldSub = st.subOf(detail.id)
+            st.withSub(
+                ClassSubscription(
+                    id = detail.id,
+                    key = plan.key,
+                    importedUpdatedAt = plan.updatedAt,
+                    notifiedUpdatedAt = plan.updatedAt,
+                    claimedAt = oldSub?.claimedAt?.takeIf { it > 0 } ?: now,
+                    lastAdded = result.added,
+                    lastUpdated = result.updated,
+                    declinedIds = declined,
+                ),
+            )
+        }
+        classPlanDetail = buildClassPlanDetail(detail.id, plan, fromCache = detail.fromCache)
+        classPlanToast = result.summary()
+        rebuildClassPlanHint()
+    }
+
+    /** 取消认领：不再同步这份清单，已导入的日程原样留成本地日程 */
+    fun unsubscribeClassPlan(id: String) {
+        classSyncStore.updateState { it.withoutSub(id) }
+        classSyncStore.prunePlanCache(classSyncStore.loadState().subs.map { it.id }.toSet())
+        classPlanDetail = null
+        classPlanToast = "已取消认领，导入的日程还在你的日程里"
+        rebuildClassPlanHint()
     }
 
     /** 手动把弹窗叫出来（点首页那一行的「去认领」/「查看」） */
@@ -504,22 +618,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val st = classSyncStore.loadState()
         when {
             idx == null || idx.plans.isEmpty() -> syncClassPlan(force = true)
-            st.subs.isEmpty() -> rebuildClassPlanHint(
+
+            /*
+             * 已认领：点那一行就是要看清单内容，直接开详情。
+             *
+             * 不再先判断「有没有新版」再决定开弹窗还是导入 —— 那是导入流程，
+             * 不是浏览流程。用户点的是「查看」，不是「更新我」。
+             */
+            st.subs.isNotEmpty() -> {
+                val sub = st.subs.maxByOrNull { it.importedUpdatedAt }
+                if (sub != null) openClassPlanDetail(sub.id) else syncClassPlan(force = true)
+            }
+
+            // 没认领、本班只有一份：也直接开详情（进去就能勾选导入），省一层选择
+            idx.plans.size == 1 -> openClassPlanDetail(idx.plans.first().id)
+
+            // 本班有多份：得先让用户选哪一份，这个弹窗躲不掉
+            else -> rebuildClassPlanHint(
                 ClassPlanPrompt.Claim(
                     idx.plans.map { ClaimablePlan(it.id, it.key, it.count, it.updatedAt) },
                 ),
             )
-            else -> {
-                val fresh = newVersions(idx, st)
-                if (fresh.isNotEmpty()) {
-                    // 点「查看」就是要看新版，直接当用户已选「查看」处理：拉正文导入
-                    claimClassPlan(fresh.first().id)
-                } else {
-                    // 没有新版：把这份清单重新拉一遍（学委可能改了但没抬 updatedAt）
-                    val sub = st.subs.maxByOrNull { it.importedUpdatedAt }
-                    if (sub != null) claimClassPlan(sub.id) else syncClassPlan(force = true)
-                }
-            }
         }
     }
 

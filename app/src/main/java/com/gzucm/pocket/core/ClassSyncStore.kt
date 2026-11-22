@@ -71,9 +71,49 @@ class ClassSyncStore(context: Context) {
 
     fun clearIndex() = synchronized(LOCK) { sp.edit().remove(KEY_INDEX).apply() }
 
+    /**
+     * 已认领清单的**正文**缓存（2026-11-22 加）。
+     *
+     * 为什么必须存：首页那行点开要看「这份清单里到底有什么」，包括没导入的、
+     * 学委刚删的。只靠 [loadIndex] 那份摘要拿不到条目，只靠 [AgendaStore]
+     * 又只有「我导入了的」—— 两个都答不了这个问题。
+     *
+     * 存下来还顺带解决了三件事：没网也能看；打开不转圈；能算出「哪几条
+     * 我还没导入」。一份 80 条约 15 KB，一个班最多 8 份，这个量级无所谓。
+     *
+     * 按服务端 id（= `planId(学委名字)`）分开存，不是只存最新一份 ——
+     * 一个班可能有多份清单，同学认领两份时两边都要能点开。
+     */
+    fun savePlanCache(id: String, plan: ClassPlan) = synchronized(LOCK) {
+        val encoded = Net.json.encodeToString(ClassPlan.serializer(), plan)
+        sp.edit().putString(KEY_PLAN_CACHE + id, encoded).apply()
+    }
+
+    fun loadPlanCache(id: String): ClassPlan? = synchronized(LOCK) {
+        val raw = sp.getString(KEY_PLAN_CACHE + id, null) ?: return@synchronized null
+        runCatching { Net.json.decodeFromString(ClassPlan.serializer(), raw) }.getOrNull()
+    }
+
+    /**
+     * 只保留这些 id 的正文，其余删掉。
+     *
+     * 学委把清单删了、或者用户取消认领时调 —— 不清理的话 prefs 会一直攒
+     * 已经没人要的正文，而且下次同 id 的旧缓存可能盖住新内容。
+     */
+    fun prunePlanCache(keep: Set<String>) = synchronized(LOCK) {
+        val edit = sp.edit()
+        sp.all.keys
+            .filter { it.startsWith(KEY_PLAN_CACHE) && it.removePrefix(KEY_PLAN_CACHE) !in keep }
+            .forEach { edit.remove(it) }
+        edit.apply()
+    }
+
     /** 退出登录 / 换班时清干净。日程和学委清单不在这里，别顺手删 */
     fun clear() = synchronized(LOCK) {
-        sp.edit().remove(KEY_STATE).remove(KEY_INDEX).remove(KEY_CLASS_NAME).apply()
+        val edit = sp.edit().remove(KEY_STATE).remove(KEY_INDEX).remove(KEY_CLASS_NAME)
+        // 正文缓存是同步状态的一部分：换班之后这些清单已经不属于这个人了
+        sp.all.keys.filter { it.startsWith(KEY_PLAN_CACHE) }.forEach { edit.remove(it) }
+        edit.apply()
     }
 
     private fun loadStateUnlocked(): ClassSyncState {
@@ -86,6 +126,9 @@ class ClassSyncStore(context: Context) {
         const val KEY_STATE = "sync_state"
         const val KEY_INDEX = "plan_index"
         const val KEY_CLASS_NAME = "class_name"
+
+        /** 正文缓存的键前缀，后面拼服务端 id：`plan_cache_1d841b` */
+        const val KEY_PLAN_CACHE = "plan_cache_"
 
         /** 和另外两个 Store 一样：多实例共享一把锁，读写不能交错 */
         val LOCK = Any()

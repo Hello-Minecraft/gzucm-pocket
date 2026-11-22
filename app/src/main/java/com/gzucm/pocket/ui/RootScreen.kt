@@ -87,6 +87,7 @@ import com.gzucm.pocket.ui.grades.GradesScreen
 import com.gzucm.pocket.ui.login.LoginScreen
 import com.gzucm.pocket.ui.power.PowerScreen
 import com.gzucm.pocket.ui.schedule.ClassPlanClaimDialog
+import com.gzucm.pocket.ui.schedule.ClassPlanDetailSheet
 import com.gzucm.pocket.ui.schedule.ClassPlanDeletedDialog
 import com.gzucm.pocket.ui.schedule.ClassPlanUpdateDialog
 import com.gzucm.pocket.ui.schedule.ScheduleScreen
@@ -695,6 +696,20 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                             onClassPlanResolveGone = { tab = Tab.Schedule },
                         )
                         ClassPlanSyncDialogs(vm)
+                        /*
+                         * 清单详情：点首页那一行的「查看 / 去看看」打开。
+                         *
+                         * 挂在今日页分支里而不是最外层：切到别的 Tab 时它跟着消失，
+                         * 不用额外写「离开今日页就关面板」的逻辑。
+                         */
+                        vm.classPlanDetail?.let { detail ->
+                            ClassPlanDetailSheet(
+                                detail = detail,
+                                onConfirm = { vm.confirmClassPlanImport(it) },
+                                onUnsubscribe = { vm.unsubscribeClassPlan(detail.id) },
+                                onClose = { vm.closeClassPlanDetail() },
+                            )
+                        }
                         }
 
                         Tab.Schedule -> ScheduleScreen(
@@ -1508,7 +1523,7 @@ private fun ClassPlanSyncDialogs(vm: AppViewModel) {
     when (val p = vm.classPlanHint?.prompt) {
         is ClassPlanPrompt.Claim -> ClassPlanClaimDialog(
             plans = p.plans,
-            onClaim = { vm.claimClassPlan(it) },
+            onClaim = { vm.openClassPlanDetail(it) },
             onDismiss = { vm.dismissClassPlanPrompt() },
         )
 
@@ -1522,7 +1537,7 @@ private fun ClassPlanSyncDialogs(vm: AppViewModel) {
              * 日程列表里能看到完整内容，比在弹窗里读强。
              */
             previewTitles = emptyList(),
-            onOpen = { vm.claimClassPlan(p.id) },
+            onOpen = { vm.openClassPlanDetail(p.id) },
             onLater = { vm.dismissClassPlanPrompt() },
         )
 

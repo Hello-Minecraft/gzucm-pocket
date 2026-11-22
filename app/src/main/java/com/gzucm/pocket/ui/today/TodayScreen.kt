@@ -820,10 +820,18 @@ private fun ClassPlanBar(
         )
     }
 
+    /*
+     * 四种状态都能点开清单详情（2026-11-22 改）。
+     *
+     * 原来只有「未认领」「有更新」右侧带字、也只有那时整行可点；
+     * 已认领且无更新时是一行死字。致辉的原话：「点开应该能看到具体日程」——
+     * 看清单里有什么，不该只在有更新时才被允许。
+     */
     val actionLabel = when (state) {
-        is ClassPlanBarState.Unclaimed -> "去认领"
+        is ClassPlanBarState.Unclaimed -> "去看看"
+        is ClassPlanBarState.Claimed -> "查看"
         is ClassPlanBarState.Updated -> "查看"
-        else -> null
+        ClassPlanBarState.Empty -> null
     }
 
     Column(
@@ -837,7 +845,11 @@ private fun ClassPlanBar(
                 .fillMaxWidth()
                 .heightIn(min = 44.dp)
                 // 有动作时整行可点：右侧那两个字的命中区太小，手指容易点空
-                .then(if (actionLabel != null) Modifier.clickable(onClick = onAction) else Modifier)
+                // 除空态外整行都可点：右侧那几个字只是提示，真正的命中区是整行
+                .then(
+                    if (state is ClassPlanBarState.Empty) Modifier
+                    else Modifier.clickable(onClick = onAction)
+                )
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -883,6 +895,12 @@ private fun ClassPlanBar(
                         fontSize = 12.5.sp,
                         fontWeight = FontWeight.Medium,
                         color = scheme.primary,
+                    )
+                    Icon(
+                        AppIcons.ChevronRight,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = scheme.primary.copy(alpha = 0.65f),
                     )
                 }
             }

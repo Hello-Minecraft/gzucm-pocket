@@ -41,6 +41,16 @@
             android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
             android:theme="@style/Theme.GzucmPocket" />
 
+        <!--
+            学委教程页。独立 Activity 而不是弹窗/底部面板：正文有七节，
+            挂在面板上时「往下读」和「下拉关闭」是同一个手势，手一滑就没了。
+        -->
+        <activity
+            android:name=".ui.schedule.ClassPlanGuideActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+            android:theme="@style/Theme.GzucmPocket" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

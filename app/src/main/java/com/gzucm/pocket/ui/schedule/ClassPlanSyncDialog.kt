@@ -67,6 +67,8 @@ sealed interface ClassPlanBarState {
 
     /** 认领了 [key] 的清单，且远端没有比本地更新的版本 */
     data class Claimed(
+        /** 服务端 id。点这一行要能打开它的详情，所以必须带着 */
+        val id: String,
         val key: String,
         val count: Int,
         /** 上次成功同步的时间戳；0 = 还没同步过 */
@@ -75,6 +77,8 @@ sealed interface ClassPlanBarState {
 
     /** 认领的清单有新版：新增 [added] 条、改了 [updated] 条 */
     data class Updated(
+        /** 同 [Claimed.id]：点「查看」要进对应的那份清单 */
+        val id: String,
         val key: String,
         val added: Int,
         val updated: Int,
@@ -288,17 +292,21 @@ private fun ClaimRow(plan: ClaimablePlan, onClaimClick: () -> Unit) {
 /**
  * 可展开的「这是什么？」。
  *
- * 三句话是契约第 7 节的固定文案，一个字都别改：
- * 干什么 / 认领之后会怎样 / 怎么退出。展开状态用 rememberSaveable 存，
- * 转屏不会自己收回去。
+ * **默认展开**（2026-11-22 改）。原来收起着，结果是：第一次见到这个功能的
+ * 同学只看到一行「本班有 1 份班级日程」，不知道它从哪来、会对自己做什么，
+ * 直接点「稍后」就再也不看了。折起来省的那 60dp 换来的是没人看得懂。
+ *
+ * 四句话对应四个真问题：这是什么东西 / 点了会怎样 / 不想要呢 / 谁知道我做了什么。
+ * 更长的完整说明在清单详情页底部，那里篇幅不受限。
  */
 @Composable
 private fun WhatIsThis(scheme: androidx.compose.material3.ColorScheme) {
-    var open by rememberSaveable { mutableStateOf(false) }
+    var open by rememberSaveable { mutableStateOf(true) }
     val lines = listOf(
-        "学委把作业清单传到这里，你的 App 每天自动看一眼",
-        "认领之后新作业会直接进你的日程，截止前会提醒你",
-        "随时可以取消认领，已导入的日程不会消失",
+        "学委把全班的作业和安排整理成清单传到云端，你的 App 每天自动看一眼",
+        "勾中的条目会变成你自己的日程，截止前按你自己的设置提醒",
+        "没勾的不会进你的日程，想改随时回来重新勾",
+        "只有本班同学能看到这份清单，你勾了什么不会传出去",
     )
     Column(Modifier.fillMaxWidth()) {
         Row(

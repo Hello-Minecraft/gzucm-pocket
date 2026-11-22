@@ -231,11 +231,40 @@ internal fun ClassPlanContent(
                 Spacer(Modifier.height(4.dp))
             }
             Text(
-                "你自己维护一份作业清单，同学粘一下分享串就能全部加进自己的日程。",
+                "维护一份作业清单，发布后本班同学打开 App 就能看到，" +
+                    "认领一下，作业就进他们自己的日程。",
                 fontSize = 12.5.sp,
                 lineHeight = 18.sp,
                 color = scheme.onSurfaceVariant,
             )
+            Spacer(Modifier.height(6.dp))
+            /*
+             * 教程入口写在这一屏，而不是「设置 → 帮助」里：
+             * 学委第一次打开这个面板时手上没有清单、也不知道该不该发，
+             * 这正是他最需要看说明的时刻。离开这一屏之后就再没有这个时机了。
+             */
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable {
+                        runCatching { ctx.startActivity(ClassPlanGuideActivity.intent(ctx)) }
+                    }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    AppIcons.Info,
+                    contentDescription = null,
+                    modifier = Modifier.size(13.dp),
+                    tint = scheme.primary,
+                )
+                Spacer(Modifier.width(5.dp))
+                Text(
+                    "第一次发清单？先看一遍教程",
+                    fontSize = 12.sp,
+                    color = scheme.primary,
+                )
+            }
 
             Spacer(Modifier.height(14.dp))
 

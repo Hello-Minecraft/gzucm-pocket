@@ -293,6 +293,18 @@ fun mergeClassTasks(
     plan: ClassPlan,
     today: LocalDate = LocalDate.now(),
     markUnread: Boolean = false,
+    /**
+     * 只导入这几条（null = 全部导入）。
+     *
+     * 2026-11-22 加的：同学认领前可以先看清单，勾掉不想要的再导入。
+     *
+     * **跳过不等于删除**：没勾的条目原地不动，也不参与下面「学委删过东西」
+     * 的判定（那段用的是完整的 `plan.tasks`，不是这个集合）。否则一次
+     * 部分导入会把所有没勾的老条目全标成「学委删了」，首页挂一屏橙色警告。
+     *
+     * 传进来的 id 是 [ClassTaskDto.id]（维护者那边的稳定 id），不是本地 Agenda.id。
+     */
+    onlyIds: Set<String>? = null,
 ): Pair<List<Agenda>, ClassImportResult> {
     val list = existing.toMutableList()
     val indexById = existing.withIndex().associate { (i, a) -> a.id to i }.toMutableMap()
@@ -304,6 +316,8 @@ fun mergeClassTasks(
     var conflicts = 0
 
     plan.tasks.forEach { dto ->
+        // 没勾选的那几条：一个字都不动，也不计入 added/updated/unchanged
+        if (onlyIds != null && dto.id !in onlyIds) return@forEach
         val incoming = dto.toClassAgenda(plan.key, today)
         val at = indexById[incoming.id]
         if (at == null) {
@@ -369,7 +383,47 @@ fun mergeClassTasks(
 }
 
 /**
- * 一条班级作业 → 本地日程。
+ * 清单详情页里，每一条该显示什么状态。
+ *
+ * 2026-11-22 加：致辉要「点开能看到具体日程、导入时能选哪几条」，
+ * 那就必须能一眼看出「这条我加过没有」。四种状态对应四种操作：
+ * [NEW] 可勾、[CHANGED] 可勾（重新覆盖）、[IMPORTED] 灰掉、
+ * [CONFLICT] 要单独处理（本地也改过，见 `resolveConflictBy*`）。
+ */
+enum class ClassTaskState {
+    /** 已经导入过，且和学委那边一致 */
+    IMPORTED,
+
+    /** 本地还没有这条 */
+    NEW,
+
+    /** 本地有，但学委改过了 —— 导入就是接受他的新版 */
+    CHANGED,
+
+    /** 两边都改过。不能在列表里直接覆盖，得让用户选 */
+    CONFLICT,
+}
+
+/**
+ * 把清单逐条对照本地日程，算出各自的状态。
+ *
+ * 返回的键是 [ClassTaskDto.id]（清单自己的 id，同学认领前也稳定），
+ * 不是本地 `Agenda.id` —— 后者由 `cls:密钥:清单id` 拼出来，只在本地有意义。
+ */
+fun classTaskStates(plan: ClassPlan, existing: List<Agenda>): Map<String, ClassTaskState> {
+    val byId = existing.associateBy { it.id }
+    return plan.tasks.associate { dto ->
+        val local = byId[taskId(plan.key, dto.id)]
+        dto.id to when {
+            local == null -> ClassTaskState.NEW
+            local.classConflict -> ClassTaskState.CONFLICT
+            dto.updatedAt > local.remoteUpdatedAt -> ClassTaskState.CHANGED
+            else -> ClassTaskState.IMPORTED
+        }
+    }
+}
+
+/** 一条班级作业 → 本地日程。
  *
  * **两种形态分开走**（2026-11-21）：
  *   · 日程（[ClassTaskDto.day] 非空）→ 普通日程，保留时长和地点；

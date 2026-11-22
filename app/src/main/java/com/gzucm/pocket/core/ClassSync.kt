@@ -53,6 +53,19 @@ data class ClassSubscription(
      */
     val lastAdded: Int = 0,
     val lastUpdated: Int = 0,
+    /**
+     * 用户在「清单详情」里明确勾掉、不想要的条目（存 [ClassTaskDto.id]）。
+     *
+     * 为什么要记住它：如果只是「这一次没勾」，下次同步会重新算成「新增 N 条」
+     * 再弹一次窗 —— 用户明确拒绝过的东西反复出现，比不给他选更烦。
+     * 记住之后，这些条目**永远不会**被自动导入，也不会出现在「新增」计数里。
+     *
+     * 想反悔随时进清单详情重新勾，那里永远列全部条目，不受这个集合限制。
+     *
+     * 用 List 不用 Set：`@Serializable` 的 Set 在旧版 kotlinx 上序列化行为不稳，
+     * 这里数据量小（最多几十个短 id），`in` 查找的线性代价可以忽略。
+     */
+    val declinedIds: List<String> = emptyList(),
 )
 
 /** 整个同步状态 */
@@ -215,6 +228,33 @@ fun newVersions(index: ClassPlanIndex, state: ClassSyncState): List<ClassPlanBri
         brief.updatedAt > sub.importedUpdatedAt
     }
 
+/**
+ * 自动同步时真正要合并的条目。
+ *
+ * 就是「清单全部条目 − 用户明确拒绝过的」。没认领过（[sub] 为 null）时全都要 ——
+ * 首次认领走的是用户勾选的路径，不走这个函数。
+ *
+ * 抽出来是因为它要能被单测：用户勾掉 3 条之后，下次同步的 added 计数
+ * 必须把那 3 条排除，否则首页会一直喊「新增 3 条」而点进去什么都没变。
+ */
+fun autoImportIds(plan: ClassPlan, sub: ClassSubscription?): Set<String> {
+    val declined = sub?.declinedIds.orEmpty().toHashSet()
+    return plan.tasks.mapNotNullTo(LinkedHashSet()) { dto ->
+        if (dto.id in declined) null else dto.id
+    }
+}
+
+/**
+ * 覆盖「这份清单里我不要哪些」。
+ *
+ * 详情页每次确认导入时整份替换，而不是追加：用户可能这次把上次勾掉的
+ * 又勾回来了，追加的话旧记录会把它继续压在拒绝名单里。
+ */
+fun ClassSyncState.withDeclined(planId: String, ids: Collection<String>): ClassSyncState {
+    val sub = subOf(planId) ?: return this
+    return withSub(sub.copy(declinedIds = ids.distinct()))
+}
+
 // ── 合并 / 冲突处理 ──────────────────────────────────────────────────
 
 /**
@@ -228,8 +268,9 @@ fun mergeClassSync(
     existing: List<Agenda>,
     plan: ClassPlan,
     today: LocalDate = LocalDate.now(),
+    onlyIds: Set<String>? = null,
 ): Pair<List<Agenda>, ClassImportResult> =
-    mergeClassTasks(existing, plan, today, markUnread = true)
+    mergeClassTasks(existing, plan, today, markUnread = true, onlyIds = onlyIds)
 
 /**
  * 冲突时用户选了「用学委的」。

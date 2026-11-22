@@ -45,9 +45,19 @@ class ReleaseNotesTest {
     fun `版本号按从新到旧排列`() {
         fun key(v: String): List<Int> = coreOf(v).split(".").map { it.toIntOrNull() ?: 0 }
         val vers = ReleaseNotes.entries.map { it.version }
+        /*
+         * 用降序比较器，不要「升序排完再 reversed()」。
+         *
+         * `1.5.0-beta4` 和 `1.5.0-beta` 去掉后缀后都是 1.5.0，在 key 上相等；
+         * 升序排序是稳定的（保持原顺序），但整体 reversed() 会把这一对也翻过来，
+         * 于是测试要求「beta 排在 beta4 前面」—— 而正确的 entries 里 beta4 在前。
+         * 降序比较器同样是稳定排序，相等元素保持原顺序，不会自己制造矛盾。
+         */
         val sorted = vers.sortedWith(
-            compareBy({ key(it)[0] }, { key(it)[1] }, { key(it)[2] }),
-        ).reversed()
+            compareByDescending<String> { key(it)[0] }
+                .thenByDescending { key(it)[1] }
+                .thenByDescending { key(it)[2] },
+        )
         assertEquals(sorted, vers)
     }
 
