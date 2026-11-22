@@ -168,9 +168,11 @@ fun ClassPlanUpdateDialog(
     onLater: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
-    val who = key.ifBlank { "学委" }
+    // key 是**清单标识**（同学认领时核对的那行字），不是人名 ——
+    // 维护人是另一个字段，自动取学籍姓名。两者别混。
+    val who = key.ifBlank { "班级清单" }
     CenterDialog(
-        title = "$who 更新了班级日程",
+        title = "$who 有更新",
         // 点遮罩 = 稍后：既然有这个选择，就别让「想关掉」变成「关不掉」
         onDismiss = onLater,
         buttons = {
@@ -228,9 +230,9 @@ fun ClassPlanDeletedDialog(
     onDismiss: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
-    val who = key.ifBlank { "学委" }
+    val who = key.ifBlank { "班级清单" }
     CenterDialog(
-        title = "$who 的清单已被删除",
+        title = "$who 已被删除",
         onDismiss = onDismiss,
         buttons = {
             DialogPrimaryButton("知道了", onDismiss)
@@ -261,7 +263,7 @@ private fun ClaimRow(plan: ClaimablePlan, onClaimClick: () -> Unit) {
     ) {
         Column(Modifier.weight(1f)) {
             Text(
-                plan.key.ifBlank { "学委" },
+                plan.key.ifBlank { "班级清单" },
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
                 color = scheme.onSurface,
@@ -303,7 +305,8 @@ private fun ClaimRow(plan: ClaimablePlan, onClaimClick: () -> Unit) {
 private fun WhatIsThis(scheme: androidx.compose.material3.ColorScheme) {
     var open by rememberSaveable { mutableStateOf(true) }
     val lines = listOf(
-        "学委把全班的作业和安排整理成清单传到云端，你的 App 每天自动看一眼",
+        "学委把全班的作业和安排整理成清单传到云端，你的 App 每天自动看一眼 —— " +
+            "不用问学委要口令，上面列出来的点一下就行",
         "勾中的条目会变成你自己的日程，截止前按你自己的设置提醒",
         "没勾的不会进你的日程，想改随时回来重新勾",
         "只有本班同学能看到这份清单，你勾了什么不会传出去",

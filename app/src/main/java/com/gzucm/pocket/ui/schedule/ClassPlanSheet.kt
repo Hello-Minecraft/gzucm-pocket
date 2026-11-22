@@ -272,29 +272,6 @@ internal fun ClassPlanContent(
             InfoLine("本班", studentClass, scheme)
             InfoLine("维护人", maintainer, scheme)
 
-            Spacer(Modifier.height(14.dp))
-
-            OutlinedTextField(
-                value = key,
-                onValueChange = {
-                    key = it.take(12)
-                    persist(plan.copy(key = key))
-                },
-                label = { Text("密钥（学委名字）", fontSize = 12.sp) },
-                placeholder = { Text("例如：张三", fontSize = 13.sp) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "填全班都知道的那个名字，通常是学委 —— 同学凭它认领这份清单。" +
-                    "谁在维护都可以，维护人是上面自动填的那个。",
-                fontSize = 11.5.sp,
-                lineHeight = 16.sp,
-                color = scheme.onSurfaceVariant.copy(alpha = 0.8f),
-            )
-
             Spacer(Modifier.height(18.dp))
 
             /*
@@ -430,7 +407,63 @@ internal fun ClassPlanContent(
                 ) { Text("从我的日程导入", fontSize = 12.5.sp) }
             }
 
-            Spacer(Modifier.height(9.dp))
+            /*
+             * 密钥紧贴发布按钮（2026-11-22 改）。
+             *
+             * 原来它排在任务列表**上方**：任务一多，用户往下滚到「发布到本班」时，
+             * 密钥框早就被顶出屏幕了，眼前只剩一个点了会报错的按钮。
+             * 致辉实测就是这样 —— 任务清单里找不到填密钥的地方。
+             *
+             * 现在它是「发布」区块的第一行，和按钮同屏，并在为空时把按钮置灰：
+             * 让人在按下去之前就知道缺什么，而不是按了才被告知。
+             */
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(scheme.outlineVariant.copy(alpha = 0.45f)),
+            )
+            Spacer(Modifier.height(16.dp))
+
+            Text(
+                "发布到本班",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = scheme.onSurface,
+            )
+            Spacer(Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = key,
+                onValueChange = {
+                    key = it.take(12)
+                    persist(plan.copy(key = key))
+                },
+                label = { Text("密钥（同学认领时核对）", fontSize = 12.sp) },
+                placeholder = { Text("例如：2023铁涛班作业", fontSize = 13.sp) },
+                singleLine = true,
+                isError = key.isBlank(),
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                if (key.isBlank()) {
+                    "填了密钥才能发布 —— 写一行同学一看就知道是你们班的字"
+                } else {
+                    "同学认领时会看到这行字，用来确认没认错班级或清单。" +
+                        "「维护人」是上面自动填的学籍姓名，不用你管"
+                },
+                fontSize = 11.5.sp,
+                lineHeight = 16.sp,
+                color = if (key.isBlank()) {
+                    scheme.error
+                } else {
+                    scheme.onSurfaceVariant.copy(alpha = 0.8f)
+                },
+            )
+
+            Spacer(Modifier.height(12.dp))
 
             Row(Modifier.fillMaxWidth()) {
                 Button(
@@ -452,7 +485,8 @@ internal fun ClassPlanContent(
                     },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
-                    enabled = onPublish != null,
+                    // 密钥不填就不让按：按了才报错的成本比置灰高一截
+                    enabled = onPublish != null && key.isNotBlank(),
                 ) { Text("发布到本班", fontSize = 12.5.sp) }
                 Spacer(Modifier.width(9.dp))
                 OutlinedButton(

@@ -808,13 +808,13 @@ private fun ClassPlanBar(
         )
 
         is ClassPlanBarState.Claimed -> Pair(
-            "${state.key.ifBlank { "学委" }}的清单 · ${state.count} 条",
+            "${state.key.ifBlank { "班级清单" }} · ${state.count} 条",
             "${classPlanSyncTime(state.syncedAt)} 同步",
         )
 
         // 「更新了：新增 2 条、改了 1 条」——顿号是首页那一行的口径，弹窗里用逗号
         is ClassPlanBarState.Updated -> Pair(
-            "${state.key.ifBlank { "学委" }}更新了：" +
+            "${state.key.ifBlank { "班级清单" }}更新了：" +
                 classPlanPatchText(state.added, state.updated, "、"),
             classPlanSyncTime(state.syncedAt),
         )

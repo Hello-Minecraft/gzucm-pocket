@@ -21,7 +21,7 @@ object ReleaseNotes {
 
     val entries: List<Entry> = listOf(
         Entry(
-            version = "1.5.0-beta4",
+            version = "1.5.0-beta5",
             date = "2026-11-22",
             headline = "班级日程不用再等学委发分享了：学委传到云端，你打开 App 就看到，" +
                 "还能自己挑要哪几条。",
