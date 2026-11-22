@@ -107,16 +107,26 @@ internal fun ClassPlanContent(
     plans: List<ClassPlan> = listOf(plan),
     /** 切到另一份去编辑（按密钥） */
     onSelectPlan: ((String) -> Unit)? = null,
-    /** 新建一份空清单 */
-    onCreatePlan: (() -> Unit)? = null,
+    /** 新建一份清单（参数是学委刚起好的名字） */
+    onCreatePlan: ((String) -> Unit)? = null,
+    /** 已发布到本班的清单（按密钥），列表里标「已发布 / 草稿」 */
+    publishedPlanKeys: Set<String> = emptySet(),
 ) {
     val ctx = LocalContext.current
     val scheme = MaterialTheme.colorScheme
     val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
     var mode by remember { mutableStateOf<Mode>(Mode.LIST) }
-    /** 是否正在看「清单列表」那一屏（切换/新建清单） */
-    var showPlanList by remember { mutableStateOf(false) }
+    /*
+     * 进来先看「我的清单」，不是直接进编辑页（2026-11-23 致辉定的排版）。
+     *
+     * 编辑页是「一份清单的内部」，列表页才是「我手上有哪几摊事」。
+     * 先看完有什么，再决定改哪一份，顺序才顺 —— 原来进来就是编辑页，
+     * 等于默认学委只有一份清单。
+     */
+    var showPlanList by remember { mutableStateOf(true) }
+    /** 「修改清单名」对话框中转的名字 */
+    var renamingPlan by remember { mutableStateOf<String?>(null) }
     var hint by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     /** 待确认的导入：解析出来了但还没灌进日程 */
     var pendingImport by remember { mutableStateOf<ClassPlan?>(null) }
@@ -230,6 +240,42 @@ internal fun ClassPlanContent(
         }
     }
 
+    renamingPlan?.let { draft ->
+        CenterDialog(
+            title = "修改清单名",
+            onDismiss = { renamingPlan = null },
+            buttons = {
+                DialogPrimaryButton(
+                    text = "保存",
+                    onClick = {
+                        if (draft.isNotBlank()) {
+                            persist(plan.copy(name = draft.trim()))
+                        }
+                        renamingPlan = null
+                    },
+                )
+                DialogSecondaryButton("取消", { renamingPlan = null })
+            },
+        ) {
+            Text(
+                "同学认领后看到的就是这个名字。",
+                fontSize = 12.5.sp,
+                lineHeight = 19.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { renamingPlan = it.take(30) },
+                label = { Text("清单名", fontSize = 12.sp) },
+                placeholder = { Text("例如：期末作业清单", fontSize = 13.sp) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+            )
+        }
+    }
+
     if (showDeleteConfirm) {
         CenterDialog(
             title = "删除已发布的清单？",
@@ -268,16 +314,20 @@ internal fun ClassPlanContent(
     if (showPlanList) {
         PlanListScreen(
             plans = plans,
+            publishedKeys = publishedPlanKeys,
             currentKey = plan.key,
             onPick = { key ->
                 onSelectPlan?.invoke(key)
                 showPlanList = false
             },
-            onCreate = {
-                onCreatePlan?.invoke()
+            onCreate = { name ->
+                onCreatePlan?.invoke(name)
                 showPlanList = false
             },
-            onBack = { showPlanList = false },
+            // 第一屏的返回 = 关掉面板回「我的日程」。
+            // 原来写成 `showPlanList = false` 会和编辑页的「返回我的清单」对跳 ——
+            // 两个页面互相弹，点了谁也关不掉（2026-11-23 致辉测出来的）。
+            onBack = onClose,
             scheme = scheme,
         )
     } else when (val m = mode) {
@@ -288,16 +338,16 @@ internal fun ClassPlanContent(
                 .padding(bottom = 26.dp)
                 .verticalScroll(rememberScrollState()),
         ) {
-            BackRow(onClose, "返回我的日程")
+            BackRow({ showPlanList = true }, "返回我的清单")
 
             if (!LocalIsWidePane.current) {
                 Text(
                     "班级日程",
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Medium,
                     color = scheme.onSurface,
                 )
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(8.dp))
             }
             Text(
                 "维护一份作业清单，发布后本班同学打开 App 就能看到，" +
@@ -310,28 +360,37 @@ internal fun ClassPlanContent(
             Spacer(Modifier.height(12.dp))
 
             /*
-             * 清单名（2026-11-23 加）。
+             * 清单名显示成标题，改的时候点右边（2026-11-23 致辉定的排版）。
              *
-             * 以前没有这个概念，`key` 一个人兼了「名字 + 密钥 + planId」三份差事，
-             * 结果界面上「清单」就等于一堆日程，学委说不清「这是哪一摊事」。
-             * 现在名字归名字，密钥归密钥。
+             * 之前做成常驻的 OutlinedTextField，整页看着像个表单；
+             * 但这一页的主语是「清单里的东西」，名字只是它的标题。
              */
-            OutlinedTextField(
-                value = plan.name,
-                onValueChange = { persist(plan.copy(name = it.take(30))) },
-                label = { Text("清单名", fontSize = 12.sp) },
-                placeholder = { Text("例如：期末作业清单", fontSize = 13.sp) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-            )
-            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "「${plan.name.ifBlank { "未命名清单" }}」",
+                    modifier = Modifier.weight(1f),
+                    fontSize = 14.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = scheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "修改清单名",
+                    fontSize = 12.sp,
+                    color = scheme.primary,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { renamingPlan = plan.name }
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                )
+            }
+            Spacer(Modifier.height(5.dp))
             Text(
-                "同学认领之后看到的就是这行字。一摊事一份清单 —— " +
-                    "期末作业、见习安排别塞进同一个筐。",
-                fontSize = 11.5.sp,
-                lineHeight = 16.sp,
-                color = scheme.onSurfaceVariant.copy(alpha = 0.8f),
+                "日程与任务：${plan.tasks.size} 条",
+                fontSize = 12.5.sp,
+                color = scheme.onSurfaceVariant,
             )
 
             Spacer(Modifier.height(6.dp))
@@ -1325,12 +1384,54 @@ private const val CLASS_PLAN_MAX_TASKS = 80
 @Composable
 private fun PlanListScreen(
     plans: List<ClassPlan>,
+    publishedKeys: Set<String>,
     currentKey: String,
     onPick: (String) -> Unit,
-    onCreate: () -> Unit,
+    onCreate: (String) -> Unit,
     onBack: () -> Unit,
     scheme: androidx.compose.material3.ColorScheme,
 ) {
+    var naming by remember { mutableStateOf(false) }
+    var draftName by remember { mutableStateOf("") }
+
+    // 先起名，再进编辑（2026-11-23 致辉定的顺序）。名字是这份清单的身份，
+    // 建的时候空着，列表里就只能显示「未命名清单」，等于没法认。
+    if (naming) {
+        CenterDialog(
+            title = "新建清单",
+            onDismiss = { naming = false },
+            buttons = {
+                DialogPrimaryButton(
+                    text = "建好了",
+                    onClick = {
+                        if (draftName.isNotBlank()) {
+                            naming = false
+                            onCreate(draftName.trim())
+                        }
+                    },
+                )
+                DialogSecondaryButton("取消", { naming = false })
+            },
+        ) {
+            Text(
+                "这份清单叫什么？同学认领之后看到的就是这个名字。",
+                fontSize = 12.5.sp,
+                lineHeight = 19.sp,
+                color = scheme.onSurface,
+            )
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(
+                value = draftName,
+                onValueChange = { draftName = it.take(30) },
+                label = { Text("清单名", fontSize = 12.sp) },
+                placeholder = { Text("例如：期末作业清单", fontSize = 13.sp) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+            )
+        }
+    }
+
     Column(
         Modifier
             .fillMaxWidth()
@@ -1338,44 +1439,63 @@ private fun PlanListScreen(
             .padding(bottom = 26.dp)
             .verticalScroll(rememberScrollState()),
     ) {
-        BackRow(onBack, "返回")
+        BackRow(onBack, "返回我的日程")
 
-        Text(
-            "我的清单",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Medium,
-            color = scheme.onSurface,
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "一摊事一份清单，各有各的名字和密钥。同学凭密钥认领其中一份。",
-            fontSize = 12.5.sp,
-            lineHeight = 18.sp,
-            color = scheme.onSurfaceVariant,
-        )
+        if (!LocalIsWidePane.current) {
+            Text(
+                "班级日程",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Medium,
+                color = scheme.onSurface,
+            )
+            Spacer(Modifier.height(10.dp))
+        }
 
-        Spacer(Modifier.height(14.dp))
+        // 「我的清单：N 条」+ 右侧「＋ 新建清单」
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "我的清单：${plans.size} 条",
+                fontSize = 12.5.sp,
+                color = scheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                "＋ 新建清单",
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Medium,
+                color = scheme.primary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable {
+                        draftName = ""
+                        naming = true
+                    }
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+            )
+        }
+
+        Spacer(Modifier.height(10.dp))
 
         if (plans.isEmpty()) {
             Text(
-                "还没有清单。点下面的「新建清单」开始 —— 先起个名字（比如「期末作业清单」），" +
-                    "再往里加作业。",
+                "还没有清单。一摊事一份 —— 期末作业、见习安排各建一份，" +
+                    "同学凭各自的密钥认领。",
                 fontSize = 12.sp,
                 lineHeight = 17.sp,
                 color = scheme.onSurfaceVariant,
             )
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(10.dp))
         }
 
         plans.forEach { p ->
-            val editing = p.key == currentKey
+            val published = p.key in publishedKeys
             Row(
                 Modifier
                     .fillMaxWidth()
                     .clip(G3CornerShape(12.dp))
                     .background(
-                        if (editing) {
-                            scheme.primary.copy(alpha = 0.10f)
+                        if (p.key == currentKey) {
+                            scheme.primary.copy(alpha = 0.09f)
                         } else {
                             scheme.surfaceVariant.copy(alpha = 0.28f)
                         },
@@ -1386,19 +1506,20 @@ private fun PlanListScreen(
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        p.name.ifBlank { "未命名清单" },
+                        "「${p.name.ifBlank { "未命名清单" }}」",
                         fontSize = 13.5.sp,
                         fontWeight = FontWeight.Medium,
                         color = scheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Spacer(Modifier.height(2.dp))
+                    Spacer(Modifier.height(3.dp))
                     Text(
                         buildString {
-                            append("${p.tasks.size} 条")
-                            append(" · 密钥 ")
+                            append("密钥：")
                             append(p.key.ifBlank { "未设" })
+                            append("，")
+                            append(if (published) "已发布" else "草稿")
                         },
                         fontSize = 11.sp,
                         color = scheme.onSurfaceVariant,
@@ -1406,30 +1527,14 @@ private fun PlanListScreen(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                if (editing) {
-                    Text(
-                        "编辑中",
-                        fontSize = 11.sp,
-                        color = scheme.primary,
-                    )
-                    Spacer(Modifier.width(4.dp))
-                }
                 Icon(
                     AppIcons.ChevronRight,
                     contentDescription = null,
-                    modifier = Modifier.size(14.dp),
+                    modifier = Modifier.size(15.dp),
                     tint = scheme.onSurfaceVariant.copy(alpha = 0.6f),
                 )
             }
             Spacer(Modifier.height(7.dp))
         }
-
-        Spacer(Modifier.height(8.dp))
-
-        OutlinedButton(
-            onClick = onCreate,
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-        ) { Text("＋ 新建清单", fontSize = 12.5.sp) }
     }
 }

@@ -165,7 +165,8 @@ fun ClassPlanDetailSheet(
                         cls.ifBlank { detail.key.ifBlank { "班级作业" } }
                     }
                     val sub = buildString {
-                        if (cls.isNotBlank()) append("$cls · ")
+                        // 标题已经是班级名时别再重复一遍（老数据没有清单名就会这样）
+                        if (cls.isNotBlank() && cls != title) append("$cls · ")
                         if (owner.isNotBlank()) append("$owner 维护 · ")
                         append("${tasks.size} 条")
                     }

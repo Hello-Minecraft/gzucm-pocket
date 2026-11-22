@@ -134,6 +134,8 @@ data class UiState(
     val classPlans: List<com.gzucm.pocket.core.ClassPlan> = emptyList(),
     /** 当前正在编辑哪一份，按密钥认 */
     val editingPlanKey: String = "",
+    /** 已经发布到本班的那几份（按密钥），清单列表里标「已发布」/「草稿」用 */
+    val publishedPlanKeys: Set<String> = emptySet(),
     val sessions: List<CourseSession> = emptyList(),
     val power: PowerInfo? = null,
     val powerDaily: List<PowerDaily> = emptyList(),
@@ -376,18 +378,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * 否则 `editingPlanKey` 指不到东西。学委填完真密钥保存时，
      * [saveClassPlan] 会按 editingPlanKey 把这一份替换掉。
      */
-    fun newClassPlan() {
+    fun newClassPlan(name: String) {
         val card = state.studentCard
         val tmpKey = "tmp-" + System.currentTimeMillis().toString(36)
         val fresh = com.gzucm.pocket.core.ClassPlan(
             key = tmpKey,
-            name = "",
+            name = name.trim(),
             maintainer = card?.name.orEmpty(),
             className = card?.className.orEmpty(),
         )
         val list = state.classPlans + fresh
         classPlanStore.saveAll(list)
         state = state.copy(classPlans = list, editingPlanKey = tmpKey)
+    }
+
+    /** 按云端订阅表刷新「哪些清单已发布」，清单列表的「已发布 / 草稿」靠它 */
+    private fun refreshPublishedPlanKeys() {
+        val keys = classSyncStore.loadState().subs.map { it.key }.toSet()
+        state = state.copy(publishedPlanKeys = keys)
     }
 
     /** 切到另一份清单去编辑（null = 回到清单列表） */
@@ -871,6 +879,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             when (val r = classSyncApi.publish(card.classKey, card.studentId, plan)) {
                 is ClassSyncApi.Result.Ok -> {
+                    // 清单列表里的「已发布 / 草稿」靠它
+                    refreshPublishedPlanKeys()
                     // 发布者自己也记一条订阅：这样首页会显示「已发布 · N 条」，
                     // 而且同学改了别人的清单时能看到「有新版」（学委多设备时有用）
                     classSyncStore.updateState {
@@ -1355,6 +1365,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 state = state.copy(classPlans = list, editingPlanKey = list.first().key)
             }
         }
+        refreshPublishedPlanKeys()
 
         // 天气和登录态无关：没登录也照样显示，先摆缓存再按节流决定要不要联网
         loadWeather()

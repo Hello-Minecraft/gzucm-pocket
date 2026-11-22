@@ -411,7 +411,8 @@ fun AgendaListSheet(
     /** 本机维护的所有清单（学委侧「换一份」用） */
     classPlans: List<com.gzucm.pocket.core.ClassPlan> = emptyList(),
     onSelectClassPlan: ((String) -> Unit)? = null,
-    onCreateClassPlan: (() -> Unit)? = null,
+    onCreateClassPlan: ((String) -> Unit)? = null,
+    publishedPlanKeys: Set<String> = emptySet(),
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -489,6 +490,7 @@ fun AgendaListSheet(
                 plans = classPlans.ifEmpty { listOf(classPlan) },
                 onSelectPlan = onSelectClassPlan,
                 onCreatePlan = onCreateClassPlan,
+                publishedPlanKeys = publishedPlanKeys,
             )
             return@AdaptiveSheet
         }
