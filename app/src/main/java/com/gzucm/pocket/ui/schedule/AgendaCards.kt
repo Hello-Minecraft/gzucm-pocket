@@ -429,10 +429,16 @@ internal fun AgendaDayCard(
                     Text(
                         buildString {
                             append(taskDueLabel(occurrence.deadlineAt, System.currentTimeMillis()))
-                            // 班级来的：补一句「来自 张三」，两份清单混在一起时能分清
+                            /*
+                             * 班级来的：补一句「来自班级日程」。
+                             *
+                             * 原来这里拼的是 origin 里的 key（写成了「来自 张三」），
+                             * 但 key 是同学自己输的**密钥**，摆到每条日程下面既多余
+                             * 又容易看懵（2026-11-23 致辉指出的）。
+                             * 想知道是哪一份，点进清单详情看班级和维护人更准。
+                             */
                             if (occurrence.origin.startsWith("class:")) {
-                                append(" · 来自 ")
-                                append(occurrence.origin.removePrefix("class:"))
+                                append(" · 来自班级日程")
                             }
                         },
                         fontSize = 11.sp,

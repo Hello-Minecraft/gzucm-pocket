@@ -1523,8 +1523,9 @@ private fun ClassPlanSyncDialogs(vm: AppViewModel) {
 
     when (val p = vm.classPlanHint?.prompt) {
         is ClassPlanPrompt.Claim -> ClassPlanClaimDialog(
+            className = p.className,
             plans = p.plans,
-            onClaim = { vm.openClassPlanDetail(it) },
+            onSubmitKey = { vm.submitClassPlanKey(it) },
             onDismiss = { vm.dismissClassPlanPrompt() },
         )
 

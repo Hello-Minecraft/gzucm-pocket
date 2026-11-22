@@ -151,25 +151,37 @@ fun ClassPlanDetailSheet(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     /*
-                     * 主行是**清单标识**（同学核对用的那行字），副标题才是「谁维护」。
-                     * 原来这里写的是 `${key} 维护` —— 把标识当成了人名。
-                     * 维护人取自正文的 maintainer（学籍姓名），老数据没有就省略。
+                     * 两行：**班级**在上（系统认出来的，同学核对用），
+                     * 「谁维护 · 多少条」在下。
+                     *
+                     * 2026-11-23 改：原来上面写的是 key，但 key 是同学自己输入的
+                     * 那道口令，不是给人看的名片。该摊在明面上的是**班级**。
                      */
                     val owner = detail.plan.maintainer.trim()
-                    val title = if (owner.isBlank()) {
-                        "${detail.key.ifBlank { "班级清单" }} · ${tasks.size} 条"
-                    } else {
-                        "${detail.key.ifBlank { "班级清单" }} · $owner 维护 · ${tasks.size} 条"
+                    val cls = detail.plan.className.trim()
+                        .ifBlank { detail.key.ifBlank { "班级清单" } }
+                    val sub = buildString {
+                        if (owner.isNotBlank()) append("$owner 维护 · ")
+                        append("${tasks.size} 条")
                     }
-                    Text(
-                        title,
-                        modifier = Modifier.weight(1f),
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = scheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            cls,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = scheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            sub,
+                            fontSize = 11.sp,
+                            color = scheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                     Spacer(Modifier.width(8.dp))
                     Text(
                         // classPlanSyncTime(0) 本身就是「还没同步」，不要再拼一个「同步」

@@ -14,10 +14,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -71,7 +73,10 @@ sealed interface ClassPlanBarState {
     data class Claimed(
         /** 服务端 id。点这一行要能打开它的详情，所以必须带着 */
         val id: String,
+        /** 密钥。**不在界面上显示** —— 它是同学输进去的那道口令，不是名字 */
         val key: String,
+        /** 维护人姓名，副标题用 */
+        val ownerName: String,
         val count: Int,
         /** 上次成功同步的时间戳；0 = 还没同步过 */
         val syncedAt: Long,
@@ -81,7 +86,9 @@ sealed interface ClassPlanBarState {
     data class Updated(
         /** 同 [Claimed.id]：点「查看」要进对应的那份清单 */
         val id: String,
+        /** 密钥，不显示（见 [Claimed.key]） */
         val key: String,
+        val ownerName: String,
         val added: Int,
         val updated: Int,
         val syncedAt: Long,
@@ -132,24 +139,104 @@ fun classPlanPatchText(added: Int, updated: Int, sep: String = "，"): String = 
  */
 @Composable
 fun ClassPlanClaimDialog(
+    /** 学籍里的行政班，只读展示 —— 同学靠它确认 App 认对了班级 */
+    className: String,
+    /** 本班现有的清单摘要，只用来告诉同学「有几份、谁维护」，**不展示密钥** */
     plans: List<ClaimablePlan>,
-    onClaim: (String) -> Unit,
+    /** 返回 true = 密钥对上了（上层会关窗并打开清单）；false = 让弹窗报错 */
+    onSubmitKey: (String) -> Boolean,
     onDismiss: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
+    var input by rememberSaveable { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+
     CenterDialog(
-        title = "本班有班级日程",
+        title = "认领班级日程",
         onDismiss = onDismiss,
         buttons = {
+            DialogPrimaryButton(
+                text = "查看清单",
+                onClick = {
+                    if (onSubmitKey(input)) error = null
+                    else error = if (input.isBlank()) {
+                        "先填密钥再点"
+                    } else {
+                        "这个密钥对不上本班的清单，问问发清单的同学"
+                    }
+                },
+            )
             DialogSecondaryButton("稍后", onDismiss)
         },
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            plans.forEach { plan ->
-                ClaimRow(plan = plan, onClaimClick = { onClaim(plan.id) })
-            }
+        /*
+         * 显示班级、输入密钥 —— 这两件事的分工是 2026-11-23 致辉定的：
+         * **班级是系统认出来的（只读展示），密钥是同学自己填的（手动输入）**。
+         * 所以这里不做「列出来让你点」：那等于把密钥直接摊开给所有人，
+         * 「确认自己找对了」这一步也就没了。
+         */
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(G3CornerShape(11.dp))
+                .background(scheme.surfaceVariant.copy(alpha = 0.35f))
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+        ) {
+            Text("你的班级", fontSize = 11.sp, color = scheme.onSurfaceVariant)
+            Spacer(Modifier.height(3.dp))
+            Text(
+                className.ifBlank { "还没读到学籍里的班级" },
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.Medium,
+                color = scheme.onSurface,
+                maxLines = 2,
+            )
         }
-        Spacer(Modifier.height(4.dp))
+
+        Spacer(Modifier.height(12.dp))
+
+        OutlinedTextField(
+            value = input,
+            onValueChange = {
+                input = it.take(20)
+                error = null
+            },
+            label = { Text("密钥", fontSize = 12.sp) },
+            placeholder = { Text("一般是学委的名字", fontSize = 13.sp) },
+            singleLine = true,
+            isError = error != null,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            error ?: "密钥一般是学委的名字，输对了才能看到清单。",
+            fontSize = 11.5.sp,
+            lineHeight = 16.sp,
+            color = if (error != null) {
+                scheme.error
+            } else {
+                scheme.onSurfaceVariant.copy(alpha = 0.8f)
+            },
+        )
+
+        Spacer(Modifier.height(10.dp))
+
+        // 只知道「有几份、谁维护」——就是想确认本班有人发过，但看不到内容
+        val who = plans.firstOrNull()?.ownerName.orEmpty()
+        Text(
+            if (plans.size == 1) {
+                "本班现有 1 份" +
+                    (if (who.isNotBlank()) "（$who 维护 · ${plans.first().count} 条）" else "")
+            } else {
+                "本班现有 ${plans.size} 份，各用各的密钥"
+            },
+            fontSize = 11.5.sp,
+            lineHeight = 16.sp,
+            color = scheme.onSurfaceVariant,
+        )
+
+        Spacer(Modifier.height(2.dp))
         WhatIsThis(scheme)
     }
 }
@@ -251,54 +338,6 @@ fun ClassPlanDeletedDialog(
 
 // ── 内部零件 ──────────────────────────────────────────────────────────
 
-/** 清单列表里的一行：学委名 / 条数 + 更新时间 / 认领 */
-@Composable
-private fun ClaimRow(plan: ClaimablePlan, onClaimClick: () -> Unit) {
-    val scheme = MaterialTheme.colorScheme
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(G3CornerShape(11.dp))
-            .background(scheme.surfaceVariant.copy(alpha = 0.35f))
-            .padding(start = 12.dp, end = 6.dp, top = 9.dp, bottom = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                plan.key.ifBlank { "班级清单" },
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                color = scheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                buildString {
-                    if (plan.ownerName.isNotBlank()) {
-                        append(plan.ownerName).append(" 维护 · ")
-                    }
-                    append("${plan.count} 条 · ")
-                    append(classPlanSyncTime(plan.updatedAt))
-                },
-                fontSize = 11.sp,
-                color = scheme.onSurfaceVariant,
-            )
-        }
-        Spacer(Modifier.width(6.dp))
-        Text(
-            "认领",
-            fontSize = 12.5.sp,
-            fontWeight = FontWeight.Medium,
-            color = scheme.primary,
-            modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .clickable(onClick = onClaimClick)
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-        )
-    }
-}
-
 /**
  * 可展开的「这是什么？」。
  *
@@ -313,11 +352,10 @@ private fun ClaimRow(plan: ClaimablePlan, onClaimClick: () -> Unit) {
 private fun WhatIsThis(scheme: androidx.compose.material3.ColorScheme) {
     var open by rememberSaveable { mutableStateOf(true) }
     val lines = listOf(
-        "学委把全班的作业和安排整理成清单传到云端，你的 App 每天自动看一眼 —— " +
-            "不用问学委要口令，上面列出来的点一下就行",
-        "勾中的条目会变成你自己的日程，截止前按你自己的设置提醒",
-        "没勾的不会进你的日程，想改随时回来重新勾",
-        "只有本班同学能看到这份清单，你勾了什么不会传出去",
+        "学委把全班的作业和安排整理成清单，发到云端",
+        "输入他给你的密钥，就能看到清单、挑自己需要的导入",
+        "导入后作业会变成你自己的日程，截止前按你的设置提醒",
+        "只有本班同学能认领，你勾了什么不会传出去",
     )
     Column(Modifier.fillMaxWidth()) {
         Row(

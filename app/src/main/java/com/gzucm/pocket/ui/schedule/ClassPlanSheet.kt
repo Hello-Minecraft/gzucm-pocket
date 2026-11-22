@@ -494,10 +494,9 @@ internal fun ClassPlanContent(
             Spacer(Modifier.height(6.dp))
             Text(
                 if (key.isBlank()) {
-                    "填了密钥才能发布 —— 写一行同学一看就知道是你们班的字"
+                    "填了密钥才能发布 —— 一般填学委的名字"
                 } else {
-                    "同学认领时会看到这行字，用来确认没认错班级或清单。" +
-                        "「维护人」是上面自动填的学籍姓名，不用你管"
+                    "同学打开 App 要输这个才能看到清单。填完记得在群里说一声「密钥是学委名字」"
                 },
                 fontSize = 11.5.sp,
                 lineHeight = 16.sp,

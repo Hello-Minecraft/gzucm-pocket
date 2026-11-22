@@ -102,8 +102,13 @@ data class ClassPlanDetailUi(
 )
 
 /** 居中弹窗的三种场景（对应 ui/schedule 里的三个 Dialog） */
-sealed interface ClassPlanPrompt {    /** 首次发现本班有清单，让用户挑一份认领 */
-    data class Claim(val plans: List<ClaimablePlan>) : ClassPlanPrompt
+sealed interface ClassPlanPrompt {    /** 首次发现本班有清单：展示班级、让同学输入密钥 */
+    data class Claim(
+        /** 学籍里的行政班，只读展示 */
+        val className: String,
+        /** 只用来显示「有几份、谁维护」，界面上不出现密钥本身 */
+        val plans: List<ClaimablePlan>,
+    ) : ClassPlanPrompt
 
     /** 已认领的清单有新版本 */
     data class Update(val id: String, val key: String, val added: Int, val updated: Int) : ClassPlanPrompt
@@ -398,15 +403,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val sub = st.subs.maxByOrNull { it.importedUpdatedAt }!!
                 val brief = idx.plans.firstOrNull { it.id == sub.id }
                 when {
-                    brief == null -> ClassPlanBarState.Claimed(sub.id, sub.key, 0, st.lastSyncAt)
+                    brief == null ->
+                        ClassPlanBarState.Claimed(sub.id, sub.key, "", 0, st.lastSyncAt)
                     brief.updatedAt > sub.importedUpdatedAt -> ClassPlanBarState.Updated(
                         sub.id,
                         sub.key,
+                        brief.ownerName,
                         sub.lastAdded,
                         sub.lastUpdated,
                         st.lastSyncAt,
                     )
-                    else -> ClassPlanBarState.Claimed(sub.id, sub.key, brief.count, st.lastSyncAt)
+                    else -> ClassPlanBarState.Claimed(
+                        sub.id,
+                        sub.key,
+                        brief.ownerName,
+                        brief.count,
+                        st.lastSyncAt,
+                    )
                 }
             }
         }
@@ -487,7 +500,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 classSyncStore.updateState { it.promptShown(now) }
                 rebuildClassPlanHint(
                     ClassPlanPrompt.Claim(
-                        index.plans.map { ClaimablePlan(it.id, it.key, it.count, it.updatedAt) },
+                        className = state.studentCard?.className.orEmpty(),
+                        // key 只用来让 submitClassPlanKey 比对，界面不展示
+                        plans = index.plans.map {
+                            ClaimablePlan(it.id, it.key, it.count, it.updatedAt, it.ownerName)
+                        },
                     ),
                 )
                 return
@@ -508,6 +525,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         rebuildClassPlanHint()
+    }
+
+    /**
+     * 同学输入的密钥能不能对上本班的某一份。
+     *
+     * 对上了就打开那份清单并返回 true（弹窗随之关掉）；
+     * 对不上返回 false，由弹窗显示「密钥不对」。
+     *
+     * 比对在本地 `index` 里做：清单的 key 是摘要里带的（服务端按班级列出），
+     * 所以不需要多一次网络往返。**界面上从不展示这些 key** —— 同学必须手输，
+     * 这就是「确认自己找对了」的那一步。
+     */
+    fun submitClassPlanKey(input: String): Boolean {
+        val key = input.trim()
+        if (key.isEmpty()) return false
+        val idx = classSyncStore.loadIndex() ?: return false
+        val hit = idx.plans.firstOrNull { it.key.trim() == key } ?: return false
+        classPlanHint = null
+        openClassPlanDetail(hit.id)
+        return true
     }
 
     /**
@@ -670,13 +707,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (sub != null) openClassPlanDetail(sub.id) else syncClassPlan(force = true)
             }
 
-            // 没认领、本班只有一份：也直接开详情（进去就能勾选导入），省一层选择
-            idx.plans.size == 1 -> openClassPlanDetail(idx.plans.first().id)
-
-            // 本班有多份：得先让用户选哪一份，这个弹窗躲不掉
+            // 未认领：一律让同学输密钥。**不要因为「只有一份」就直接打开** ——
+            // 密钥的作用就是让人确认自己找对了，省掉这一步等于没有。
             else -> rebuildClassPlanHint(
                 ClassPlanPrompt.Claim(
-                    idx.plans.map {
+                    className = state.studentCard?.className.orEmpty(),
+                    plans = idx.plans.map {
                         ClaimablePlan(it.id, it.key, it.count, it.updatedAt, it.ownerName)
                     },
                 ),

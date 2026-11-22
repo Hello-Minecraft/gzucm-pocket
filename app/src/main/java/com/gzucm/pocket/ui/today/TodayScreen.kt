@@ -801,22 +801,42 @@ private fun ClassPlanBar(
         ClassPlanBarState.Empty ->
             Pair("还没有班级日程", "学委上传后会自动出现在这里")
 
-        // 只列前 3 份：一行装不下第 4 个名字，兜底交给省略号
+        /*
+         * 未认领：只说「有几份、谁维护、多少条」，**绝不显示密钥**。
+         *
+         * 密钥是同学自己要输入的（2026-11-23 致辉定的），摊在这一行就等于
+         * 把门直接打开了，「确认自己找对了」那一步也就白设了。
+         */
         is ClassPlanBarState.Unclaimed -> Pair(
             "本班有 ${state.plans.size} 份班级日程",
-            state.plans.take(3).joinToString(" · ") { "${it.key} ${it.count} 条" },
+            state.plans.take(3).joinToString(" · ") {
+                val who = it.ownerName.ifBlank { "同学" }
+                "$who ${it.count} 条"
+            },
         )
 
+        /*
+         * 标题里**不出现密钥**。
+         *
+         * 密钥是同学自己输进去的那道口令（2026-11-23 定的），把它当成清单名摆在
+         * 首页，等于每次抬头都看到一串「钟伟熙」—— 既没信息量又容易看懵。
+         * 该露的是「这是班级日程」和「谁在维护」。
+         */
         is ClassPlanBarState.Claimed -> Pair(
-            "${state.key.ifBlank { "班级清单" }} · ${state.count} 条",
-            "${classPlanSyncTime(state.syncedAt)} 同步",
+            "班级日程 · ${state.count} 条",
+            buildString {
+                if (state.ownerName.isNotBlank()) append("${state.ownerName} 维护 · ")
+                append("${classPlanSyncTime(state.syncedAt)} 同步")
+            },
         )
 
         // 「更新了：新增 2 条、改了 1 条」——顿号是首页那一行的口径，弹窗里用逗号
         is ClassPlanBarState.Updated -> Pair(
-            "${state.key.ifBlank { "班级清单" }}更新了：" +
-                classPlanPatchText(state.added, state.updated, "、"),
-            classPlanSyncTime(state.syncedAt),
+            "班级日程更新了：" + classPlanPatchText(state.added, state.updated, "、"),
+            buildString {
+                if (state.ownerName.isNotBlank()) append("${state.ownerName} 维护 · ")
+                append(classPlanSyncTime(state.syncedAt))
+            },
         )
     }
 
