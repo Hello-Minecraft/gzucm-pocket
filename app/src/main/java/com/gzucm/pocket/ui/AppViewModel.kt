@@ -603,16 +603,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * 同学输入的密钥能不能对上本班的某一份。
+     * 同学为**已选中的那一份**清单输入的密钥对不对。
      *
-     * 对上了就打开那份清单并返回 true（弹窗随之关掉）；
-     * 对不上返回 false，由弹窗显示「密钥不对」。
+     * 对了就打开这份清单并返回 true（弹窗随之关掉）；不对返回 false，
+     * 由弹窗显示「这个密钥对不上这一份清单」。
+     *
+     * 必须按 [planId] 定位：一个班可以有多份清单、各有各的密钥，
+     * 以前「拿 key 反找清单」的做法会让同学输对别人的 key 就认领到别人那份，
+     * 现在清单是弹窗里先选好的，这里只负责校验「这个 key 是不是这一份的」。
      *
      * 比对在本地 `index` 里做：清单的 key 是摘要里带的（服务端按班级列出），
      * 所以不需要多一次网络往返。**界面上从不展示这些 key** —— 同学必须手输，
      * 这就是「确认自己找对了」的那一步。
      */
-    fun submitClassPlanKey(input: String, onResult: (Boolean) -> Unit) {
+    fun submitClassPlanKey(planId: String, input: String, onResult: (Boolean) -> Unit) {
         val key = input.trim()
         if (key.isEmpty()) {
             onResult(false)
@@ -620,10 +624,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         // 先拿本地已有的索引比：绝大多数情况一次就中
-        val local = classSyncStore.loadIndex()?.plans?.firstOrNull { it.key.trim() == key }
-        if (local != null) {
+        val local = classSyncStore.loadIndex()?.plans?.firstOrNull { it.id == planId }
+        if (local != null && local.key.trim() == key) {
             classPlanHint = null
-            openClassPlanDetail(local.id)
+            openClassPlanDetail(planId)
             onResult(true)
             return
         }
@@ -631,12 +635,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         /*
          * 本地没对上，**不能直接判「密钥错了」**。
          *
+         * 两种情况都会走到这里：索引里还没有这份清单，或者有、但 key 还是旧的。
          * 2026-11-23 致辉在手机上输「钟伟熙」一直提示不对：他手机上缓存的是
          * 学委前一天那份索引（那时密钥还是旧值），而学委这边已经改过密钥重新发布了。
          * 同学的 App 一天只同步一次，`requestClassPlanPrompt` 只要本地有索引就直接用，
          * 于是本地永远是新旧不一致 —— 输入正确答案也必然失败。
          *
-         * 所以这里再往服务端要一次：拉到了就用最新索引重判，还不对才是真不对。
+         * 所以这里再往服务端要一次：拉到了就按 planId 重新找一遍再比，还不对才是真不对。
          */
         val card = state.studentCard
         if (card == null) {
@@ -647,10 +652,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             when (val r = classSyncApi.index(card.classKey)) {
                 is ClassSyncApi.Result.Ok -> {
                     classSyncStore.saveIndex(r.value)
-                    val hit = r.value.plans.firstOrNull { it.key.trim() == key }
-                    if (hit != null) {
+                    val plan = r.value.plans.firstOrNull { it.id == planId }
+                    if (plan != null && plan.key.trim() == key) {
                         classPlanHint = null
-                        openClassPlanDetail(hit.id)
+                        openClassPlanDetail(planId)
                         onResult(true)
                     } else {
                         onResult(false)

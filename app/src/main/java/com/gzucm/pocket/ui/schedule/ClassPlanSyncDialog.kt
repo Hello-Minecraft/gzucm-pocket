@@ -137,28 +137,35 @@ fun classPlanPatchText(added: Int, updated: Int, sep: String = "，"): String = 
 /**
  * 场景一：首次发现本班有清单。
  *
- * 只负责画：认领动作通过 [onClaim] 抛给调用方（传 planId），不在这里发请求。
+ * 只负责画：认领动作通过 [onSubmitKey] 抛给调用方（带 planId 和密钥），
+ * 不在这里发请求。
  *
- * 标题用「本班有班级日程」而不是「本班有 N 份」：N 已经逐行列出来了，
+ * 标题用「认领班级日程」而不是「本班有 N 份」：N 已经逐行列出来了，
  * 标题再数一遍反而啰嗦。
  */
 @Composable
 fun ClassPlanClaimDialog(
     /** 学籍里的行政班，只读展示 —— 同学靠它确认 App 认对了班级 */
     className: String,
-    /** 本班现有的清单摘要，只用来告诉同学「有几份、谁维护」，**不展示密钥** */
+    /** 本班现有的清单摘要，用来让同学挑一份，**不展示密钥** */
     plans: List<ClaimablePlan>,
     /**
-     * 校验密钥。**异步**：本地索引对不上时还要往服务端拉一次最新列表
-     * （同学手机上的索引可能停在学委改密钥之前），所以结果走回调。
+     * 校验「这一份的密钥」。**异步**：本地索引里没有这份清单（或 key 是旧的）时
+     * 还要往服务端拉一次最新列表，所以结果走回调。
      */
-    onSubmitKey: (String, (Boolean) -> Unit) -> Unit,
+    onSubmitKey: (planId: String, key: String, onResult: (Boolean) -> Unit) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
     var input by rememberSaveable { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var checking by remember { mutableStateOf(false) }
+    /*
+     * 默认选中第一份：本班只有一份清单是常态，默认选中让同学少点一次；
+     * 多份时也有个明确的起点，不至于对着列表不知道从哪下手。
+     * 以 plans 作为 key，列表变了（重新拉了索引）就重选，不会残留一个不存在的 id。
+     */
+    var selectedId by rememberSaveable(plans) { mutableStateOf(plans.firstOrNull()?.id) }
 
     CenterDialog(
         title = "认领班级日程",
@@ -168,15 +175,17 @@ fun ClassPlanClaimDialog(
                 text = if (checking) "正在核对…" else "查看清单",
                 onClick = {
                     if (checking) return@DialogPrimaryButton
+                    val plan = plans.firstOrNull { it.id == selectedId }
+                    error = when {
+                        plan == null -> "先选一份清单"
+                        input.isBlank() -> "先填密钥再点"
+                        else -> null
+                    }
+                    if (plan == null || input.isBlank()) return@DialogPrimaryButton
                     checking = true
-                    error = null
-                    onSubmitKey(input) { ok ->
+                    onSubmitKey(plan.id, input) { ok ->
                         checking = false
-                        error = when {
-                            ok -> null
-                            input.isBlank() -> "先填密钥再点"
-                            else -> "这个密钥对不上本班的清单，问问发清单的同学"
-                        }
+                        error = if (ok) null else "这个密钥对不上这一份清单，问问发清单的同学"
                     }
                 },
             )
@@ -184,10 +193,17 @@ fun ClassPlanClaimDialog(
         },
     ) {
         /*
-         * 显示班级、输入密钥 —— 这两件事的分工是 2026-11-23 致辉定的：
-         * **班级是系统认出来的（只读展示），密钥是同学自己填的（手动输入）**。
-         * 所以这里不做「列出来让你点」：那等于把密钥直接摊开给所有人，
-         * 「确认自己找对了」这一步也就没了。
+         * 先选清单、再输密钥（2026-11-23 改）。
+         *
+         * 原来只让同学输一个密钥，靠密钥反推是哪一份清单。但一个班可以有多份
+         * 清单、各有各的密钥，人一旦记混就会「输对了密钥却认领错清单」，
+         * 而弹窗本身又只列了名字不能点，等于让同学对着列表干猜。
+         *
+         * 现在把「选哪一份」和「证明有权看」拆成两步：列表里只给名字、条数、
+         * 维护人（都是发布时就公开的信息），密钥仍然要另外找维护人要 ——
+         * 所以列表可以放心点，密钥该保密的还是保密。
+         *
+         * 班级是系统认出来的（只读），清单是同学自己选的，密钥是同学自己填的。
          */
         Column(
             Modifier
@@ -209,6 +225,83 @@ fun ClassPlanClaimDialog(
 
         Spacer(Modifier.height(12.dp))
 
+        Text(
+            if (plans.size == 1) "本班现有 1 份，选它：" else "本班现有 ${plans.size} 份，选一份：",
+            fontSize = 11.5.sp,
+            color = scheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(6.dp))
+        if (plans.isEmpty()) {
+            // 正常不会到这儿（没清单就不弹这个窗），留着是为了列表为空时也有话说
+            Text(
+                "还没拉到清单，稍后再试",
+                fontSize = 11.5.sp,
+                color = scheme.onSurfaceVariant,
+            )
+        } else {
+            /*
+             * 整行可点，不做 RadioButton：弹窗宽度本来就紧，单选用底色 + 右侧勾
+             * 已经够清楚，多一个圆点会把清单名挤到换行。
+             */
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                plans.forEach { p ->
+                    val selected = p.id == selectedId
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(G3CornerShape(11.dp))
+                            .background(
+                                if (selected) {
+                                    scheme.primary.copy(alpha = 0.10f)
+                                } else {
+                                    scheme.surfaceVariant.copy(alpha = 0.30f)
+                                },
+                            )
+                            .clickable {
+                                selectedId = p.id
+                                error = null
+                            }
+                            .padding(horizontal = 12.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                p.name.ifBlank { "未命名清单" },
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = if (selected) scheme.primary else scheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                if (p.ownerName.isBlank()) {
+                                    "${p.count} 条"
+                                } else {
+                                    "${p.count} 条 · ${p.ownerName} 维护"
+                                },
+                                fontSize = 11.sp,
+                                color = scheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        if (selected) {
+                            Spacer(Modifier.width(8.dp))
+                            Icon(
+                                AppIcons.Check,
+                                contentDescription = "已选中",
+                                modifier = Modifier.size(16.dp),
+                                tint = scheme.primary,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
         OutlinedTextField(
             value = input,
             onValueChange = {
@@ -224,7 +317,7 @@ fun ClassPlanClaimDialog(
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            error ?: "密钥一般是学委的名字，输对了才能看到清单。",
+            error ?: "这一份的密钥由维护的人给你，输对了才能看到内容。",
             fontSize = 11.5.sp,
             lineHeight = 16.sp,
             color = if (error != null) {
@@ -233,38 +326,6 @@ fun ClassPlanClaimDialog(
                 scheme.onSurfaceVariant.copy(alpha = 0.8f)
             },
         )
-
-        Spacer(Modifier.height(10.dp))
-
-        // 只知道「有几份、谁维护」——就是想确认本班有人发过，但看不到内容
-        /*
-         * 列出本班有哪几份（名字 + 条数 + 维护人），但**不显示密钥**。
-         *
-         * 这样同学知道「有几摊事」，输哪个密钥进哪一份；而密钥仍然得从学委那里拿到，
-         * 「确认自己找对了」这一步还在。
-         */
-        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(
-                if (plans.size == 1) "本班现有 1 份：" else "本班现有 ${plans.size} 份：",
-                fontSize = 11.5.sp,
-                color = scheme.onSurfaceVariant,
-            )
-            plans.take(4).forEach { p ->
-                Text(
-                    buildString {
-                        append("· ")
-                        append(p.name.ifBlank { "未命名清单" })
-                        append("  ${p.count} 条")
-                        if (p.ownerName.isNotBlank()) append("（${p.ownerName}）")
-                    },
-                    fontSize = 11.5.sp,
-                    lineHeight = 16.sp,
-                    color = scheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
 
         Spacer(Modifier.height(2.dp))
         WhatIsThis(scheme)
