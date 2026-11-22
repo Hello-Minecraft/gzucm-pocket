@@ -25,13 +25,14 @@ import java.util.concurrent.TimeUnit
 /**
  * 班级日程云端的 HTTP 客户端（契约 §2）。
  *
- * ## 和天气共用同一个云函数
+ * ## 和天气是两个函数、同一个 token
  *
- * 域名和 `X-App-Token` 都从 `BuildConfig.WEATHER_BASE` / `WEATHER_APP_TOKEN` 读 ——
- * **同一个 FC 实例、同一个 APP_TOKEN**，只是路径前缀换成 `/classplan`。
- * 不另开一套配置：多一个域名就多一份要维护的密钥，而且用户只需要配一次。
- * 配了 `weather.properties` 里的 `base` + `app_token`，天气和班级日程一起生效；
- * 没配（比如别人 clone 下来构建）就两个功能都安静地不出现，不会报错。
+ * 域名读 `BuildConfig.CLASSPLAN_BASE`（2026-11-22 单独建的 `classplan` 函数），
+ * 和天气的 `WEATHER_BASE` 不是一个。为什么不合并成一个：天气只转发和风、
+ * 这里读写 OSS，两套逻辑放一个文件里改一处要回归另一处。
+ * `X-App-Token` 复用天气那一个（`WEATHER_APP_TOKEN`）—— 多一个密钥就多一处维护。
+ *
+ * 没配地址（比如别人 clone 下来构建）时整块功能安静地不出现，不报错。
  *
  * ## 为什么不用 [Net.client]
  *
@@ -46,7 +47,7 @@ import java.util.concurrent.TimeUnit
  * 首页每天自动同步一次，抛异常会直接把整个页面搞崩。
  */
 class ClassSyncApi(
-    private val base: String = BuildConfig.WEATHER_BASE,
+    private val base: String = BuildConfig.CLASSPLAN_BASE,
     private val appToken: String = BuildConfig.WEATHER_APP_TOKEN,
     private val client: OkHttpClient = DefaultClient,
 ) {

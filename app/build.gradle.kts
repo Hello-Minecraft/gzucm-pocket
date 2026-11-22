@@ -57,6 +57,21 @@ android {
             "WEATHER_APP_TOKEN",
             "\"${weatherProps.getProperty("app_token", "").trim()}\"",
         )
+        /*
+         * 班级日程云函数（2026-11-22）。
+         *
+         * 和天气**不是同一个函数**：天气只转发和风、班级日程读写 OSS，
+         * 两套逻辑放一个文件里只会互相牵连，所以各建各的（同为 cn-hangzhou）。
+         * 密钥复用 APP_TOKEN 那一个，不另开一套 —— 多一个密钥就多一处要维护、
+         * 多一处可能泄露。
+         *
+         * 留空时班级日程整块不出现（不是报错），和天气缺失时的处理一致。
+         */
+        buildConfigField(
+            "String",
+            "CLASSPLAN_BASE",
+            "\"${weatherProps.getProperty("classplan_base", "").trim()}\"",
+        )
     }
 
     /**
