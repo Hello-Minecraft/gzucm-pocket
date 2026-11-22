@@ -537,14 +537,53 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * 所以不需要多一次网络往返。**界面上从不展示这些 key** —— 同学必须手输，
      * 这就是「确认自己找对了」的那一步。
      */
-    fun submitClassPlanKey(input: String): Boolean {
+    fun submitClassPlanKey(input: String, onResult: (Boolean) -> Unit) {
         val key = input.trim()
-        if (key.isEmpty()) return false
-        val idx = classSyncStore.loadIndex() ?: return false
-        val hit = idx.plans.firstOrNull { it.key.trim() == key } ?: return false
-        classPlanHint = null
-        openClassPlanDetail(hit.id)
-        return true
+        if (key.isEmpty()) {
+            onResult(false)
+            return
+        }
+
+        // 先拿本地已有的索引比：绝大多数情况一次就中
+        val local = classSyncStore.loadIndex()?.plans?.firstOrNull { it.key.trim() == key }
+        if (local != null) {
+            classPlanHint = null
+            openClassPlanDetail(local.id)
+            onResult(true)
+            return
+        }
+
+        /*
+         * 本地没对上，**不能直接判「密钥错了」**。
+         *
+         * 2026-11-23 致辉在手机上输「钟伟熙」一直提示不对：他手机上缓存的是
+         * 学委前一天那份索引（那时密钥还是旧值），而学委这边已经改过密钥重新发布了。
+         * 同学的 App 一天只同步一次，`requestClassPlanPrompt` 只要本地有索引就直接用，
+         * 于是本地永远是新旧不一致 —— 输入正确答案也必然失败。
+         *
+         * 所以这里再往服务端要一次：拉到了就用最新索引重判，还不对才是真不对。
+         */
+        val card = state.studentCard
+        if (card == null) {
+            onResult(false)
+            return
+        }
+        viewModelScope.launch {
+            when (val r = classSyncApi.index(card.classKey)) {
+                is ClassSyncApi.Result.Ok -> {
+                    classSyncStore.saveIndex(r.value)
+                    val hit = r.value.plans.firstOrNull { it.key.trim() == key }
+                    if (hit != null) {
+                        classPlanHint = null
+                        openClassPlanDetail(hit.id)
+                        onResult(true)
+                    } else {
+                        onResult(false)
+                    }
+                }
+                is ClassSyncApi.Result.Failed -> onResult(false)
+            }
+        }
     }
 
     /**

@@ -143,26 +143,35 @@ fun ClassPlanClaimDialog(
     className: String,
     /** 本班现有的清单摘要，只用来告诉同学「有几份、谁维护」，**不展示密钥** */
     plans: List<ClaimablePlan>,
-    /** 返回 true = 密钥对上了（上层会关窗并打开清单）；false = 让弹窗报错 */
-    onSubmitKey: (String) -> Boolean,
+    /**
+     * 校验密钥。**异步**：本地索引对不上时还要往服务端拉一次最新列表
+     * （同学手机上的索引可能停在学委改密钥之前），所以结果走回调。
+     */
+    onSubmitKey: (String, (Boolean) -> Unit) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
     var input by rememberSaveable { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    var checking by remember { mutableStateOf(false) }
 
     CenterDialog(
         title = "认领班级日程",
         onDismiss = onDismiss,
         buttons = {
             DialogPrimaryButton(
-                text = "查看清单",
+                text = if (checking) "正在核对…" else "查看清单",
                 onClick = {
-                    if (onSubmitKey(input)) error = null
-                    else error = if (input.isBlank()) {
-                        "先填密钥再点"
-                    } else {
-                        "这个密钥对不上本班的清单，问问发清单的同学"
+                    if (checking) return@DialogPrimaryButton
+                    checking = true
+                    error = null
+                    onSubmitKey(input) { ok ->
+                        checking = false
+                        error = when {
+                            ok -> null
+                            input.isBlank() -> "先填密钥再点"
+                            else -> "这个密钥对不上本班的清单，问问发清单的同学"
+                        }
                     }
                 },
             )
