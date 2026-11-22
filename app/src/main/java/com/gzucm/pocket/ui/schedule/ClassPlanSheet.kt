@@ -42,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -102,12 +103,20 @@ internal fun ClassPlanContent(
      * 但界面上一直没有这个入口 —— 承诺了没做，现在补上。
      */
     onDeletePublished: (() -> Unit)? = null,
+    /** 本机维护的所有清单，用于「切换清单」那一屏 */
+    plans: List<ClassPlan> = listOf(plan),
+    /** 切到另一份去编辑（按密钥） */
+    onSelectPlan: ((String) -> Unit)? = null,
+    /** 新建一份空清单 */
+    onCreatePlan: (() -> Unit)? = null,
 ) {
     val ctx = LocalContext.current
     val scheme = MaterialTheme.colorScheme
     val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
     var mode by remember { mutableStateOf<Mode>(Mode.LIST) }
+    /** 是否正在看「清单列表」那一屏（切换/新建清单） */
+    var showPlanList by remember { mutableStateOf(false) }
     var hint by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     /** 待确认的导入：解析出来了但还没灌进日程 */
     var pendingImport by remember { mutableStateOf<ClassPlan?>(null) }
@@ -256,7 +265,22 @@ internal fun ClassPlanContent(
         }
     }
 
-    when (val m = mode) {
+    if (showPlanList) {
+        PlanListScreen(
+            plans = plans,
+            currentKey = plan.key,
+            onPick = { key ->
+                onSelectPlan?.invoke(key)
+                showPlanList = false
+            },
+            onCreate = {
+                onCreatePlan?.invoke()
+                showPlanList = false
+            },
+            onBack = { showPlanList = false },
+            scheme = scheme,
+        )
+    } else when (val m = mode) {
         Mode.LIST -> Column(
             Modifier
                 .fillMaxWidth()
@@ -282,6 +306,34 @@ internal fun ClassPlanContent(
                 lineHeight = 18.sp,
                 color = scheme.onSurfaceVariant,
             )
+
+            Spacer(Modifier.height(12.dp))
+
+            /*
+             * 清单名（2026-11-23 加）。
+             *
+             * 以前没有这个概念，`key` 一个人兼了「名字 + 密钥 + planId」三份差事，
+             * 结果界面上「清单」就等于一堆日程，学委说不清「这是哪一摊事」。
+             * 现在名字归名字，密钥归密钥。
+             */
+            OutlinedTextField(
+                value = plan.name,
+                onValueChange = { persist(plan.copy(name = it.take(30))) },
+                label = { Text("清单名", fontSize = 12.sp) },
+                placeholder = { Text("例如：期末作业清单", fontSize = 13.sp) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "同学认领之后看到的就是这行字。一摊事一份清单 —— " +
+                    "期末作业、见习安排别塞进同一个筐。",
+                fontSize = 11.5.sp,
+                lineHeight = 16.sp,
+                color = scheme.onSurfaceVariant.copy(alpha = 0.8f),
+            )
+
             Spacer(Modifier.height(6.dp))
             /*
              * 教程入口写在这一屏，而不是「设置 → 帮助」里：
@@ -316,6 +368,31 @@ internal fun ClassPlanContent(
             // 自动识别的两项：班级（云端主索引）和维护人（谁在上传）
             InfoLine("本班", studentClass, scheme)
             InfoLine("维护人", maintainer, scheme)
+
+            // 换一份 / 再建一份。只有一份时不显示（点进去就是它，没什么可换的）
+            if ((plans.size > 1 || onCreatePlan != null) && !LocalIsWidePane.current) {
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { showPlanList = true }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        AppIcons.EventNote,
+                        contentDescription = null,
+                        modifier = Modifier.size(13.dp),
+                        tint = scheme.primary,
+                    )
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        if (plans.size > 1) "换一份清单（本机 ${plans.size} 份）" else "再建一份清单",
+                        fontSize = 12.sp,
+                        color = scheme.primary,
+                    )
+                }
+            }
 
             Spacer(Modifier.height(18.dp))
 
@@ -484,8 +561,10 @@ internal fun ClassPlanContent(
                     key = it.take(12)
                     persist(plan.copy(key = key))
                 },
-                label = { Text("密钥（同学认领时核对）", fontSize = 12.sp) },
-                placeholder = { Text("例如：2023铁涛班作业", fontSize = 13.sp) },
+                label = { Text("密钥", fontSize = 12.sp) },
+                // 这句提示是致辉反复要求的固定文案（2026-11-23 又强调一次）：
+                // 学委不知道该填什么，同学也不知道该输什么，都靠这一行。
+                placeholder = { Text("一般是学委名字", fontSize = 13.sp) },
                 singleLine = true,
                 isError = key.isBlank(),
                 modifier = Modifier.fillMaxWidth(),
@@ -1234,3 +1313,123 @@ private fun dueLabel(ms: Long?): String =
 
 /** 一份清单最多几条。和云函数 `bad_count` 的阈值必须一致（契约 §2.3） */
 private const val CLASS_PLAN_MAX_TASKS = 80
+
+/**
+ * 「我的清单」那一屏：本机维护的所有清单，点一份进去改。
+ *
+ * 为什么单独一层（2026-11-23 致辉定的「先建清单再加条目」）：
+ * 一个班常常不止一摊事 —— 期末作业、见习安排、实验报告各是各的清单，
+ * 各有各的名字和密钥。把这些全塞在一个列表里，同学认领时根本分不清
+ * 「这 13 条是作业还是见习安排」。
+ */
+@Composable
+private fun PlanListScreen(
+    plans: List<ClassPlan>,
+    currentKey: String,
+    onPick: (String) -> Unit,
+    onCreate: () -> Unit,
+    onBack: () -> Unit,
+    scheme: androidx.compose.material3.ColorScheme,
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 26.dp)
+            .verticalScroll(rememberScrollState()),
+    ) {
+        BackRow(onBack, "返回")
+
+        Text(
+            "我的清单",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Medium,
+            color = scheme.onSurface,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "一摊事一份清单，各有各的名字和密钥。同学凭密钥认领其中一份。",
+            fontSize = 12.5.sp,
+            lineHeight = 18.sp,
+            color = scheme.onSurfaceVariant,
+        )
+
+        Spacer(Modifier.height(14.dp))
+
+        if (plans.isEmpty()) {
+            Text(
+                "还没有清单。点下面的「新建清单」开始 —— 先起个名字（比如「期末作业清单」），" +
+                    "再往里加作业。",
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+                color = scheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(14.dp))
+        }
+
+        plans.forEach { p ->
+            val editing = p.key == currentKey
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(G3CornerShape(12.dp))
+                    .background(
+                        if (editing) {
+                            scheme.primary.copy(alpha = 0.10f)
+                        } else {
+                            scheme.surfaceVariant.copy(alpha = 0.28f)
+                        },
+                    )
+                    .clickable { onPick(p.key) }
+                    .padding(horizontal = 13.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        p.name.ifBlank { "未命名清单" },
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = scheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        buildString {
+                            append("${p.tasks.size} 条")
+                            append(" · 密钥 ")
+                            append(p.key.ifBlank { "未设" })
+                        },
+                        fontSize = 11.sp,
+                        color = scheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (editing) {
+                    Text(
+                        "编辑中",
+                        fontSize = 11.sp,
+                        color = scheme.primary,
+                    )
+                    Spacer(Modifier.width(4.dp))
+                }
+                Icon(
+                    AppIcons.ChevronRight,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = scheme.onSurfaceVariant.copy(alpha = 0.6f),
+                )
+            }
+            Spacer(Modifier.height(7.dp))
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        OutlinedButton(
+            onClick = onCreate,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+        ) { Text("＋ 新建清单", fontSize = 12.5.sp) }
+    }
+}

@@ -159,14 +159,19 @@ fun ClassPlanDetailSheet(
                      */
                     val owner = detail.plan.maintainer.trim()
                     val cls = detail.plan.className.trim()
-                        .ifBlank { detail.key.ifBlank { "班级清单" } }
+                    // 清单名优先（2026-11-23 加）：这是学委自己起的那摊事的名字，
+                    // 老数据没有就退回班级名
+                    val title = detail.plan.name.trim().ifBlank {
+                        cls.ifBlank { detail.key.ifBlank { "班级作业" } }
+                    }
                     val sub = buildString {
+                        if (cls.isNotBlank()) append("$cls · ")
                         if (owner.isNotBlank()) append("$owner 维护 · ")
                         append("${tasks.size} 条")
                     }
                     Column(Modifier.weight(1f)) {
                         Text(
-                            cls,
+                            title,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Medium,
                             color = scheme.onSurface,

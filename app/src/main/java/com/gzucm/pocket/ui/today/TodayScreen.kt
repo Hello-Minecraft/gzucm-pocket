@@ -823,7 +823,7 @@ private fun ClassPlanBar(
          * 该露的是「这是班级日程」和「谁在维护」。
          */
         is ClassPlanBarState.Claimed -> Pair(
-            "班级日程 · ${state.count} 条",
+            "${state.planName.ifBlank { "班级作业" }} · ${state.count} 条",
             buildString {
                 if (state.ownerName.isNotBlank()) append("${state.ownerName} 维护 · ")
                 append("${classPlanSyncTime(state.syncedAt)} 同步")
@@ -832,7 +832,8 @@ private fun ClassPlanBar(
 
         // 「更新了：新增 2 条、改了 1 条」——顿号是首页那一行的口径，弹窗里用逗号
         is ClassPlanBarState.Updated -> Pair(
-            "班级日程更新了：" + classPlanPatchText(state.added, state.updated, "、"),
+            "${state.planName.ifBlank { "班级作业" }}更新了：" +
+                classPlanPatchText(state.added, state.updated, "、"),
             buildString {
                 if (state.ownerName.isNotBlank()) append("${state.ownerName} 维护 · ")
                 append(classPlanSyncTime(state.syncedAt))

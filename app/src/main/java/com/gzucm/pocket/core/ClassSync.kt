@@ -35,6 +35,8 @@ data class ClassPlanBrief(
      * 界面按「不显示」处理，不是「未知」。
      */
     val ownerName: String = "",
+    /** 清单名，如「期末作业清单」。老数据没有，空串时界面兜底成「班级作业」 */
+    val name: String = "",
     val count: Int = 0,
     val updatedAt: Long = 0,
 )

@@ -123,12 +123,17 @@ data class UiState(
     /** 学籍卡片（班级/年级/专业）。null = 还没拉到过，或这台设备还没登录过 */
     val studentCard: com.gzucm.pocket.core.StudentCard? = null,
     /**
-     * 班级日程：学委维护的那份清单。
+     * 本机维护的**所有**班级清单（学委侧）。
+     *
+     * 2026-11-23 从「只有一份」改成列表：一个班通常不止一摊事 ——
+     * 期末作业清单、见习安排清单、实验报告清单，各有各的名字和密钥。
      *
      * 和 `agenda`（自己的日程）分开两块 —— 一个是「我发给别人的」，
      * 一个是「我自己的事」，责任人和生命周期都不一样（见 ClassPlanStore 的注释）。
      */
-    val classPlan: com.gzucm.pocket.core.ClassPlan = com.gzucm.pocket.core.ClassPlan(key = ""),
+    val classPlans: List<com.gzucm.pocket.core.ClassPlan> = emptyList(),
+    /** 当前正在编辑哪一份，按密钥认 */
+    val editingPlanKey: String = "",
     val sessions: List<CourseSession> = emptyList(),
     val power: PowerInfo? = null,
     val powerDaily: List<PowerDaily> = emptyList(),
@@ -190,7 +195,17 @@ data class UiState(
     val weatherRefreshing: Boolean = false,
     /** 拉取失败的原因（只在已经有一次成功数据时不显示，避免吵闹） */
     val weatherError: String? = null,
-)
+) {
+    /**
+     * 当前正在编辑的那份清单。
+     *
+     * 保留这个名字是为了不动几十处调用点 —— 它们要的都是「手上这份」，
+     * 而不是「全部清单」。没有编辑目标时给一份空清单（key 为空）。
+     */
+    val classPlan: com.gzucm.pocket.core.ClassPlan
+        get() = classPlans.firstOrNull { it.key == editingPlanKey }
+            ?: com.gzucm.pocket.core.ClassPlan(key = "")
+}
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -336,8 +351,58 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * 两套存储分开，删掉自己日程里的一条不会让全班的清单少一条。
      */
     fun saveClassPlan(plan: com.gzucm.pocket.core.ClassPlan) {
-        classPlanStore.save(plan)
-        state = state.copy(classPlan = plan)
+        val list = state.classPlans.toMutableList()
+        /*
+         * 定位顺序很重要：先按「当前编辑的那份」找，再按密钥找。
+         *
+         * 学委改密钥时会走到这里 —— 那时 plan.key 已经是新值，按它找只能新增一份，
+         * 原来那份（旧密钥）就变成永远够不着的孤儿。按 editingPlanKey 找才是「改」。
+         */
+        val byEditing = list.indexOfFirst { it.key == state.editingPlanKey }
+        val byKey = list.indexOfFirst { it.key == plan.key }
+        when {
+            byEditing >= 0 -> list[byEditing] = plan
+            byKey >= 0 -> list[byKey] = plan
+            else -> list.add(plan)
+        }
+        classPlanStore.saveAll(list)
+        state = state.copy(classPlans = list, editingPlanKey = plan.key)
+    }
+
+    /**
+     * 新建一份空清单，直接进入编辑。
+     *
+     * 先给个临时密钥（`tmp-` 前缀）：还没填名字和密钥时它也得有个身份，
+     * 否则 `editingPlanKey` 指不到东西。学委填完真密钥保存时，
+     * [saveClassPlan] 会按 editingPlanKey 把这一份替换掉。
+     */
+    fun newClassPlan() {
+        val card = state.studentCard
+        val tmpKey = "tmp-" + System.currentTimeMillis().toString(36)
+        val fresh = com.gzucm.pocket.core.ClassPlan(
+            key = tmpKey,
+            name = "",
+            maintainer = card?.name.orEmpty(),
+            className = card?.className.orEmpty(),
+        )
+        val list = state.classPlans + fresh
+        classPlanStore.saveAll(list)
+        state = state.copy(classPlans = list, editingPlanKey = tmpKey)
+    }
+
+    /** 切到另一份清单去编辑（null = 回到清单列表） */
+    fun editClassPlan(key: String?) {
+        state = state.copy(editingPlanKey = key.orEmpty())
+    }
+
+    /** 删掉本机的一份清单（只删本地，云端那份要走「删除已发布的清单」） */
+    fun removeLocalClassPlan(key: String) {
+        val list = state.classPlans.filterNot { it.key == key }
+        classPlanStore.saveAll(list)
+        state = state.copy(
+            classPlans = list,
+            editingPlanKey = if (state.editingPlanKey == key) "" else state.editingPlanKey,
+        )
     }
 
     // ── 班级日程：云端同步（2026-11-22） ──────────────────────────
@@ -395,7 +460,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             idx == null || idx.plans.isEmpty() -> ClassPlanBarState.Empty
             st.subs.isEmpty() -> ClassPlanBarState.Unclaimed(
                 idx.plans.map {
-                    ClaimablePlan(it.id, it.key, it.count, it.updatedAt, it.ownerName)
+                    ClaimablePlan(it.id, it.key, it.count, it.updatedAt, it.ownerName, it.name)
                 },
             )
             else -> {
@@ -404,11 +469,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val brief = idx.plans.firstOrNull { it.id == sub.id }
                 when {
                     brief == null ->
-                        ClassPlanBarState.Claimed(sub.id, sub.key, "", 0, st.lastSyncAt)
+                        ClassPlanBarState.Claimed(sub.id, sub.key, "", "", 0, st.lastSyncAt)
                     brief.updatedAt > sub.importedUpdatedAt -> ClassPlanBarState.Updated(
                         sub.id,
                         sub.key,
                         brief.ownerName,
+                        brief.name,
                         sub.lastAdded,
                         sub.lastUpdated,
                         st.lastSyncAt,
@@ -417,6 +483,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         sub.id,
                         sub.key,
                         brief.ownerName,
+                        brief.name,
                         brief.count,
                         st.lastSyncAt,
                     )
@@ -503,7 +570,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         className = state.studentCard?.className.orEmpty(),
                         // key 只用来让 submitClassPlanKey 比对，界面不展示
                         plans = index.plans.map {
-                            ClaimablePlan(it.id, it.key, it.count, it.updatedAt, it.ownerName)
+                            ClaimablePlan(it.id, it.key, it.count, it.updatedAt, it.ownerName, it.name)
                         },
                     ),
                 )
@@ -752,7 +819,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 ClassPlanPrompt.Claim(
                     className = state.studentCard?.className.orEmpty(),
                     plans = idx.plans.map {
-                        ClaimablePlan(it.id, it.key, it.count, it.updatedAt, it.ownerName)
+                        ClaimablePlan(it.id, it.key, it.count, it.updatedAt, it.ownerName, it.name)
                     },
                 ),
             )
@@ -1277,10 +1344,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
          */
         ensureStudentCard()
 
-        // 班级清单：学委维护的那份。空 key 表示还没建过，面板会引导他填
-        classPlanStore.load().let { if (it.key.isNotBlank() || it.tasks.isNotEmpty()) {
-            state = state.copy(classPlan = it)
-        } }
+        /*
+         * 班级清单：本机维护的所有份。列表为空表示还没建过，面板会引导他建。
+         *
+         * 编辑目标默认指向第一份 —— 学委点进「班级日程」就该看到自己最近在弄的东西，
+         * 而不是先挑一份（只有一份时那一屏纯属浪费）。
+         */
+        classPlanStore.loadAll().let { list ->
+            if (list.isNotEmpty()) {
+                state = state.copy(classPlans = list, editingPlanKey = list.first().key)
+            }
+        }
 
         // 天气和登录态无关：没登录也照样显示，先摆缓存再按节流决定要不要联网
         loadWeather()

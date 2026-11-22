@@ -112,6 +112,19 @@ data class ClassPlan(
      * 接云端之后它是「要不要提示同学有新版」的判据。
      */
     val updatedAt: Long = 0L,
+    /**
+     * 清单名：**给人看的**，学委自己起，比如「期末作业清单」「见习安排清单」。
+     *
+     * 2026-11-23 加。在这之前 [key] 一个人兼了三份差事（清单名、密钥、planId 来源），
+     * 结果界面上「清单」就等于一堆日程，说不清这是哪一摊事。
+     *
+     * 分工定死：
+     *   · [name] → 显示（同学认领后、详情页顶部、首页那行）
+     *   · [key]  → 同学输入的密钥，也是 planId 的来源，**不展示**
+     *
+     * 空串 = 老数据（加字段之前发的），显示时兜底成「班级作业」。
+     */
+    val name: String = "",
 )
 
 /** 导入结果，直接拿去拼一句人话给用户看 */
@@ -174,21 +187,49 @@ class ClassPlanStore(context: Context) {
     private val sp = context.applicationContext
         .getSharedPreferences("gzucm_pocket_class_plan", Context.MODE_PRIVATE)
 
-    fun load(): ClassPlan = synchronized(LOCK) {
-        val raw = sp.getString(KEY_PLAN, null) ?: return@synchronized ClassPlan(key = "")
-        runCatching { Net.json.decodeFromString(ClassPlan.serializer(), raw) }
-            .getOrDefault(ClassPlan(key = ""))
+    /**
+     * 本机维护的**所有**清单（2026-11-23 从「只有一份」改成列表）。
+     *
+     * 一个班常常不止一摊事：期末作业、见习安排、实验报告…… 每摊一份清单，
+     * 各有各的名字和密钥。原来只能存一份，等于逼着学委把所有东西塞进一个筐。
+     *
+     * 旧数据兼容：只有旧的 `class_plan`（单份）时读出来当第一份；
+     * 下次保存会写成新的 `class_plans`，旧键留着不管（为一个字段写清理逻辑不值当）。
+     */
+    fun loadAll(): List<ClassPlan> = synchronized(LOCK) {
+        val raw = sp.getString(KEY_PLANS, null)
+        if (raw != null) {
+            val list = runCatching {
+                Net.json.decodeFromString(
+                    kotlinx.serialization.builtins.ListSerializer(ClassPlan.serializer()), raw,
+                )
+            }.getOrNull()
+            if (list != null) return@synchronized list
+        }
+        val legacy = sp.getString(KEY_PLAN, null) ?: return@synchronized emptyList()
+        runCatching { Net.json.decodeFromString(ClassPlan.serializer(), legacy) }
+            .getOrNull()
+            ?.takeIf { it.key.isNotBlank() || it.tasks.isNotEmpty() }
+            ?.let { listOf(it) }
+            ?: emptyList()
     }
 
-    fun save(plan: ClassPlan) = synchronized(LOCK) {
-        val encoded = Net.json.encodeToString(ClassPlan.serializer(), plan)
-        sp.edit().putString(KEY_PLAN, encoded).apply()
+    fun saveAll(plans: List<ClassPlan>) = synchronized(LOCK) {
+        val encoded = Net.json.encodeToString(
+            kotlinx.serialization.builtins.ListSerializer(ClassPlan.serializer()), plans,
+        )
+        sp.edit().putString(KEY_PLANS, encoded).apply()
     }
 
-    fun clear() = synchronized(LOCK) { sp.edit().remove(KEY_PLAN).apply() }
+    fun clear() = synchronized(LOCK) {
+        sp.edit().remove(KEY_PLANS).remove(KEY_PLAN).apply()
+    }
 
     private companion object {
+        /** 旧格式：单份清单 */
         const val KEY_PLAN = "class_plan"
+        /** 新格式：清单列表 */
+        const val KEY_PLANS = "class_plans"
         val LOCK = Any()
     }
 }

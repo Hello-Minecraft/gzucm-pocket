@@ -319,10 +319,16 @@ def _brief_from_head(key: str):
     # 姓名（展示用）。老对象没有这个 meta —— 留空即可，不要为了它多打一次 GET：
     # 重建一次最多 8 份，每份都补一次正文下载会把扩容时的冷启动拖长。
     owner_name = urllib.parse.unquote(h.get("x-oss-meta-owner-name", "") or "")
+    # 清单名（2026-11-23 加）：学委起的那摊事的名字，如「期末作业清单」。
+    # 老对象没有这个 meta，留空让客户端兜底。
+    plan_name = urllib.parse.unquote(h.get("x-oss-meta-name", "") or "")
     count = _as_int(h.get("x-oss-meta-count"), -1)
     updated = _as_int(h.get("x-oss-meta-updatedat"), 0)
 
-    if count < 0 or not key_name:
+    # 缺 name 也读一次正文：老对象（这个字段加之前发的）meta 里没有 name，
+    # 不回填的话学委重新发布之前，同学那边永远看不到清单名。
+    # 一个班最多 8 份，重建时多读几次正文不算什么。
+    if count < 0 or not key_name or not plan_name:
         # 元数据不全（别的东西写进来的对象，或早期版本），读正文兜底。
         # 一处失败不影响整次重建，返回 None 让调用方跳过这一条。
         status, _, raw = oss("GET", key)
@@ -337,12 +343,13 @@ def _brief_from_head(key: str):
         key_name = key_name or str(plan.get("key") or "")
         maintainer = maintainer or str(plan.get("maintainer") or "")
         owner_name = owner_name or str(plan.get("maintainer") or "")
+        plan_name = plan_name or str(plan.get("name") or "")
         tasks = plan.get("tasks")
         count = len(tasks) if isinstance(tasks, list) else 0
         updated = updated or _as_int(plan.get("updatedAt"), 0)
 
     return {"id": pid, "key": key_name, "maintainer": maintainer,
-            "ownerName": owner_name,
+            "ownerName": owner_name, "name": plan_name,
             "count": max(count, 0), "updatedAt": updated}
 
 
@@ -514,6 +521,7 @@ def h_index(payload: dict):
         "key": str(p.get("key") or ""),
         "maintainer": str(p.get("maintainer") or ""),
         "ownerName": str(p.get("ownerName") or ""),
+        "name": str(p.get("name") or ""),
         "count": _as_int(p.get("count")),
         "updatedAt": _as_int(p.get("updatedAt")),
     } for p in idx.get("plans") or []]
@@ -622,6 +630,8 @@ def h_publish(payload: dict):
         # 和学号分成两个字段 —— 合成一个的话，重名会串、学号又没法读。
         "x-oss-meta-owner-name": urllib.parse.quote(
             str(plan.get("maintainer") or ""), safe=""),
+        # 清单名：同学在认领列表和详情页顶部看到的标题
+        "x-oss-meta-name": urllib.parse.quote(str(plan.get("name") or ""), safe=""),
         "x-oss-meta-key": urllib.parse.quote(key, safe=""),
         "x-oss-meta-count": str(len(tasks)),
         "x-oss-meta-updatedat": str(updated_at),
@@ -633,6 +643,7 @@ def h_publish(payload: dict):
 
     brief = {"id": pid, "key": key, "maintainer": uploader,
              "ownerName": str(plan.get("maintainer") or ""),
+             "name": str(plan.get("name") or ""),
              "count": len(tasks), "updatedAt": updated_at}
     plans = [p for p in plans if str(p.get("id")) != pid]
     plans.append(brief)

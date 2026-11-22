@@ -53,6 +53,8 @@ data class ClaimablePlan(
     val updatedAt: Long,
     /** 维护人姓名（学籍里的），空 = 老数据没有这个字段，界面上省略这一截 */
     val ownerName: String = "",
+    /** 清单名，如「期末作业清单」 */
+    val name: String = "",
 )
 
 /**
@@ -77,6 +79,8 @@ sealed interface ClassPlanBarState {
         val key: String,
         /** 维护人姓名，副标题用 */
         val ownerName: String,
+        /** 清单名（学委起的），标题用 */
+        val planName: String = "",
         val count: Int,
         /** 上次成功同步的时间戳；0 = 还没同步过 */
         val syncedAt: Long,
@@ -89,6 +93,7 @@ sealed interface ClassPlanBarState {
         /** 密钥，不显示（见 [Claimed.key]） */
         val key: String,
         val ownerName: String,
+        val planName: String = "",
         val added: Int,
         val updated: Int,
         val syncedAt: Long,
@@ -211,7 +216,7 @@ fun ClassPlanClaimDialog(
                 error = null
             },
             label = { Text("密钥", fontSize = 12.sp) },
-            placeholder = { Text("一般是学委的名字", fontSize = 13.sp) },
+            placeholder = { Text("一般是学委名字", fontSize = 13.sp) },
             singleLine = true,
             isError = error != null,
             modifier = Modifier.fillMaxWidth(),
@@ -232,18 +237,34 @@ fun ClassPlanClaimDialog(
         Spacer(Modifier.height(10.dp))
 
         // 只知道「有几份、谁维护」——就是想确认本班有人发过，但看不到内容
-        val who = plans.firstOrNull()?.ownerName.orEmpty()
-        Text(
-            if (plans.size == 1) {
-                "本班现有 1 份" +
-                    (if (who.isNotBlank()) "（$who 维护 · ${plans.first().count} 条）" else "")
-            } else {
-                "本班现有 ${plans.size} 份，各用各的密钥"
-            },
-            fontSize = 11.5.sp,
-            lineHeight = 16.sp,
-            color = scheme.onSurfaceVariant,
-        )
+        /*
+         * 列出本班有哪几份（名字 + 条数 + 维护人），但**不显示密钥**。
+         *
+         * 这样同学知道「有几摊事」，输哪个密钥进哪一份；而密钥仍然得从学委那里拿到，
+         * 「确认自己找对了」这一步还在。
+         */
+        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(
+                if (plans.size == 1) "本班现有 1 份：" else "本班现有 ${plans.size} 份：",
+                fontSize = 11.5.sp,
+                color = scheme.onSurfaceVariant,
+            )
+            plans.take(4).forEach { p ->
+                Text(
+                    buildString {
+                        append("· ")
+                        append(p.name.ifBlank { "未命名清单" })
+                        append("  ${p.count} 条")
+                        if (p.ownerName.isNotBlank()) append("（${p.ownerName}）")
+                    },
+                    fontSize = 11.5.sp,
+                    lineHeight = 16.sp,
+                    color = scheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
 
         Spacer(Modifier.height(2.dp))
         WhatIsThis(scheme)
