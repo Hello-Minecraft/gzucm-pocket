@@ -95,6 +95,13 @@ internal fun ClassPlanContent(
     onPublish: ((ClassPlan) -> Unit)? = null,
     /** 从本班拉取清单（手动兜底，和粘分享串并列）。null 时不显示 */
     onFetchFromClass: (() -> Unit)? = null,
+    /**
+     * 删掉已发布到本班的那一份（null = 功能不可用）。
+     *
+     * 2026-11-23 补：发布确认框和教程都写着「发布后可以删除」，
+     * 但界面上一直没有这个入口 —— 承诺了没做，现在补上。
+     */
+    onDeletePublished: (() -> Unit)? = null,
 ) {
     val ctx = LocalContext.current
     val scheme = MaterialTheme.colorScheme
@@ -115,6 +122,9 @@ internal fun ClassPlanContent(
 
     /** 「发布到本班」的确认框。每次发布都要过一次，不是只第一次 */
     var showPublishConfirm by remember { mutableStateOf(false) }
+
+    /** 删除已发布清单的确认框 */
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     fun persist(next: ClassPlan) {
         /*
@@ -204,6 +214,41 @@ internal fun ClassPlanContent(
             Spacer(Modifier.height(10.dp))
             Text(
                 "共 ${plan.tasks.size} 条 · 发布后可以删除，但不能改别人发布的清单",
+                fontSize = 11.5.sp,
+                lineHeight = 16.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+
+    if (showDeleteConfirm) {
+        CenterDialog(
+            title = "删除已发布的清单？",
+            onDismiss = { showDeleteConfirm = false },
+            buttons = {
+                DialogPrimaryButton(
+                    text = "删除",
+                    onClick = {
+                        showDeleteConfirm = false
+                        onDeletePublished?.invoke()
+                    },
+                )
+                DialogSecondaryButton(
+                    text = "算了",
+                    onClick = { showDeleteConfirm = false },
+                )
+            },
+        ) {
+            Text(
+                "本班同学下次打开 App 会看到「清单已被删除」。" +
+                    "他们已经导入的日程不会消失，会变成自己普通的日程。",
+                fontSize = 12.5.sp,
+                lineHeight = 19.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "你自己这份清单还在，改完可以重新发布。",
                 fontSize = 11.5.sp,
                 lineHeight = 16.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -511,6 +556,34 @@ internal fun ClassPlanContent(
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
                 ) { Text("粘贴分享串", fontSize = 12.5.sp) }
+            }
+
+            if (onDeletePublished != null && key.isNotBlank()) {
+                Spacer(Modifier.height(18.dp))
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(scheme.outlineVariant.copy(alpha = 0.45f)),
+                )
+                Spacer(Modifier.height(14.dp))
+                Text(
+                    "删除已发布的清单",
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = scheme.error,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { showDeleteConfirm = true }
+                        .padding(horizontal = 2.dp, vertical = 4.dp),
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "只从班上撤下来，你自己这份清单和同学已导入的日程都还在",
+                    fontSize = 11.5.sp,
+                    lineHeight = 16.sp,
+                    color = scheme.onSurfaceVariant.copy(alpha = 0.8f),
+                )
             }
 
             if (onPublish != null) {

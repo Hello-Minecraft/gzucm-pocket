@@ -949,6 +949,7 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
             }
         },
         onFetchFromClass = { vm.requestClassPlanPrompt() },
+        onDeletePublished = { vm.deletePublishedClassPlan { msg -> Toast.makeText(ctx0, msg, Toast.LENGTH_SHORT).show() } },
         onAdd = { date, minute ->
             editingAgenda = null
             draftAgendaDate = date

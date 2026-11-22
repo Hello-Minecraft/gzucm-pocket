@@ -605,6 +605,44 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         rebuildClassPlanHint()
     }
 
+    /**
+     * 删掉自己发布到本班的清单（学委侧）。
+     *
+     * 只删云端那一份，**不动本地正在编辑的清单** —— 学委可能只是想从班上撤下来，
+     * 不想把辛苦整理的条目也清空。所以这里只清订阅和缓存，`state.classPlan` 原样留着，
+     * 想重新发布随时再按一次。
+     *
+     * 同学那边下次同步会看到「清单已被删除」，但他们已导入的日程不会消失
+     * （客户端只是把 origin 清成本地日程）。
+     */
+    fun deletePublishedClassPlan(onResult: (String) -> Unit) {
+        val card = state.studentCard ?: return
+        val name = state.classPlan.key.trim()
+        if (name.isEmpty()) {
+            onResult("还没填密钥，不知道要删哪一份")
+            return
+        }
+        val sub = classSyncStore.loadState().subs.firstOrNull { it.key == name }
+        if (sub == null) {
+            onResult("云端没有「$name」，可能已经删过了")
+            return
+        }
+        viewModelScope.launch {
+            when (val r = classSyncApi.delete(card.classKey, sub.id, card.studentId)) {
+                is ClassSyncApi.Result.Ok -> {
+                    classSyncStore.updateState { it.withoutSub(sub.id) }
+                    classSyncStore.prunePlanCache(
+                        classSyncStore.loadState().subs.map { it.id }.toSet(),
+                    )
+                    classPlanDetail = null
+                    onResult("已删除「$name」。同学那边会看到提示，已导入的日程不会消失")
+                    rebuildClassPlanHint()
+                }
+                is ClassSyncApi.Result.Failed -> onResult(r.message.ifBlank { "删除失败，稍后再试" })
+            }
+        }
+    }
+
     /** 取消认领：不再同步这份清单，已导入的日程原样留成本地日程 */
     fun unsubscribeClassPlan(id: String) {
         classSyncStore.updateState { it.withoutSub(id) }
