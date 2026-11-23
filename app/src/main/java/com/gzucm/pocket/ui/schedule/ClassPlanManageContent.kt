@@ -55,7 +55,6 @@ import com.gzucm.pocket.core.decodeClassToken
 import com.gzucm.pocket.core.encodeClassToken
 import com.gzucm.pocket.core.mergeClassTasks
 import com.gzucm.pocket.core.toClassTask
-import com.gzucm.pocket.ui.adaptive.LocalIsWidePane
 import com.gzucm.pocket.ui.components.CenterDialog
 import com.gzucm.pocket.ui.components.DialogPrimaryButton
 import com.gzucm.pocket.ui.components.DialogSecondaryButton
@@ -69,22 +68,29 @@ import java.time.ZoneOffset
 import java.util.UUID
 
 /**
- * 班级日程的内容区。
+ * 班级日程（学委侧）的整页内容。
  *
- * **不是独立面板**：由 [AgendaListSheet] 在同一个 Dialog 里切换内容显示。
- * 手机端每个 `AdaptiveSheet` 都是一个 Dialog 窗口，面板叠面板会出现
- * 「按返回键直接退回桌面」（Dialog 吃掉 BACK 后 Activity 又收到一次）。
+ * ## 为什么不再是面板
  *
- * 三块内容共用一个 Column，靠 [mode] 切换：清单 / 编辑一条 / 从日程挑。
- * 每一步都是「返回上一步」而不是「开一个新窗口」。
+ * 原来它挂在 `AgendaListSheet` 的 Dialog 里，靠 `showClassShare` 切换内容。
+ * 但编辑页要填密钥、挑日期、写要求，手指一动就贴着下沿 —— 底部面板只要
+ * 往下一滑就把半天的输入关掉了（致辉 2026-11 反复报的就是这个）。
+ * 现在整页跑在 [ClassPlanActivity] 里，滑动只是滚动，返回键才是返回。
+ *
+ * ## 页面怎么切
+ *
+ * 自己不持有导航状态：Activity 拿 [page] 决定画哪一屏，这里只负责把
+ * 「用户点了什么」翻译成 [onPage]。这样系统返回键和顶部返回箭头
+ * 可以统一在 Activity 里处理，不会出现两边各退一层的问题。
  */
 @Composable
-internal fun ClassPlanContent(
+internal fun ClassPlanManageContent(
+    page: Page,
+    onPage: (Page) -> Unit,
     plan: ClassPlan,
     onPlanChange: (ClassPlan) -> Unit,
     myAgendas: List<Agenda>,
     onImportToAgenda: (List<Agenda>) -> Unit,
-    onClose: () -> Unit,
     /** 学籍里的姓名 = 维护人，**自动填、不可改**（不是密钥） */
     maintainer: String? = null,
     /** 学籍里的行政班，只用于显示「你是哪个班的」，不参与密钥 */
@@ -119,15 +125,13 @@ internal fun ClassPlanContent(
     val scheme = MaterialTheme.colorScheme
     val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
-    var mode by remember { mutableStateOf<Mode>(Mode.LIST) }
     /*
      * 进来先看「我的清单」，不是直接进编辑页（2026-11-23 致辉定的排版）。
      *
      * 编辑页是「一份清单的内部」，列表页才是「我手上有哪几摊事」。
      * 先看完有什么，再决定改哪一份，顺序才顺 —— 原来进来就是编辑页，
-     * 等于默认学委只有一份清单。
+     * 等于默认学委只有一份清单。这个初始值现在由 Activity 给（Page.Plans）。
      */
-    var showPlanList by remember { mutableStateOf(true) }
     /** 「修改清单名」对话框中转的名字 */
     var renamingPlan by remember { mutableStateOf<String?>(null) }
     var hint by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
@@ -141,6 +145,15 @@ internal fun ClassPlanContent(
      * 维护人是另一个字段，那个才自动填。
      */
     var key by rememberSaveable { mutableStateOf(plan.key) }
+
+    /*
+     * 换了一份清单（点列表里的另一份 / 刚新建）时，把密钥框换成那一份的。
+     *
+     * 不能写成 `rememberSaveable(plan.key)`：这里每敲一个字都会 persist 回 ViewModel，
+     * plan.key 跟着变，输入框状态被反复重建，光标会跳。而打字时 key 和 plan.key
+     * 本来就相等，这个 effect 是空操作；只有真的换了一份（两者不等）才写回。
+     */
+    LaunchedEffect(plan.key) { if (key != plan.key) key = plan.key }
 
     /** 「发布到本班」的确认框。每次发布都要过一次，不是只第一次 */
     var showPublishConfirm by remember { mutableStateOf(false) }
@@ -314,44 +327,34 @@ internal fun ClassPlanContent(
         }
     }
 
-    if (showPlanList) {
-        PlanListScreen(
+    when (page) {
+        Page.Plans -> PlanListScreen(
             plans = plans,
             publishedKeys = publishedPlanKeys,
             currentKey = plan.key,
             onPick = { key ->
                 onSelectPlan?.invoke(key)
-                showPlanList = false
+                onPage(Page.Editor)
             },
             onCreate = { name ->
                 onCreatePlan?.invoke(name)
-                showPlanList = false
+                onPage(Page.Editor)
             },
-            // 第一屏的返回 = 关掉面板回「我的日程」。
-            // 原来写成 `showPlanList = false` 会和编辑页的「返回我的清单」对跳 ——
-            // 两个页面互相弹，点了谁也关不掉（2026-11-23 致辉测出来的）。
-            onBack = onClose,
             scheme = scheme,
         )
-    } else when (val m = mode) {
-        Mode.LIST -> Column(
+
+        Page.Editor -> Column(
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 26.dp)
                 .verticalScroll(rememberScrollState()),
         ) {
-            BackRow({ showPlanList = true }, "返回我的清单")
-
-            if (!LocalIsWidePane.current) {
-                Text(
-                    "班级日程",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Medium,
-                    color = scheme.onSurface,
-                )
-                Spacer(Modifier.height(8.dp))
-            }
+            /*
+             * 这一屏的顶部不再自己写「返回我的清单」和「班级日程」大标题：
+             * 返回箭头在 Activity 的顶栏（点了回清单列表），标题也在那一行。
+             * 页面里再画一遍就成了两层标题，滚动时还会跟着走掉。
+             */
             Text(
                 "维护一份作业清单，发布后本班同学打开 App 就能看到，" +
                     "认领一下，作业就进他们自己的日程。",
@@ -432,12 +435,12 @@ internal fun ClassPlanContent(
             InfoLine("维护人", maintainer, scheme)
 
             // 换一份 / 再建一份。只有一份时不显示（点进去就是它，没什么可换的）
-            if ((plans.size > 1 || onCreatePlan != null) && !LocalIsWidePane.current) {
+            if (plans.size > 1 || onCreatePlan != null) {
                 Spacer(Modifier.height(10.dp))
                 Row(
                     Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable { showPlanList = true }
+                        .clickable { onPage(Page.Plans) }
                         .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -564,8 +567,8 @@ internal fun ClassPlanContent(
                     TaskRow(
                         task = task,
                         scheme = scheme,
-                        onEdit = { mode = Mode.Edit(task, copyFrom = null) },
-                        onCopy = { mode = Mode.Edit(task = null, copyFrom = task) },
+                        onEdit = { onPage(Page.TaskEdit(task, copyFrom = null)) },
+                        onCopy = { onPage(Page.TaskEdit(task = null, copyFrom = task)) },
                         onDelete = {
                             persist(plan.copy(tasks = plan.tasks.filterNot { it.id == task.id }))
                             hint = "已经删了「${task.title}」" to true
@@ -579,13 +582,13 @@ internal fun ClassPlanContent(
 
             Row(Modifier.fillMaxWidth()) {
                 OutlinedButton(
-                    onClick = { mode = Mode.Edit(null, null) },
+                    onClick = { onPage(Page.TaskEdit(null, null)) },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
                 ) { Text("＋ 新建作业", fontSize = 12.5.sp) }
                 Spacer(Modifier.width(9.dp))
                 OutlinedButton(
-                    onClick = { mode = Mode.PICK },
+                    onClick = { onPage(Page.Pick) },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
                 ) { Text("从我的日程导入", fontSize = 12.5.sp) }
@@ -751,43 +754,40 @@ internal fun ClassPlanContent(
             )
         }
 
-        is Mode.Edit -> TaskEditView(
-            existing = m.task,
-            copyFrom = m.copyFrom,
+        is Page.TaskEdit -> TaskEditView(
+            existing = page.task,
+            copyFrom = page.copyFrom,
             scheme = scheme,
             // 导入来的条目沿用日程的 id，用它认「哪些是日程导入、时间只读」
             agendaIds = remember(myAgendas) { myAgendas.map { it.id }.toSet() },
-            onCancel = { mode = Mode.LIST },
+            onCancel = { onPage(Page.Editor) },
             onSave = { dto ->
                 val next = plan.tasks.filterNot { it.id == dto.id } + dto
                 persist(plan.copy(tasks = next))
-                hint = if (m.task == null) "已加「${dto.title}」" to true else "已改「${dto.title}」" to true
-                mode = Mode.LIST
+                hint = if (page.task == null) "已加「${dto.title}」" to true else "已改「${dto.title}」" to true
+                onPage(Page.Editor)
             },
         )
 
-        Mode.PICK -> PickAgendaView(
+        Page.Pick -> PickAgendaView(
             agendas = myAgendas,
             alreadyIn = plan.tasks.map { it.id }.toSet(),
             scheme = scheme,
-            onCancel = { mode = Mode.LIST },
+            onCancel = { onPage(Page.Editor) },
             onConfirm = { picked ->
                 val next = plan.tasks + picked.map { it.toClassTask() }
                 persist(plan.copy(tasks = next))
                 hint = "从日程搬过来 ${picked.size} 条" to true
-                mode = Mode.LIST
+                onPage(Page.Editor)
             },
         )
+
+        // Claim / Detail 是同学侧的页面，由 Activity 直接渲染，不进这一支
+        else -> Unit
     }
 }
 
 // ── 子界面 ────────────────────────────────────────────────────────────
-
-private sealed interface Mode {
-    data object LIST : Mode
-    data class Edit(val task: ClassTaskDto?, val copyFrom: ClassTaskDto?) : Mode
-    object PICK : Mode
-}
 
 /** 一行「标签 + 值」的只读信息，值拿不到就整行不显示 */
 @Composable
@@ -812,28 +812,6 @@ private fun InfoLine(
         Spacer(Modifier.width(5.dp))
         Text("$label：", fontSize = 11.5.sp, color = scheme.onSurfaceVariant)
         Text(value, fontSize = 11.5.sp, color = scheme.primary)
-    }
-}
-
-@Composable
-private fun BackRow(onClick: () -> Unit, label: String) {
-    val scheme = MaterialTheme.colorScheme
-    Row(
-        Modifier
-            .padding(bottom = 8.dp)
-            .clip(G3CornerShape(10.dp))
-            .clickable(onClick = onClick)
-            .padding(vertical = 6.dp, horizontal = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            AppIcons.ArrowBack,
-            contentDescription = null,
-            modifier = Modifier.size(17.dp),
-            tint = scheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.width(5.dp))
-        Text(label, fontSize = 12.5.sp, color = scheme.onSurfaceVariant)
     }
 }
 
@@ -978,7 +956,7 @@ private fun TaskEditView(
             .padding(bottom = 26.dp)
             .verticalScroll(rememberScrollState()),
     ) {
-        BackRow(onCancel, "返回清单")
+        // 返回清单不在这里画：顶栏那个箭头就是（返回层级见 ClassPlanActivity）
         Text(
             when {
                 existing != null -> if (kind == TaskKind.EVENT) "改一条日程" else "改一条作业"
@@ -1430,6 +1408,52 @@ private fun InlineDateCard(
                 showModeToggle = false,
                 modifier = Modifier.fillMaxWidth(),
             )
+            /*
+             * 日历下面再放一个整条宽的「确定」。
+             * 上面那行小字在日历的**上方**，用户选日期时视线是跟着日历往下走的，
+             * 走到底看到一片空白就以为已经生效了 —— 「经常忘记点上面那个确定」就是这么来的。
+             * 所以在日历正下方补一个显眼的主按钮，手指抬起来的位置就有确认键。
+             */
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (allowClear) {
+                    // 次级操作放左边的小字按钮，主按钮依旧占满剩下的宽度
+                    Text(
+                        "清除",
+                        fontSize = 12.5.sp,
+                        color = scheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(onClick = onClear)
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+                // 高度写死 46.dp：滚动容器里 fillMaxHeight 会塌成 0 高（踩过）
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .height(46.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(scheme.primary)
+                        .clickable {
+                            pickerState.selectedDateMillis?.let { onConfirm(msToIso(it)) }
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "确定",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = scheme.surface,
+                    )
+                }
+            }
         }
     }
 }
@@ -1491,7 +1515,6 @@ private fun PickAgendaView(
             .padding(horizontal = 20.dp)
             .padding(bottom = 26.dp),
     ) {
-        BackRow(onCancel, "返回清单")
         Text(
             "从我的日程导入",
             style = MaterialTheme.typography.titleMedium,
@@ -1708,7 +1731,6 @@ private fun PlanListScreen(
     currentKey: String,
     onPick: (String) -> Unit,
     onCreate: (String) -> Unit,
-    onBack: () -> Unit,
     scheme: androidx.compose.material3.ColorScheme,
 ) {
     var naming by remember { mutableStateOf(false) }
@@ -1759,18 +1781,7 @@ private fun PlanListScreen(
             .padding(bottom = 26.dp)
             .verticalScroll(rememberScrollState()),
     ) {
-        BackRow(onBack, "返回我的日程")
-
-        if (!LocalIsWidePane.current) {
-            Text(
-                "班级日程",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Medium,
-                color = scheme.onSurface,
-            )
-            Spacer(Modifier.height(10.dp))
-        }
-
+        // 返回箭头和「班级日程」标题都在 Activity 顶栏，这里从列表本身写起
         // 「我的清单：N 条」+ 右侧「＋ 新建清单」
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -40,7 +41,6 @@ import androidx.compose.ui.unit.sp
 import com.gzucm.pocket.core.ClassTaskDto
 import com.gzucm.pocket.core.ClassTaskState
 import com.gzucm.pocket.ui.ClassPlanDetailUi
-import com.gzucm.pocket.ui.adaptive.AdaptiveSheet
 import com.gzucm.pocket.ui.components.CenterDialog
 import com.gzucm.pocket.ui.components.DialogPrimaryButton
 import com.gzucm.pocket.ui.components.DialogSecondaryButton
@@ -59,7 +59,7 @@ private val PlanWarnDark = Color(0xFFF2AC66)
 private val RowMinHeight = 56.dp
 
 /**
- * 班级清单详情面板：认领 / 导入之前，先让同学看见这份清单里到底有什么。
+ * 班级清单详情页：认领 / 导入之前，先让同学看见这份清单里到底有什么。
  *
  * ## 为什么要有这一层
  *
@@ -67,26 +67,24 @@ private val RowMinHeight = 56.dp
  * 用户看不到吃进了什么，就没法拒绝一条自己根本不打算做的作业；
  * 而清单是学委的，里面必然有几条跟他无关。
  *
- * ## 为什么不做成 Dialog
+ * ## 为什么是整页而不是面板 / Dialog
  *
- * 这一层要放几十行可勾选的条目 + 一整段说明，Dialog 装不下；
- * 而且「面板叠 Dialog」在本项目里踩过 BACK 直接退回桌面的坑
- * （见 AgendaSheet 里考试详情那段注释）。所以走 [AdaptiveSheet]。
+ * 这一层要放几十行可勾选的条目 + 一整段说明。Dialog 装不下；底部面板虽然装得下，
+ * 但列表要上下翻，而「往下翻」和「下拉关闭面板」是同一个手势 —— 看着看着清单就没了。
+ * 整页之后滑动只是滚动，返回键才是退出（2026-11 致辉报的正是误触下滑）。
  *
- * 唯一允许的 Dialog 是「取消认领」的二次确认 —— 它是**面板之上的一个确认**，
- * 且确认后由调用方（onUnsubscribe）连面板一起关掉，不会留下「面板和弹窗各关一层」
- * 的中间态。
+ * 唯一允许的 Dialog 是「取消认领」的二次确认 —— 它是一次性的一问一答，
+ * 不存在误触下滑的问题。
  *
  * ## 勾选状态
  *
  * 只记「用户手动改过哪几条」，不存整份选中集合，见下面 overrides 的注释。
  */
 @Composable
-fun ClassPlanDetailSheet(
+fun ClassPlanDetailContent(
     detail: ClassPlanDetailUi,
     onConfirm: (Set<String>) -> Unit,
     onUnsubscribe: () -> Unit,
-    onClose: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
     val tasks = detail.plan.tasks
@@ -132,163 +130,159 @@ fun ClassPlanDetailSheet(
     // 说明默认展开：第一次认领的人最需要读它，收起来等于没写
     var helpOpen by remember(detail.id) { mutableStateOf(true) }
 
-    AdaptiveSheet(
-        visible = true,
-        onDismiss = onClose,
-        paneTitle = "班级日程",
-        paneWidth = 400.dp,
-        // 列表自己滚。两层 verticalScroll 叠一起会抛 infinite constraints
-        scrollable = false,
-    ) {
-        Column(Modifier.fillMaxWidth()) {
+    /*
+     * 整页：高度由 Activity 的骨架给满。
+     * 列表自己滚，外面不要再套 verticalScroll —— 两层滚动叠一起会抛
+     * infinite constraints（这个坑原来在 AdaptiveSheet 里踩过一次）。
+     */
+    Column(Modifier.fillMaxSize()) {
 
-            // ── 1. 来源行 ─────────────────────────────────────────
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 18.dp)
-                    .padding(top = 8.dp, bottom = 4.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    /*
-                     * 两行：**班级**在上（系统认出来的，同学核对用），
-                     * 「谁维护 · 多少条」在下。
-                     *
-                     * 2026-11-23 改：原来上面写的是 key，但 key 是同学自己输入的
-                     * 那道口令，不是给人看的名片。该摊在明面上的是**班级**。
-                     */
-                    val owner = detail.plan.maintainer.trim()
-                    val cls = detail.plan.className.trim()
-                    // 清单名优先（2026-11-23 加）：这是学委自己起的那摊事的名字，
-                    // 老数据没有就退回班级名
-                    val title = detail.plan.name.trim().ifBlank {
-                        cls.ifBlank { detail.key.ifBlank { "班级作业" } }
-                    }
-                    val sub = buildString {
-                        // 标题已经是班级名时别再重复一遍（老数据没有清单名就会这样）
-                        if (cls.isNotBlank() && cls != title) append("$cls · ")
-                        if (owner.isNotBlank()) append("$owner 维护 · ")
-                        append("${tasks.size} 条")
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            title,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = scheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            sub,
-                            fontSize = 11.sp,
-                            color = scheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Spacer(Modifier.width(8.dp))
+        // ── 1. 来源行 ─────────────────────────────────────────
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp)
+                .padding(top = 8.dp, bottom = 4.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                /*
+                 * 两行：**班级**在上（系统认出来的，同学核对用），
+                 * 「谁维护 · 多少条」在下。
+                 *
+                 * 2026-11-23 改：原来上面写的是 key，但 key 是同学自己输入的
+                 * 那道口令，不是给人看的名片。该摊在明面上的是**班级**。
+                 */
+                val owner = detail.plan.maintainer.trim()
+                val cls = detail.plan.className.trim()
+                // 清单名优先（2026-11-23 加）：这是学委自己起的那摊事的名字，
+                // 老数据没有就退回班级名
+                val title = detail.plan.name.trim().ifBlank {
+                    cls.ifBlank { detail.key.ifBlank { "班级作业" } }
+                }
+                val sub = buildString {
+                    // 标题已经是班级名时别再重复一遍（老数据没有清单名就会这样）
+                    if (cls.isNotBlank() && cls != title) append("$cls · ")
+                    if (owner.isNotBlank()) append("$owner 维护 · ")
+                    append("${tasks.size} 条")
+                }
+                Column(Modifier.weight(1f)) {
                     Text(
-                        // classPlanSyncTime(0) 本身就是「还没同步」，不要再拼一个「同步」
-                        if (detail.syncedAt <= 0L) {
-                            classPlanSyncTime(0L)
-                        } else {
-                            "${classPlanSyncTime(detail.syncedAt)} 同步"
-                        },
+                        title,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = scheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        sub,
                         fontSize = 11.sp,
                         color = scheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
-                if (detail.fromCache) {
-                    Spacer(Modifier.height(3.dp))
-                    Text(
-                        "显示的是上次同步的内容，可能不是最新",
-                        fontSize = 11.sp,
-                        lineHeight = 15.sp,
-                        color = warn,
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    // classPlanSyncTime(0) 本身就是「还没同步」，不要再拼一个「同步」
+                    if (detail.syncedAt <= 0L) {
+                        classPlanSyncTime(0L)
+                    } else {
+                        "${classPlanSyncTime(detail.syncedAt)} 同步"
+                    },
+                    fontSize = 11.sp,
+                    color = scheme.onSurfaceVariant,
+                )
+            }
+            if (detail.fromCache) {
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    "显示的是上次同步的内容，可能不是最新",
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    color = warn,
+                )
+            }
+        }
+
+        // ── 2. 条目列表 ───────────────────────────────────────
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            contentPadding = PaddingValues(bottom = 6.dp),
+        ) {
+            if (tasks.isEmpty()) {
+                item(key = "empty") { EmptyPlan() }
+            } else {
+                itemsIndexed(tasks, key = { _, task -> task.id }) { index, task ->
+                    val state = stateOf(task.id)
+                    PlanTaskRow(
+                        task = task,
+                        state = state,
+                        checked = checkedOf(task),
+                        onToggle = {
+                            // 只翻这一条，别动其它条目的选择
+                            overrides = overrides + (task.id to !checkedOf(task))
+                        },
                     )
+                    if (index != tasks.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 18.dp),
+                            thickness = 1.dp,
+                            color = scheme.outlineVariant.copy(alpha = 0.4f),
+                        )
+                    }
                 }
             }
 
-            // ── 2. 条目列表 ───────────────────────────────────────
-            LazyColumn(
+            // ── 3. 「这是什么？」────────────────────────────────
+            item(key = "help") {
+                PlanHelpBlock(
+                    open = helpOpen,
+                    onToggle = { helpOpen = !helpOpen },
+                )
+            }
+        }
+
+        // ── 4. 底部按钮区（不随列表滚）────────────────────────
+        HorizontalDivider(
+            thickness = 1.dp,
+            color = scheme.outlineVariant.copy(alpha = 0.4f),
+        )
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp)
+                .padding(top = 12.dp, bottom = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Button(
+                onClick = { onConfirm(selected) },
+                enabled = selected.isNotEmpty(),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f),
-                contentPadding = PaddingValues(bottom = 6.dp),
+                    .height(44.dp),
+                shape = G3CornerShape(12.dp),
             ) {
-                if (tasks.isEmpty()) {
-                    item(key = "empty") { EmptyPlan() }
-                } else {
-                    itemsIndexed(tasks, key = { _, task -> task.id }) { index, task ->
-                        val state = stateOf(task.id)
-                        PlanTaskRow(
-                            task = task,
-                            state = state,
-                            checked = checkedOf(task),
-                            onToggle = {
-                                // 只翻这一条，别动其它条目的选择
-                                overrides = overrides + (task.id to !checkedOf(task))
-                            },
-                        )
-                        if (index != tasks.lastIndex) {
-                            HorizontalDivider(
-                                modifier = Modifier.padding(horizontal = 18.dp),
-                                thickness = 1.dp,
-                                color = scheme.outlineVariant.copy(alpha = 0.4f),
-                            )
-                        }
-                    }
-                }
-
-                // ── 3. 「这是什么？」────────────────────────────────
-                item(key = "help") {
-                    PlanHelpBlock(
-                        open = helpOpen,
-                        onToggle = { helpOpen = !helpOpen },
-                    )
-                }
+                Text(
+                    if (detail.claimed) {
+                        "导入 ${selected.size} 条"
+                    } else {
+                        "认领并导入 ${selected.size} 条"
+                    },
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Medium,
+                )
             }
-
-            // ── 4. 底部按钮区（不随列表滚）────────────────────────
-            HorizontalDivider(
-                thickness = 1.dp,
-                color = scheme.outlineVariant.copy(alpha = 0.4f),
-            )
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 18.dp)
-                    .padding(top = 12.dp, bottom = 20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Button(
-                    onClick = { onConfirm(selected) },
-                    enabled = selected.isNotEmpty(),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(44.dp),
-                    shape = G3CornerShape(12.dp),
+            if (detail.claimed) {
+                Spacer(Modifier.height(2.dp))
+                TextButton(
+                    onClick = { confirmUnsubscribe = true },
+                    modifier = Modifier.height(36.dp),
                 ) {
-                    Text(
-                        if (detail.claimed) {
-                            "导入 ${selected.size} 条"
-                        } else {
-                            "认领并导入 ${selected.size} 条"
-                        },
-                        fontSize = 13.5.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
-                }
-                if (detail.claimed) {
-                    Spacer(Modifier.height(2.dp))
-                    TextButton(
-                        onClick = { confirmUnsubscribe = true },
-                        modifier = Modifier.height(36.dp),
-                    ) {
-                        Text("取消认领", fontSize = 12.sp, color = scheme.onSurfaceVariant)
-                    }
+                    Text("取消认领", fontSize = 12.sp, color = scheme.onSurfaceVariant)
                 }
             }
         }
@@ -296,9 +290,8 @@ fun ClassPlanDetailSheet(
         /*
          * 取消认领的二次确认。
          *
-         * 这是面板之上唯一允许的 Dialog，而且是「确认完就整层关掉」：
-         * 确认后同时调 onUnsubscribe（上层会关面板），不在这里各关各的 ——
-         * 面板和 Dialog 各自处理 BACK 会多出一次返回，踩过直接退回桌面的坑。
+         * 整页之上唯一允许的 Dialog —— 它是一次性的一问一答，不存在下滑误触。
+         * 确认后调 onUnsubscribe，由 Activity 决定退回哪一页（这里不管导航）。
          */
         if (confirmUnsubscribe) {
             CenterDialog(

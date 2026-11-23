@@ -398,6 +398,44 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         state = state.copy(publishedPlanKeys = keys)
     }
 
+    /**
+     * 重新从存储读一遍本机清单（2026-11-23）。
+     *
+     * 班级日程已经是独立 Activity，它有自己的 [AppViewModel] 实例 —— 在那边
+     * 保存 / 新建 / 删除清单只写进 SharedPreferences，主界面这个 VM 的内存 state
+     * 一个字都不会变。不重读的话，从 Activity 返回首页还是旧清单（少一份、
+     * 名字是旧的、「已发布」标记也停在发布前）。
+     *
+     * 顺带重建首页那一行：同学侧的认领 / 取消认领改的是订阅表，
+     * 同样只有重新算一遍才知道「现在还算不算已认领」。
+     */
+    fun reloadClassPlans() {
+        val list = classPlanStore.loadAll()
+        state = state.copy(
+            classPlans = list,
+            // 正在编辑的那份可能已经被删掉了，退回第一份，免得指着一个不存在的密钥
+            editingPlanKey = state.editingPlanKey
+                .takeIf { key -> list.any { it.key == key } }
+                ?: list.firstOrNull()?.key.orEmpty(),
+        )
+        refreshPublishedPlanKeys()
+        rebuildClassPlanHint()
+    }
+
+    /**
+     * 重新从存储读一遍日程（2026-11-23）。
+     *
+     * 班级日程 Activity 里「导入到我的日程」/「认领并导入」写的是 AgendaStore，
+     * 主界面这个 VM 的 `state.agenda` 还是导入前那份 —— 不重读的话，
+     * 回到今日页/课表看不到刚导入的作业，得等下次冷启动。
+     *
+     * 不重排提醒：写入方（replaceAgendas）已经把闹钟重排过了，
+     * 这里只是把同一份数据读回内存。
+     */
+    fun reloadAgendas() {
+        state = state.copy(agenda = agendaStore.load())
+    }
+
     /** 切到另一份清单去编辑（null = 回到清单列表） */
     fun editClassPlan(key: String?) {
         state = state.copy(editingPlanKey = key.orEmpty())
@@ -638,7 +676,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
          * 两种情况都会走到这里：索引里还没有这份清单，或者有、但 key 还是旧的。
          * 2026-11-23 致辉在手机上输「钟伟熙」一直提示不对：他手机上缓存的是
          * 学委前一天那份索引（那时密钥还是旧值），而学委这边已经改过密钥重新发布了。
-         * 同学的 App 一天只同步一次，`requestClassPlanPrompt` 只要本地有索引就直接用，
+         * 同学的 App 一天只同步一次，本地索引可能一直是旧的 ——
          * 于是本地永远是新旧不一致 —— 输入正确答案也必然失败。
          *
          * 所以这里再往服务端要一次：拉到了就按 planId 重新找一遍再比，还不对才是真不对。
@@ -693,9 +731,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
-
-    /** 关掉详情面板。不改任何数据 —— 用户只是点开看了眼 */
-    fun closeClassPlanDetail() { classPlanDetail = null }
 
     private fun buildClassPlanDetail(
         id: String,
@@ -808,36 +843,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         rebuildClassPlanHint()
     }
 
-    /** 手动把弹窗叫出来（点首页那一行的「去认领」/「查看」） */
-    fun requestClassPlanPrompt() {
-        val idx = classSyncStore.loadIndex()
-        val st = classSyncStore.loadState()
-        when {
-            idx == null || idx.plans.isEmpty() -> syncClassPlan(force = true)
-
-            /*
-             * 已认领：点那一行就是要看清单内容，直接开详情。
-             *
-             * 不再先判断「有没有新版」再决定开弹窗还是导入 —— 那是导入流程，
-             * 不是浏览流程。用户点的是「查看」，不是「更新我」。
-             */
-            st.subs.isNotEmpty() -> {
-                val sub = st.subs.maxByOrNull { it.importedUpdatedAt }
-                if (sub != null) openClassPlanDetail(sub.id) else syncClassPlan(force = true)
-            }
-
-            // 未认领：一律让同学输密钥。**不要因为「只有一份」就直接打开** ——
-            // 密钥的作用就是让人确认自己找对了，省掉这一步等于没有。
-            else -> rebuildClassPlanHint(
-                ClassPlanPrompt.Claim(
-                    className = state.studentCard?.className.orEmpty(),
-                    plans = idx.plans.map {
-                        ClaimablePlan(it.id, it.key, it.count, it.updatedAt, it.ownerName, it.name)
-                    },
-                ),
-            )
-        }
-    }
+    /*
+     * 原来这里还有一个 requestClassPlanPrompt()：点首页那一行时算「该弹认领窗
+     * 还是该开详情」。2026-11-23 认领改成独立 Activity 之后，这个判断搬到了
+     * ClassPlanActivity 的 initialClaimPage（已认领直接进详情，否则先进认领页），
+     * 这里就不再需要了 —— 两个 Activity 各有一个 VM，判断只能由拿到页面的那边做。
+     */
 
     /** 关掉弹窗。记一次「忽略」——连续 3 次之后只留首页横幅，不再弹 */
     fun dismissClassPlanPrompt(countAsIgnore: Boolean = true) {

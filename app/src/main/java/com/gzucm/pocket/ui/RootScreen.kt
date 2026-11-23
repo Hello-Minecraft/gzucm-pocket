@@ -86,8 +86,6 @@ import com.gzucm.pocket.ui.components.rememberHazeState
 import com.gzucm.pocket.ui.grades.GradesScreen
 import com.gzucm.pocket.ui.login.LoginScreen
 import com.gzucm.pocket.ui.power.PowerScreen
-import com.gzucm.pocket.ui.schedule.ClassPlanClaimDialog
-import com.gzucm.pocket.ui.schedule.ClassPlanDetailSheet
 import com.gzucm.pocket.ui.schedule.ClassPlanDeletedDialog
 import com.gzucm.pocket.ui.schedule.ClassPlanUpdateDialog
 import com.gzucm.pocket.ui.schedule.ScheduleScreen
@@ -384,6 +382,16 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
         vm.checkUpdateIfStale()
         // 天气也是「回到前台就看一眼」：内部按 1 小时节流，多调无副作用
         vm.maybeRefreshWeather()
+        /*
+         * 班级日程是独立 Activity，它有自己的 ViewModel —— 那边改的清单
+         * 只落在 SharedPreferences 里，这个 VM 不知道。回到前台重读一次，
+         * 否则从那边回来首页还是旧清单（详情见 reloadClassPlans 的注释）。
+         *
+         * 日程放在前面：reloadClassPlans 会顺手重算首页那一行，里面含
+         * 「学委删了 N 条，本地还留着」的计数，得先拿到新的 agenda 才算得准。
+         */
+        vm.reloadAgendas()
+        vm.reloadClassPlans()
         // 用户可能刚去系统设置里开了通知 / 精确闹钟，回来要立刻反映，
         // 不然设置页「未授权」的红字一直挂着
         notifyOk = notifyGranted()
@@ -692,24 +700,26 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                              */
                             classPlan = vm.classPlanHint?.bar,
                             classPlanOrphaned = vm.classPlanHint?.orphaned ?: 0,
-                            onClassPlanAction = { vm.requestClassPlanPrompt() },
+                            /*
+                             * 「查看 / 认领」直接开独立 Activity（2026-11-23）。
+                             *
+                             * 原来是弹居中窗再转详情面板：列表几十行，往下翻和
+                             * 「下拉关面板」是同一个手势，看着看着清单就没了。
+                             * 整页之后滑动只是滚动。
+                             */
+                            onClassPlanAction = {
+                                runCatching {
+                                    ctx0.startActivity(
+                                        com.gzucm.pocket.ui.schedule.ClassPlanActivity.intent(
+                                            ctx0,
+                                            com.gzucm.pocket.ui.schedule.ClassPlanActivity.MODE_CLAIM,
+                                        ),
+                                    )
+                                }
+                            },
                             onClassPlanResolveGone = { tab = Tab.Schedule },
                         )
                         ClassPlanSyncDialogs(vm)
-                        /*
-                         * 清单详情：点首页那一行的「查看 / 去看看」打开。
-                         *
-                         * 挂在今日页分支里而不是最外层：切到别的 Tab 时它跟着消失，
-                         * 不用额外写「离开今日页就关面板」的逻辑。
-                         */
-                        vm.classPlanDetail?.let { detail ->
-                            ClassPlanDetailSheet(
-                                detail = detail,
-                                onConfirm = { vm.confirmClassPlanImport(it) },
-                                onUnsubscribe = { vm.unsubscribeClassPlan(detail.id) },
-                                onClose = { vm.closeClassPlanDetail() },
-                            )
-                        }
                         }
 
                         Tab.Schedule -> ScheduleScreen(
@@ -930,30 +940,11 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
         examCurrentKey = selectedEntry?.key ?: "",
         onSwitchEntry = { switchEntry(it) },
         onExamClick = { e -> selectedExam = e },
-        // 班级作业导入：一次写一次存储、重排一次闹钟（见 replaceAgendas 的注释）
-        onImportAgendas = { list -> vm.replaceAgendas(list) },
-        // 班级清单（学委维护的），和上面的「导入到我自己的日程」是两件事
-        classPlan = state.classPlan,
-        onClassPlanChange = { vm.saveClassPlan(it) },
-        // 学籍里的姓名，预填班级清单的密钥（学委一般就用自己的名字）
-        studentName = state.studentCard?.name,
-        studentClass = state.studentCard?.className,
         /*
-         * 云端：发布 / 手动拉取（2026-11-22）。
-         * 没配 FC 时 vm 里这两个回调也照传 —— 面板自己会看 onPublish 是否可用，
-         * 真正发出请求时 ClassSyncApi 会返回 NOT_CONFIGURED，提示一句就完了。
+         * 班级日程的入口、数据、云端回调都搬去 ClassPlanActivity 了
+         * （那是它自己的 ViewModel 和整页界面）。
+         * 这个面板只剩「我的日程」，不再需要那 11 个班级日程参数。
          */
-        onPublish = { plan ->
-            vm.publishClassPlan(plan) { msg ->
-                Toast.makeText(ctx0, msg, Toast.LENGTH_SHORT).show()
-            }
-        },
-        onFetchFromClass = { vm.requestClassPlanPrompt() },
-        onDeletePublished = { vm.deletePublishedClassPlan { msg -> Toast.makeText(ctx0, msg, Toast.LENGTH_SHORT).show() } },
-        classPlans = vm.state.classPlans,
-        onSelectClassPlan = { vm.editClassPlan(it) },
-        onCreateClassPlan = { name -> vm.newClassPlan(name) },
-        publishedPlanKeys = vm.state.publishedPlanKeys,
         onAdd = { date, minute ->
             editingAgenda = null
             draftAgendaDate = date
@@ -1505,14 +1496,17 @@ private fun FloatingBar(
 }
 
 /**
- * 班级日程的三个居中弹窗。
+ * 班级日程的两个居中弹窗（「有更新」「已被删除」）。
  *
  * 只在首页渲染：在日程页、设置页同步出结果时不弹 —— 用户正忙着别的事，
  * 这时候弹「学委更新了作业」只会让他关掉，等于白白消耗掉当天那一次弹窗额度。
  * 攒着，回首页再问。
  *
- * 为什么不是底部面板：致辉 2026-11-22 明确否掉了从下往上那种
- * （下滑容易误触关闭，网页也是同一个原因改成整页的）。
+ * 「认领」那个弹窗已经删掉（2026-11-23）：认领要选清单、输密钥、读四行说明，
+ * 装不进一个居中窗，改成独立 Activity（ClassPlanActivity.MODE_CLAIM）。
+ *
+ * 为什么保留这两个：它们是一次性的一问一答（知道了 / 稍后），
+ * 不存在「下滑误触」的问题，没必要为两句话再开一个页面。
  */
 @Composable
 private fun ClassPlanSyncDialogs(vm: AppViewModel) {
@@ -1526,13 +1520,6 @@ private fun ClassPlanSyncDialogs(vm: AppViewModel) {
     }
 
     when (val p = vm.classPlanHint?.prompt) {
-        is ClassPlanPrompt.Claim -> ClassPlanClaimDialog(
-            className = p.className,
-            plans = p.plans,
-            onSubmitKey = { planId, key, cb -> vm.submitClassPlanKey(planId, key, cb) },
-            onDismiss = { vm.dismissClassPlanPrompt() },
-        )
-
         is ClassPlanPrompt.Update -> ClassPlanUpdateDialog(
             key = p.key,
             added = p.added,
@@ -1543,7 +1530,20 @@ private fun ClassPlanSyncDialogs(vm: AppViewModel) {
              * 日程列表里能看到完整内容，比在弹窗里读强。
              */
             previewTitles = emptyList(),
-            onOpen = { vm.openClassPlanDetail(p.id) },
+            // 进独立 Activity 的详情页；已认领状态下会直接落在那一份清单上
+            onOpen = {
+                // 先把这条提示收掉：Activity 回来时不该再看见同一个弹窗。
+                // 不算「忽略」—— 用户是去看了，不是点了稍后。
+                vm.dismissClassPlanPrompt(countAsIgnore = false)
+                runCatching {
+                    ctx.startActivity(
+                        com.gzucm.pocket.ui.schedule.ClassPlanActivity.intent(
+                            ctx,
+                            com.gzucm.pocket.ui.schedule.ClassPlanActivity.MODE_CLAIM,
+                        ),
+                    )
+                }
+            },
             onLater = { vm.dismissClassPlanPrompt() },
         )
 
@@ -1553,6 +1553,7 @@ private fun ClassPlanSyncDialogs(vm: AppViewModel) {
             onDismiss = { vm.dismissClassPlanPrompt(countAsIgnore = false) },
         )
 
-        null -> Unit
+        // 「认领」现在只有首页那一行 + 独立 Activity 一条路，这里不再弹窗
+        else -> Unit
     }
 }

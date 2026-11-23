@@ -388,37 +388,10 @@ fun AgendaListSheet(
     onEdit: (Agenda) -> Unit,
     /** 勾选 / 取消勾选截止任务（已完成项会移入列表底部的「已完成」栏） */
     onTaskCheck: (Agenda) -> Unit = {},
-    /**
-     * 班级作业导入后整表替换日程。
-     *
-     * 单独一个回调而不是复用 [onTaskCheck]：导入是批量写，走 `saveAgenda`
-     * 逐条 upsert 会写几十次 prefs、重排几十轮闹钟（见 `replaceAgendas` 的注释）。
-     */
-    onImportAgendas: (List<Agenda>) -> Unit = {},
-    /** 学委维护的班级清单 */
-    classPlan: com.gzucm.pocket.core.ClassPlan = com.gzucm.pocket.core.ClassPlan(key = ""),
-    onClassPlanChange: (com.gzucm.pocket.core.ClassPlan) -> Unit = {},
-    /** 学籍里的姓名 = 班级清单的维护人（自动，不是密钥） */
-    studentName: String? = null,
-    /** 学籍里的行政班，班级日程里显示「自动识别到你的班级为…」 */
-    studentClass: String? = null,
-    /** 发布班级清单到云端（null = 没配 FC，按钮不显示） */
-    onPublish: ((com.gzucm.pocket.core.ClassPlan) -> Unit)? = null,
-    /** 从本班拉取清单（手动兜底） */
-    onFetchFromClass: (() -> Unit)? = null,
-    /** 删除已发布的班级清单（学委侧） */
-    onDeletePublished: (() -> Unit)? = null,
-    /** 本机维护的所有清单（学委侧「换一份」用） */
-    classPlans: List<com.gzucm.pocket.core.ClassPlan> = emptyList(),
-    onSelectClassPlan: ((String) -> Unit)? = null,
-    onCreateClassPlan: ((String) -> Unit)? = null,
-    publishedPlanKeys: Set<String> = emptySet(),
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
-    // 班级作业：和日程列表同一层，不做成二级页面 —— 它只是「往这个列表里灌数据」
-    var showClassShare by remember { mutableStateOf(false) }
     /*
      * 列表分三段：
      *   ① 未完成任务（按紧急度：逾期 → 临近 → 一般 → 长期）
@@ -450,11 +423,7 @@ fun AgendaListSheet(
     AdaptiveSheet(
         visible = visible,
         onDismiss = onDismiss,
-        paneTitle = when {
-            examDetail != null -> "考试详情"
-            showClassShare -> "班级日程"
-            else -> "我的日程"
-        },
+        paneTitle = if (examDetail != null) "考试详情" else "我的日程",
         paneWidth = 400.dp,
         scrollable = false,
     ) {
@@ -466,31 +435,6 @@ fun AgendaListSheet(
                 overlapEntries = examOverlapEntries,
                 currentEntryKey = examCurrentKey,
                 onSwitchEntry = onSwitchEntry,
-            )
-            return@AdaptiveSheet
-        }
-        /*
-         * 班级作业：同一个面板换内容，不新开 Dialog。
-         *
-         * 手机端每多一层 Dialog，返回键就多一分「直接退回桌面」的风险
-         * （Dialog 吃掉 BACK 之后 Activity 又收到一次），考试详情也走这条路。
-         */
-        if (showClassShare) {
-            ClassPlanContent(
-                plan = classPlan,
-                onPlanChange = onClassPlanChange,
-                myAgendas = rules,
-                onImportToAgenda = onImportAgendas,
-                onClose = { showClassShare = false },
-                maintainer = studentName,
-                studentClass = studentClass,
-                onPublish = onPublish,
-                onFetchFromClass = onFetchFromClass,
-                onDeletePublished = onDeletePublished,
-                plans = classPlans.ifEmpty { listOf(classPlan) },
-                onSelectPlan = onSelectClassPlan,
-                onCreatePlan = onCreateClassPlan,
-                publishedPlanKeys = publishedPlanKeys,
             )
             return@AdaptiveSheet
         }
@@ -517,6 +461,8 @@ fun AgendaListSheet(
             verticalArrangement = Arrangement.spacedBy(9.dp),
         ) {
             item(key = "agenda_header") {
+                // LocalContext 只能在组合里读，点击时再用（onClick 不是 @Composable）
+                val ctx = androidx.compose.ui.platform.LocalContext.current
                 Column {
                     Row(
                         Modifier.fillMaxWidth(),
@@ -536,9 +482,19 @@ fun AgendaListSheet(
                          * 「班级作业」入口放在标题右边，不单独占一行卡片 ——
                          * 它不是每天都用的功能，但学委发 DDL 的那几天会连着进好几次，
                          * 沉到设置里等于每次都要绕一圈。
+                         *
+                         * 2026-11-23 起开独立 Activity：这一整块（清单列表 → 编辑 →
+                         * 改条目）内容多、还要输入，塞在这个底部面板里手一滑就关掉，
+                         * 填了一半的要求全没了。
                          */
                         TextButton(
-                            onClick = { showClassShare = true },
+                            onClick = {
+                                runCatching {
+                                    ctx.startActivity(
+                                        ClassPlanActivity.intent(ctx, ClassPlanActivity.MODE_MANAGE),
+                                    )
+                                }
+                            },
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                         ) {
                             Text("班级日程", fontSize = 12.5.sp, color = scheme.primary)

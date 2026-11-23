@@ -58,6 +58,19 @@
             android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
             android:theme="@style/Theme.GzucmPocket" />
 
+        <!--
+            班级日程（学委维护 + 同学认领）。2026-11-23 从底部面板 / 居中弹窗
+            改成整页：编辑页有输入框和日期选择器，面板被往下带一下就把输入全丢了；
+            详情页要翻几十行条目，「往下翻」和「下拉关面板」又是同一个手势。
+            adjustResize：编辑页底部有输入框，键盘弹起时要顶上去而不是盖住保存按钮。
+        -->
+        <activity
+            android:name=".ui.schedule.ClassPlanActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+            android:theme="@style/Theme.GzucmPocket" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

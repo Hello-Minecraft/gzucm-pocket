@@ -45,7 +45,7 @@ import com.gzucm.pocket.ui.icons.AppIcons
  *
  * 一节的标题和正文放在同一张 [micaPanel] 卡片里：七节拆成七张卡之后，
  * 用户一眼能数出「还有几节没看」，比一整片长文好定位。
- * 节标题 15sp Medium、正文 13sp/20sp —— 和 [ClassPlanSheet] 里的说明文字同档，
+ * 节标题 15sp Medium、正文 13sp/20sp —— 和 [ClassPlanManageContent] 里的说明文字同档，
  * 两处并排看不会一个大一个小。
  *
  * ## 宽屏为什么限宽 640dp

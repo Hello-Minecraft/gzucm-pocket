@@ -6,16 +6,21 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -135,16 +140,20 @@ fun classPlanPatchText(added: Int, updated: Int, sep: String = "，"): String = 
 }
 
 /**
- * 场景一：首次发现本班有清单。
+ * 场景一：首次发现本班有清单（整页）。
+ *
+ * 原来是 [CenterDialog] 里的内容，现在改成 [ClassPlanActivity] 的一整页：
+ * 这里要列清单、输密钥、底下还有四行说明，弹窗高度不够时只能缩在一个小框里滚，
+ * 手指一滑还容易把弹窗带下去（误触）。整页之后滑动只是滚动。
+ *
+ * 标题用「认领班级日程」而不是「本班有 N 份」：N 已经逐行列出来了，
+ * 标题再数一遍反而啰嗦。标题在 Activity 顶栏。
  *
  * 只负责画：认领动作通过 [onSubmitKey] 抛给调用方（带 planId 和密钥），
  * 不在这里发请求。
- *
- * 标题用「认领班级日程」而不是「本班有 N 份」：N 已经逐行列出来了，
- * 标题再数一遍反而啰嗦。
  */
 @Composable
-fun ClassPlanClaimDialog(
+fun ClassPlanClaimScreen(
     /** 学籍里的行政班，只读展示 —— 同学靠它确认 App 认对了班级 */
     className: String,
     /** 本班现有的清单摘要，用来让同学挑一份，**不展示密钥** */
@@ -154,7 +163,8 @@ fun ClassPlanClaimDialog(
      * 还要往服务端拉一次最新列表，所以结果走回调。
      */
     onSubmitKey: (planId: String, key: String, onResult: (Boolean) -> Unit) -> Unit,
-    onDismiss: () -> Unit,
+    /** 退出认领（整页的出口，等于 finish） */
+    onClose: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
     var input by rememberSaveable { mutableStateOf("") }
@@ -167,168 +177,200 @@ fun ClassPlanClaimDialog(
      */
     var selectedId by rememberSaveable(plans) { mutableStateOf(plans.firstOrNull()?.id) }
 
-    CenterDialog(
-        title = "认领班级日程",
-        onDismiss = onDismiss,
-        buttons = {
-            DialogPrimaryButton(
-                text = if (checking) "正在核对…" else "查看清单",
-                onClick = {
-                    if (checking) return@DialogPrimaryButton
-                    val plan = plans.firstOrNull { it.id == selectedId }
-                    error = when {
-                        plan == null -> "先选一份清单"
-                        input.isBlank() -> "先填密钥再点"
-                        else -> null
-                    }
-                    if (plan == null || input.isBlank()) return@DialogPrimaryButton
-                    checking = true
-                    onSubmitKey(plan.id, input) { ok ->
-                        checking = false
-                        error = if (ok) null else "这个密钥对不上这一份清单，问问发清单的同学"
-                    }
-                },
-            )
-            DialogSecondaryButton("稍后", onDismiss)
-        },
+    fun tryClaim() {
+        if (checking) return
+        val plan = plans.firstOrNull { it.id == selectedId }
+        error = when {
+            plan == null -> "先选一份清单"
+            input.isBlank() -> "先填密钥再点"
+            else -> null
+        }
+        if (plan == null || input.isBlank()) return
+        checking = true
+        onSubmitKey(plan.id, input) { ok ->
+            checking = false
+            error = if (ok) null else "这个密钥对不上这一份清单，问问发清单的同学"
+        }
+    }
+
+    /*
+     * 正文可滚、按钮固定在底部：清单多的时候滚的是中间那段，
+     * 「查看清单」不会被顶出屏幕 —— 这一点在原来的弹窗里做不到。
+     */
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 26.dp),
     ) {
-        /*
-         * 先选清单、再输密钥（2026-11-23 改）。
-         *
-         * 原来只让同学输一个密钥，靠密钥反推是哪一份清单。但一个班可以有多份
-         * 清单、各有各的密钥，人一旦记混就会「输对了密钥却认领错清单」，
-         * 而弹窗本身又只列了名字不能点，等于让同学对着列表干猜。
-         *
-         * 现在把「选哪一份」和「证明有权看」拆成两步：列表里只给名字、条数、
-         * 维护人（都是发布时就公开的信息），密钥仍然要另外找维护人要 ——
-         * 所以列表可以放心点，密钥该保密的还是保密。
-         *
-         * 班级是系统认出来的（只读），清单是同学自己选的，密钥是同学自己填的。
-         */
         Column(
             Modifier
-                .fillMaxWidth()
-                .clip(G3CornerShape(11.dp))
-                .background(scheme.surfaceVariant.copy(alpha = 0.35f))
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
         ) {
-            Text("你的班级", fontSize = 11.sp, color = scheme.onSurfaceVariant)
-            Spacer(Modifier.height(3.dp))
-            Text(
-                className.ifBlank { "还没读到学籍里的班级" },
-                fontSize = 13.5.sp,
-                fontWeight = FontWeight.Medium,
-                color = scheme.onSurface,
-                maxLines = 2,
-            )
-        }
+            /*
+             * 先选清单、再输密钥（2026-11-23 改）。
+             *
+             * 原来只让同学输一个密钥，靠密钥反推是哪一份清单。但一个班可以有多份
+             * 清单、各有各的密钥，人一旦记混就会「输对了密钥却认领错清单」，
+             * 而弹窗本身又只列了名字不能点，等于让同学对着列表干猜。
+             *
+             * 现在把「选哪一份」和「证明有权看」拆成两步：列表里只给名字、条数、
+             * 维护人（都是发布时就公开的信息），密钥仍然要另外找维护人要 ——
+             * 所以列表可以放心点，密钥该保密的还是保密。
+             *
+             * 班级是系统认出来的（只读），清单是同学自己选的，密钥是同学自己填的。
+             */
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(G3CornerShape(11.dp))
+                    .background(scheme.surfaceVariant.copy(alpha = 0.35f))
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+            ) {
+                Text("你的班级", fontSize = 11.sp, color = scheme.onSurfaceVariant)
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    className.ifBlank { "还没读到学籍里的班级" },
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = scheme.onSurface,
+                    maxLines = 2,
+                )
+            }
 
-        Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(12.dp))
 
-        Text(
-            if (plans.size == 1) "本班现有 1 份，选它：" else "本班现有 ${plans.size} 份，选一份：",
-            fontSize = 11.5.sp,
-            color = scheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(6.dp))
-        if (plans.isEmpty()) {
-            // 正常不会到这儿（没清单就不弹这个窗），留着是为了列表为空时也有话说
             Text(
-                "还没拉到清单，稍后再试",
+                if (plans.size == 1) "本班现有 1 份，选它：" else "本班现有 ${plans.size} 份，选一份：",
                 fontSize = 11.5.sp,
                 color = scheme.onSurfaceVariant,
             )
-        } else {
-            /*
-             * 整行可点，不做 RadioButton：弹窗宽度本来就紧，单选用底色 + 右侧勾
-             * 已经够清楚，多一个圆点会把清单名挤到换行。
-             */
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                plans.forEach { p ->
-                    val selected = p.id == selectedId
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(G3CornerShape(11.dp))
-                            .background(
-                                if (selected) {
-                                    scheme.primary.copy(alpha = 0.10f)
-                                } else {
-                                    scheme.surfaceVariant.copy(alpha = 0.30f)
-                                },
-                            )
-                            .clickable {
-                                selectedId = p.id
-                                error = null
+            Spacer(Modifier.height(6.dp))
+            if (plans.isEmpty()) {
+                // 正常不会到这儿（没清单就不弹这个窗），留着是为了列表为空时也有话说
+                Text(
+                    "还没拉到清单，稍后再试",
+                    fontSize = 11.5.sp,
+                    color = scheme.onSurfaceVariant,
+                )
+            } else {
+                /*
+                 * 整行可点，不做 RadioButton：弹窗宽度本来就紧，单选用底色 + 右侧勾
+                 * 已经够清楚，多一个圆点会把清单名挤到换行。
+                 */
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    plans.forEach { p ->
+                        val selected = p.id == selectedId
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(G3CornerShape(11.dp))
+                                .background(
+                                    if (selected) {
+                                        scheme.primary.copy(alpha = 0.10f)
+                                    } else {
+                                        scheme.surfaceVariant.copy(alpha = 0.30f)
+                                    },
+                                )
+                                .clickable {
+                                    selectedId = p.id
+                                    error = null
+                                }
+                                .padding(horizontal = 12.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    p.name.ifBlank { "未命名清单" },
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = if (selected) scheme.primary else scheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    if (p.ownerName.isBlank()) {
+                                        "${p.count} 条"
+                                    } else {
+                                        "${p.count} 条 · ${p.ownerName} 维护"
+                                    },
+                                    fontSize = 11.sp,
+                                    color = scheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
                             }
-                            .padding(horizontal = 12.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                p.name.ifBlank { "未命名清单" },
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = if (selected) scheme.primary else scheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                if (p.ownerName.isBlank()) {
-                                    "${p.count} 条"
-                                } else {
-                                    "${p.count} 条 · ${p.ownerName} 维护"
-                                },
-                                fontSize = 11.sp,
-                                color = scheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        if (selected) {
-                            Spacer(Modifier.width(8.dp))
-                            Icon(
-                                AppIcons.Check,
-                                contentDescription = "已选中",
-                                modifier = Modifier.size(16.dp),
-                                tint = scheme.primary,
-                            )
+                            if (selected) {
+                                Spacer(Modifier.width(8.dp))
+                                Icon(
+                                    AppIcons.Check,
+                                    contentDescription = "已选中",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = scheme.primary,
+                                )
+                            }
                         }
                     }
                 }
             }
+
+            Spacer(Modifier.height(12.dp))
+
+            OutlinedTextField(
+                value = input,
+                onValueChange = {
+                    input = it.take(20)
+                    error = null
+                },
+                label = { Text("密钥", fontSize = 12.sp) },
+                placeholder = { Text("一般是学委名字", fontSize = 13.sp) },
+                singleLine = true,
+                isError = error != null,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                error ?: "这一份的密钥由维护的人给你，输对了才能看到内容。",
+                fontSize = 11.5.sp,
+                lineHeight = 16.sp,
+                color = if (error != null) {
+                    scheme.error
+                } else {
+                    scheme.onSurfaceVariant.copy(alpha = 0.8f)
+                },
+            )
+
+            Spacer(Modifier.height(2.dp))
+            WhatIsThis(scheme)
+            Spacer(Modifier.height(8.dp))
         }
 
         Spacer(Modifier.height(12.dp))
-
-        OutlinedTextField(
-            value = input,
-            onValueChange = {
-                input = it.take(20)
-                error = null
-            },
-            label = { Text("密钥", fontSize = 12.sp) },
-            placeholder = { Text("一般是学委名字", fontSize = 13.sp) },
-            singleLine = true,
-            isError = error != null,
-            modifier = Modifier.fillMaxWidth(),
+        Button(
+            onClick = { tryClaim() },
+            enabled = !checking,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp),
             shape = RoundedCornerShape(12.dp),
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            error ?: "这一份的密钥由维护的人给你，输对了才能看到内容。",
-            fontSize = 11.5.sp,
-            lineHeight = 16.sp,
-            color = if (error != null) {
-                scheme.error
-            } else {
-                scheme.onSurfaceVariant.copy(alpha = 0.8f)
-            },
-        )
-
-        Spacer(Modifier.height(2.dp))
-        WhatIsThis(scheme)
+        ) {
+            Text(
+                if (checking) "正在核对…" else "查看清单",
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+        TextButton(
+            onClick = onClose,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(40.dp),
+        ) {
+            Text("稍后", fontSize = 13.sp, color = scheme.onSurfaceVariant)
+        }
     }
 }
 
