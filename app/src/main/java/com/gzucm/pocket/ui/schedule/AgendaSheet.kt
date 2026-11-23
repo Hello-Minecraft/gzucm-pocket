@@ -1864,7 +1864,7 @@ private val WheelItemHeight = 36.dp
 private val WheelHeight = 132.dp
 
 @Composable
-private fun WheelColumn(
+internal fun WheelColumn(
     count: Int,
     initialIndex: Int,
     label: (Int) -> String,
@@ -1998,7 +1998,7 @@ private fun hasNotifyPermission(ctx: android.content.Context): Boolean =
  * 要额外引依赖，一个 ▾ 足够表达，也不会在字体缩放时错位。
  */
 @Composable
-private fun FieldRow(
+internal fun FieldRow(
     label: String,
     value: String,
     expanded: Boolean,
