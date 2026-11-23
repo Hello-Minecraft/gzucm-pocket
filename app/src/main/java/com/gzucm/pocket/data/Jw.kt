@@ -558,13 +558,19 @@ object Jw {
              * 字段名以真实响应为准（2026-11-14 抓到的样例）：
              *   kcmc 课程 / ksrq 日期 / kssj 时间 / kscdmc 考场 / zwh 座位
              *   ksaplxmc 安排类型 / khxsmc 考核形式 / kslbmc 类别
-             *   jkteaxms 监考 / xqmc 校区 / zc 周次 / jcdm2 节次 / sjbh 试卷号 / xs 学分
+             *   jkteaxms 监考 / xqmc 校区 / zc 周次 / jcdm2 节次 / sjbh 试卷号 / xs 学时
              *
              * 之前猜的是 cdmc/jxcdmc（课表的教室字段），所以地点一直是空的 ——
              * 考试的考场字段叫 kscdmc，跟课表不是一套。
+             *
+             * 2026-11-23 用户反馈：考试详情里「学分」显示成了「学时」。
+             * 根因就是上面的 xs —— 这个接口的 xs 是**学时**（课时数），不是学分。
+             * 真正的学分是 xf，但并非每次都有，所以：xs 固定标「学时」；
+             * xf 有值才额外补一行「学分」，且排在学时前面（学分更被关心）。
              */
             val week = o.str("zc")
-            val credit = o.str("xs")
+            val hours = o.str("xs")
+            val credit = o.str("xf")
             ExamItem(
                 course = o.str("kcmc"),
                 date = o.str("ksrq"),
@@ -583,6 +589,7 @@ object Jw {
                     ExamDetail("试卷编号", o.str("sjbh")),
                     ExamDetail("课程编号", o.str("kcbh")),
                     ExamDetail("学分", credit.removeSuffix(".0")),
+                    ExamDetail("学时", hours.removeSuffix(".0")),
                 ).filter { it.value.isNotBlank() },
             )
         } ?: emptyList()

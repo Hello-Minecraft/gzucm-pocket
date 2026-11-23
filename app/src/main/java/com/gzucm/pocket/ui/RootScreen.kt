@@ -507,6 +507,19 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
     var showFeedback by remember { mutableStateOf(false) }
     // 「今日页显示」子页面（电费 / 天气 / 接下来 / 本周概览 开关 + 提前天数）
     var showTodaySectionsInSettings by remember { mutableStateOf(false) }
+    /*
+     * 天气地点。
+     *
+     * 单独存一份 state 而不是每次现读 SharedPreferences：后者不是可观察对象，
+     * 在子页面里选完地点，设置页那一行的地点名不会跟着变。
+     * 真值仍以 WeatherPlaceStore 为准，这里只是它的镜像。
+     */
+    val weatherPlaceStore = remember {
+        com.gzucm.pocket.core.WeatherPlaceStore(ctx0.applicationContext)
+    }
+    var weatherPlace by remember { mutableStateOf(weatherPlaceStore.place) }
+    // 「天气位置」子页面（4 个预设 + 使用当前位置）
+    var showWeatherPlaceInSettings by remember { mutableStateOf(false) }
     /**
      * 今日页显示配置。
      *
@@ -680,6 +693,7 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                             weather = state.weather,
                             weatherRefreshing = state.weatherRefreshing,
                             weatherError = state.weatherError,
+                            weatherPlaceLabel = weatherPlace.label,
                             onOpenSections = { showTodaySections = true },
                             onOpenPower = { tab = Tab.Power },
                             onOpenSettings = { showSettings = true },
@@ -1082,6 +1096,7 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 showAbout = false
                 showExport = false
                 showTodaySectionsInSettings = false
+                showWeatherPlaceInSettings = false
                 showSettings = false
             },
             paneWidth = 460.dp,
@@ -1090,6 +1105,7 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 showDonate -> "打赏作者"
                 showExport -> "导出课表"
                 showTodaySectionsInSettings -> "今日页显示"
+                showWeatherPlaceInSettings -> "天气位置"
                 else -> "设置"
             },
             // 设置页和关于页正文自带 verticalScroll，这里必须关掉
@@ -1108,13 +1124,14 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
              */
             androidx.activity.compose.BackHandler(
                 enabled = showAbout || showDonate || showExport || showFeedback ||
-                    showTodaySectionsInSettings,
+                    showTodaySectionsInSettings || showWeatherPlaceInSettings,
             ) {
                 showAbout = false
                 showDonate = false
                 showExport = false
                 showFeedback = false
                 showTodaySectionsInSettings = false
+                showWeatherPlaceInSettings = false
             }
             if (showFeedback) {
                 com.gzucm.pocket.ui.settings.FeedbackSheet(
@@ -1274,6 +1291,26 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 )
                 return@AdaptiveSheet
             }
+            /*
+             * 天气位置（2026-11-23）。
+             *
+             * 同样是一个子页面，理由和「今日页显示」一样：手机上一个面板就是一个 Dialog。
+             *
+             * 选中之后：先落 state（让设置页那行的名字立刻变），再交给 ViewModel
+             * 存盘 + 清缓存 + 绕过节流重拉；最后关掉这一页。
+             */
+            if (showWeatherPlaceInSettings) {
+                com.gzucm.pocket.ui.settings.WeatherPlaceContent(
+                    current = weatherPlace,
+                    onPick = { picked ->
+                        weatherPlace = picked
+                        vm.onWeatherPlaceChanged(picked)
+                        showWeatherPlaceInSettings = false
+                    },
+                    onBack = { showWeatherPlaceInSettings = false },
+                )
+                return@AdaptiveSheet
+            }
             com.gzucm.pocket.ui.settings.SettingsScreen(
                 onSync = { vm.sync(); showSettings = false },
                 onLogout = { vm.logout(); showSettings = false },
@@ -1311,6 +1348,9 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                  */
                 onOpenExport = { showExport = true },
                 onOpenTodaySections = { showTodaySectionsInSettings = true },
+                weatherPlaceLabel = weatherPlace.label,
+                weatherAvailable = com.gzucm.pocket.core.Weather.enabled,
+                onOpenWeatherPlace = { showWeatherPlaceInSettings = true },
                 startTabIndex = prefs.startTab,
                 onStartTabChange = {
                     prefs.startTab = it

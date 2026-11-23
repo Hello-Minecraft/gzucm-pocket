@@ -14,8 +14,8 @@
 
     App ──> FC（本文件） ──> 和风
              ├─ 路径白名单：只认 /weather/now、/weather/7d
-             ├─ 城市写死（LOCATION），客户端改不了
-             ├─ 结果缓存 30 分钟（保护额度，也更快）
+             ├─ 客户端可传 ?lat=&lon=（只认中国大陆范围），缺省回落 LOCATION
+             ├─ 结果缓存 30 分钟，按「路由 + 坐标」分别缓存
              ├─ 可选 X-App-Token 校验（防脚本乱刷，不是强认证）
              └─ 每实例每分钟限流
 
@@ -34,7 +34,7 @@
    | `QWEATHER_KEY_ID` | 凭据的 ID（JWT header 的 kid） |
    | `QWEATHER_PRIVATE_KEY` | `ed25519-private.pem` 的**全文**（含 BEGIN/END 两行） |
    | `QWEATHER_HOST` | 你的专属 API Host，如 `https://abcd1234.re.qweatherapi.com` |
-   | `QWEATHER_LOCATION` | 城市 LocationID，广州是 `101280101`（可省） |
+   | `QWEATHER_LOCATION` | 兜底城市 LocationID，广州是 `101280101`（客户端没传坐标时用，可省） |
    | `APP_TOKEN` | 和 App 里约定的串；留空则不校验 |
    | `CACHE_SECONDS` | 缓存秒数，默认 1800 |
    | `RATE_LIMIT_PER_MIN` | 每 IP 每分钟上限，默认 30 |
@@ -48,6 +48,7 @@
 - 限流是**进程内**的：FC 会横向扩容、实例会被回收，所以它挡不住分布式刷。
   真要严格限流得走 API 网关的流控或 Redis，这个量级（自己和同学用）不值当。
 - 缓存同理，多个实例各存一份。目的只是把「每人每次打开都请求」压成「每半小时一次」。
+  坐标进来后每个坐标一个 key，所以加了个简单的条数上限（见 `_cache_put`）。
 - 私钥放在控制台环境变量里，能看到的子账号就能看到它。别把生产账号借人。
 """
 
@@ -89,8 +90,19 @@ ROUTES = {
     "/weather/7d": "/v7/weather/7d",
 }
 
+# 只接受中国大陆范围的坐标。这个函数是给同学取「自己所在地」天气用的，
+# 不能变成一个「全球任意城市天气代理」—— 一旦被拿去刷，和风的免费额度很快就没了。
+# 超出范围（或解析失败）一律回落到 LOCATION，跟以前的行为一致。
+CN_LON_MIN, CN_LON_MAX = 73.0, 136.0
+CN_LAT_MIN, CN_LAT_MAX = 3.0, 54.0
+
+# 缓存条数上限。坐标成为 key 的一部分后，每个坐标都会留下一条，
+# 实例长时间不被回收时会越积越多（内存缓慢上涨）；到顶就整体清空 ——
+# 天气数据随时可重建，清空的代价只是下一轮 MISS，比做 LRU 省事也不会错。
+CACHE_MAX_ENTRIES = 200
+
 _token = {"jwt": None, "exp": 0}
-_cache = {}   # route_key -> (expire_at, body_text)
+_cache = {}   # cache_key（route@location）-> (expire_at, body_text)
 _rate = {}    # ip -> [window_start, count]
 
 
@@ -252,8 +264,8 @@ def _decode(raw: bytes) -> str:
     return raw.decode("utf-8", "replace")
 
 
-def _upstream(qweather_path: str) -> str:
-    url = f"{QWEATHER_HOST}{qweather_path}?location={urllib.parse.quote(LOCATION)}"
+def _upstream(qweather_path: str, location: str) -> str:
+    url = f"{QWEATHER_HOST}{qweather_path}?location={urllib.parse.quote(location)}"
     headers = {
         "Authorization": f"Bearer {_sign_jwt()}",
         "Accept": "application/json",
@@ -305,7 +317,50 @@ def _parse(event):
     path = event.get("rawPath") or event.get("path") or http.get("path") or "/"
     method = http.get("method") or event.get("httpMethod") or "GET"
     ip = http.get("sourceIp") or headers.get("x-forwarded-for", "").split(",")[0].strip() or "unknown"
-    return {"path": path, "method": method, "headers": headers, "ip": ip}
+
+    # 查询串有三处可能：Web 函数模式塞在 queryParameters，事件函数可能是
+    # queryStringParameters / rawQueryString，也可能整串原样留在 path 里
+    # （"…/weather/now?lat=1&lon=2"）。全收，后写的覆盖先写的。
+    query = {}
+    qs_sources = [(path.split("?", 1)[1] if "?" in path else ""),
+                  event.get("rawQueryString") or ""]
+    for raw_qs in qs_sources:
+        if isinstance(raw_qs, str) and raw_qs:
+            for k, v in urllib.parse.parse_qsl(raw_qs, keep_blank_values=True):
+                query[k.lower()] = v
+    for src in (event.get("queryStringParameters"), event.get("queryParameters")):
+        if isinstance(src, dict):
+            for k, v in src.items():
+                query[str(k).lower()] = v
+
+    return {"path": path, "method": method, "headers": headers, "ip": ip, "query": query}
+
+
+def _pick_location(query) -> str:
+    """把 ?lat=&lon= 转成和风要的 `经度,纬度`；缺一个或解析不出就回落 LOCATION。
+
+    和风的 location 参数是**经度在前**（跟日常说法相反），两位小数足够定位到街区。
+    范围校验在这里做：只放行中国大陆，别让这个函数变成全球天气代理。
+    """
+    lat_raw = str(query.get("lat") or "").strip()
+    lon_raw = str(query.get("lon") or "").strip()
+    if not lat_raw or not lon_raw:
+        return LOCATION
+    try:
+        lat, lon = float(lat_raw), float(lon_raw)
+    except (TypeError, ValueError):
+        return LOCATION
+    # NaN 跟任何数比较都是 False，顺手被这行挡掉；inf 也过不了上限
+    if not (CN_LON_MIN <= lon <= CN_LON_MAX and CN_LAT_MIN <= lat <= CN_LAT_MAX):
+        return LOCATION
+    return f"{lon:.2f},{lat:.2f}"
+
+
+def _cache_put(cache_key: str, value) -> None:
+    """写缓存，顺带守住条目上限（理由见 CACHE_MAX_ENTRIES 处的注释）。"""
+    if cache_key not in _cache and len(_cache) >= CACHE_MAX_ENTRIES:
+        _cache.clear()
+    _cache[cache_key] = value
 
 
 def _resp(status: int, body: str, cache_state: str = "BYPASS"):
@@ -349,13 +404,17 @@ def _event_handler(event, context):
     if not _rate_ok(req["ip"]):
         return _fail(429, "429", "请求太频繁")
 
+    # 缓存必须按坐标分开：只按路由存的话，深圳的用户会看到广州的缓存
+    location = _pick_location(req["query"])
+    cache_key = f"{route_key}@{location}"
+
     now = time.time()
-    hit = _cache.get(route_key)
+    hit = _cache.get(cache_key)
     if hit and hit[0] > now:
         return _resp(200, hit[1], "HIT")
 
     try:
-        body = _upstream(ROUTES[route_key])
+        body = _upstream(ROUTES[route_key], location)
     except urllib.error.HTTPError as e:
         # 和风把业务码放 body 里（401 凭据无效 / 403 应用限制 / 429 超额 / 404 城市错）。
         # 原样透给 App：它那边会把 code 显示出来，配错时一眼能看出是哪一类，
@@ -385,7 +444,7 @@ def _event_handler(event, context):
     # 只有 code=200 才缓存，否则会把一次偶发错误缓存半小时
     try:
         if json.loads(body).get("code") == "200":
-            _cache[route_key] = (now + CACHE_SECONDS, body)
+            _cache_put(cache_key, (now + CACHE_SECONDS, body))
     except Exception:
         pass
 

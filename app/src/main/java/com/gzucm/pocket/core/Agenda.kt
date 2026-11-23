@@ -472,5 +472,17 @@ fun mergeForDay(
     val out = ArrayList<ScheduleEntry>(sessions.size + occurrences.size)
     sessions.forEach { if (it.week == week && it.weekday == weekday) out += ScheduleEntry.Course(it) }
     occurrences.forEach { if (it.week == week && it.weekday == weekday) out += ScheduleEntry.Custom(it) }
-    return out.sortedWith(compareBy({ it.startMinute }, { it.stableKey }))
+    /*
+     * 按 stableKey 去重。
+     *
+     * 教务偶尔会返回「同周、同天、同节次、同课名、同地点」的重复记录
+     * （分组上课 / 导出时多拼了一行），两条画在课表上完全重叠，留一条就够。
+     * 不去重的话 stableKey 相同，日视图把它们喂给 LazyColumn 的 items(key) 时
+     * 会直接抛 IllegalArgumentException「Key ... was already used」把 App 干崩
+     * —— 2026-11-23 华为 TET-AN00 用户反馈的日视图切换崩溃就是这个。
+     *
+     * 放在排序前做，distinctBy 保留首次出现的顺序，不影响排序结果。
+     */
+    return out.distinctBy { it.stableKey }
+        .sortedWith(compareBy({ it.startMinute }, { it.stableKey }))
 }

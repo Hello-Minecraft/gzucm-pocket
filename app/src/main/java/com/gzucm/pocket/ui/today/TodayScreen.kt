@@ -140,6 +140,14 @@ fun TodayScreen(
     onClassPlanAction: () -> Unit = {},
     /** 点橙色提示里的「处理」 */
     onClassPlanResolveGone: () -> Unit = {},
+    /**
+     * 天气卡标题上的地点名（用户在设置里选的天气位置）。
+     *
+     * 有数据时卡片显示 `info.city`（拉取时按同一个 place 写进去的）；
+     * 还在拉 / 拉失败时用它，否则空卡上连「这是哪儿的天气」都没有。
+     * 追加在末尾，理由同上：截图测试有按位置传参的调用。
+     */
+    weatherPlaceLabel: String = Weather.CityLabel,
 ) {
     // today 也挂在同一个 tick 上：停在首页跨过 0 点后要切到新的一天，
     // 下面 remember(…, today) 那几处才会重算
@@ -308,6 +316,7 @@ fun TodayScreen(
                                     onOpenPower = onOpenPower,
                                     onAgendaClick = onAgendaClick,
                                     onOpenSections = onOpenSections,
+                                    weatherPlaceLabel = weatherPlaceLabel,
                                 )
                             }
                     }
@@ -447,6 +456,7 @@ fun TodayScreen(
                             onOpenPower = onOpenPower,
                             onAgendaClick = onAgendaClick,
                             onOpenSections = onOpenSections,
+                            weatherPlaceLabel = weatherPlaceLabel,
                         )
                     }
                     Spacer(Modifier.height(18.dp))
@@ -1455,6 +1465,7 @@ private fun TodayBlockCard(
     onOpenPower: () -> Unit,
     onAgendaClick: (AgendaOccurrence) -> Unit,
     onOpenSections: () -> Unit,
+    weatherPlaceLabel: String,
 ) {
     when (block) {
         TodayBlock.WEATHER -> {
@@ -1468,6 +1479,7 @@ private fun TodayBlockCard(
                     refreshing = weatherRefreshing,
                     error = weatherError,
                     onLongPress = onOpenSections,
+                    placeLabel = weatherPlaceLabel,
                 )
             }
         }

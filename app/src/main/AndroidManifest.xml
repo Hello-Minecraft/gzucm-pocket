@@ -17,6 +17,22 @@
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <!--
+        天气地点里的「使用当前位置」。
+
+        **只要粗略定位**：天气按 0.01°（约 1 公里）取格点，精确到街道毫无意义，
+        而「精确位置」在系统弹窗上更容易让人警觉 —— 为一个天气卡不值。
+
+        这个权限**不会在启动时申请**：只有用户在设置里点「使用当前位置」的那一刻，
+        才通过 RequestPermission 弹窗（见 ui/settings/WeatherPlaceSheet.kt）。
+        坐标只写本机 SharedPreferences，不上传、不写日志。
+
+        不要加 ACCESS_FINE_LOCATION / ACCESS_BACKGROUND_LOCATION：
+        前者会把权限弹窗升级成「精确位置」并暴露更细的坐标，
+        后者意味着退出 App 后还能定位 —— 这个功能一次都不需要。
+    -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!--
         Android 11 起 App 默认看不到别的包。
 
         「智慧宿管」这类只能企业微信打开的服务，要靠 wxwork:// 把用户送过去 ——

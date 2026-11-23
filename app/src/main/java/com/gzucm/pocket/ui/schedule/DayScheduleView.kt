@@ -16,7 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import com.gzucm.pocket.ui.components.G3CornerShape
@@ -345,7 +345,14 @@ internal fun DayScheduleView(
                         ),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        items(entries, key = { it.stableKey }) { entry ->
+                        /*
+                         * key 里额外拼上下标：mergeForDay 已经按 stableKey 去过重，
+                         * 但这里再兜一层 —— 万一上游（缓存里的旧数据、别的调用方）
+                         * 还塞进来两条 key 相同的记录，LazyColumn 会抛
+                         * 「Key ... was already used」直接崩掉整个日视图。
+                         * 拼下标不影响元素顺序和内容，只是保证 key 唯一。
+                         */
+                        itemsIndexed(entries, key = { index, e -> "${e.stableKey}#$index" }) { _, entry ->
                             when (entry) {
                                 is ScheduleEntry.Course -> {
                                     val s = entry.session

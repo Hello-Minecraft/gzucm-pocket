@@ -58,6 +58,14 @@ fun WeatherCard(
     refreshing: Boolean,
     error: String?,
     onLongPress: () -> Unit,
+    /**
+     * 没有数据时标题上写的地点。
+     *
+     * 有数据时用 [Weather.Info.city]（拉取时按用户选的地点写进去的）——
+     * 两者其实同源，只是在「正在拉 / 拉失败」这几秒里 info 还是空的，
+     * 那时候也得让用户看见「这是哪儿的天气」。
+     */
+    placeLabel: String = Weather.CityLabel,
 ) {
     val scheme = MaterialTheme.colorScheme
 
@@ -80,9 +88,12 @@ fun WeatherCard(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                Weather.CityLabel,
+                // 地点由用户在设置里选，不再是写死的「广州 · 三元里」
+                info?.city ?: placeLabel,
                 style = MaterialTheme.typography.bodySmall,
                 color = scheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.weight(1f))
             Text(

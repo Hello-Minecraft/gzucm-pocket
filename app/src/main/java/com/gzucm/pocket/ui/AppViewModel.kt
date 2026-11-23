@@ -262,9 +262,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (weatherJob?.isActive == true) return
         val last = state.weather?.fetchedAt ?: 0L
         if (!Weather.canRefresh(last, System.currentTimeMillis())) return
+        forceRefreshWeather()
+    }
+
+    /**
+     * 不管节流，立刻拉一次。
+     *
+     * 只给「用户刚换了天气地点」这一类**明确的意图**用：他自己点的，
+     * 就说明想看新地方的天气，拿一小时节流拦着只会让他以为没生效。
+     * 常态刷新的节流仍然在 [maybeRefreshWeather]，别在这里加例外。
+     */
+    fun forceRefreshWeather() {
+        if (!Weather.enabled) return
+        if (!store.todaySections.weather) return
+        if (weatherJob?.isActive == true) return
         weatherJob = viewModelScope.launch {
             state = state.copy(weatherRefreshing = true)
-            val info = Weather.fetch()
+            val info = Weather.fetch(placeStore.place)
             state = if (info == null) {
                 /*
                  * 失败不清旧数据：手里有一份一小时前的天气，
@@ -281,6 +295,29 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
+    /**
+     * 用户换了天气地点。
+     *
+     * 三件事必须一起做，少一样界面就是错的：
+     *   ① 存下来（下次启动还是这个地点）；
+     *   ② 丢掉缓存和卡片 —— 旧数据是**旧地方**的温度，
+     *      留着会出现「标题是深圳、温度是三元里」；
+     *   ③ 绕过节流立刻重拉，否则要等一小时才看到新地点。
+     *
+     * 定位失败的兜底不在这里：拿不到坐标时 UI 根本不会调这个方法。
+     */
+    fun onWeatherPlaceChanged(place: com.gzucm.pocket.core.WeatherPlace) {
+        placeStore.place = place
+        store.weatherCache = null
+        weatherJob?.cancel()
+        weatherJob = null
+        state = state.copy(weather = null, weatherRefreshing = false, weatherError = null)
+        forceRefreshWeather()
+    }
+
+    /** 设置页要显示的当前地点。直接读盘：SharedPreferences 不是可观察对象，不宜进 state */
+    fun weatherPlace(): com.gzucm.pocket.core.WeatherPlace = placeStore.place
 
     /**
      * 今日页显示配置变了。
@@ -1305,6 +1342,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * 下一次 ON_RESUME 就会再发一份请求，一小时一次的节流直接失效。
      */
     private var weatherJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * 天气地点（预设 / 当前位置）。
+     *
+     * 和 [weatherJob] 一样**必须声明在 init 之前**：bootstrap → loadWeather
+     * 一路会读它，晚于 init 的话那一刻它还是 null，会直接 NPE。
+     */
+    private val placeStore = com.gzucm.pocket.core.WeatherPlaceStore(getApplication())
 
     /** 当前周（1 起）。用户可手动校正，默认为按校历推算。 */
     var currentWeek by mutableStateOf(1)

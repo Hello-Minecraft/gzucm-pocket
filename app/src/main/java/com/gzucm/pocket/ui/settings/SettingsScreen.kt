@@ -90,6 +90,12 @@ fun SettingsScreen(
     onOpenFeedback: () -> Unit = {},
     /** 打开「今日页显示」子页面（电费 / 天气 / 接下来 / 本周概览 的开关 + 提前天数） */
     onOpenTodaySections: () -> Unit = {},
+    /** 当前天气地点名，显示在「天气位置」右侧 */
+    weatherPlaceLabel: String = com.gzucm.pocket.core.WeatherPlace.default.label,
+    /** 这个构建有没有天气服务（没配 key 时隐藏「天气位置」，否则是一个点进去也没用的入口） */
+    weatherAvailable: Boolean = com.gzucm.pocket.core.Weather.enabled,
+    /** 打开「天气位置」子页面（预设地点 + 使用当前位置） */
+    onOpenWeatherPlace: () -> Unit = {},
 ) {
     val scheme = MaterialTheme.colorScheme
     val scrollState = rememberScrollState()
@@ -197,6 +203,29 @@ fun SettingsScreen(
                 onOpenTodaySections,
                 hPadding = 14.dp,
             )
+
+            /*
+             * 天气位置。
+             *
+             * 和「今日页显示」同一张卡：两块都在回答「首页那张天气卡长什么样」。
+             * 点开是子页面（不是就地弹菜单）—— 里面还有「使用当前位置」这个
+             * 会等几秒的定位动作，塞在一个下拉里容易点错、也不好放失败提示。
+             *
+             * 没配天气服务时整行不出现：点进去选完地点、首页啥也没有，比不显示更糟。
+             */
+            if (weatherAvailable) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp)
+                        .height(0.7.dp)
+                        .background(scheme.onSurfaceVariant.copy(alpha = 0.14f)),
+                )
+                WeatherPlaceRow(
+                    value = weatherPlaceLabel,
+                    onClick = onOpenWeatherPlace,
+                )
+            }
         }
 
         Spacer(Modifier.height(16.dp))
@@ -563,10 +592,63 @@ private fun ActionRow(
     }
 }
 
-/** 与底部 Tab 顺序一致 */
-private val StartTabs = listOf("今日", "课表", "成绩", "电费")
-
 /**
+ * 「天气位置」那一行。
+ *
+ * 比普通 [ActionRow] 多两样东西：
+ *   · 右侧的当前地点名（否则用户点进去才知道现在选的是哪个）；
+ *   · 下面那句隐私说明 —— **不能省**。这一行背后是定位权限，
+ *     用户有权在点进去之前就知道坐标去哪了。
+ */
+@Composable
+private fun WeatherPlaceRow(
+    value: String,
+    onClick: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(AppIcons.Place, contentDescription = null, modifier = Modifier.size(19.dp))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("天气位置", fontSize = 13.5.sp)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    value,
+                    fontSize = 11.5.sp,
+                    color = scheme.primary,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Spacer(Modifier.height(2.dp))
+            Text(
+                "仅用于获取你所在位置的天气。坐标只保存在这台手机上，不会上传，我们服务器也不保存。",
+                fontSize = 10.5.sp,
+                lineHeight = 15.sp,
+                color = scheme.onSurfaceVariant.copy(alpha = 0.8f),
+            )
+        }
+        Spacer(Modifier.width(6.dp))
+        Icon(
+            AppIcons.ChevronRight,
+            contentDescription = null,
+            modifier = Modifier.size(17.dp),
+            tint = scheme.onSurfaceVariant.copy(alpha = 0.5f),
+        )
+    }
+}
+
+/** 与底部 Tab 顺序一致 */
+private val StartTabs = listOf("今日", "课表", "成绩", "电费")/**
  * 主题色色卡。
  *
  * 两行各 6 格：`默认 + 9 个预设 + 自定义` = 12 格，正好排满。

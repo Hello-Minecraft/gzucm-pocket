@@ -39,16 +39,14 @@ object Weather {
     const val MinIntervalMs: Long = 60L * 60L * 1000L
 
     /**
-     * 城市：广州（和风 location id）。
+     * 卡片标题上的默认地点名。
      *
-     * 故意不做定位、不做城市选择：这个 App 的用户就是三元里校区的学生，
-     * 申请定位权限换来的是「可能定位到宿舍隔壁那条街」，不值。
-     * 以后要做城市切换，把 [Location] 做成设置项即可，接口不用动。
+     * 以前这里是写死的常量「广州 · 三元里」。现在地点由用户在设置里选
+     * （见 [WeatherPlace]），卡片显示的是 [Info.city] —— 拉取时按当时选中的
+     * place 写进去的。这个属性只是把「默认地点叫什么」留给不关心地点的调用方
+     * （主要是不联网的截图测试），**不要拿它决定界面显示的内容**。
      */
-    private const val Location = "101280101"
-
-    /** 卡片标题上写的城市 */
-    const val CityLabel: String = "广州 · 三元里"
+    val CityLabel: String get() = WeatherPlace.default.label
 
     /**
      * 天气功能的开关。
@@ -143,12 +141,12 @@ object Weather {
     )
 
     /** 实时天气。失败（含 `code != 200`）返回 null，调用方保留旧数据 */
-    fun parseNow(raw: String, fetchedAt: Long): Info? = runCatching {
+    fun parseNow(raw: String, fetchedAt: Long, city: String = CityLabel): Info? = runCatching {
         val r = json.decodeFromString<Resp>(raw)
         if (r.code != "200") return null
         val n = r.now ?: return null
         Info(
-            city = CityLabel,
+            city = city,
             temp = n.temp.toIntOrNull() ?: return null,
             feelsLike = n.feelsLike.toIntOrNull() ?: n.temp.toIntOrNull() ?: 0,
             humidity = n.humidity.toIntOrNull() ?: 0,
@@ -251,29 +249,42 @@ object Weather {
      *
      * 两次请求（实时 + 7 天）分开做：实时失败就整条失败，
      * 预报失败只影响下方那排小字 —— 手里至少还有「现在多少度」。
+     *
+     * [place] 决定这次看哪儿。默认值保证老调用点（和不关心地点的测试）
+     * 行为不变：还是三元里。
      */
-    suspend fun fetch(): Info? = withContext(Dispatchers.IO) {
-        if (BuildConfig.WEATHER_BASE.isNotBlank()) fetchViaProxy() else fetchDirect()
-    }
+    suspend fun fetch(place: WeatherPlace = WeatherPlace.default): Info? =
+        withContext(Dispatchers.IO) {
+            if (BuildConfig.WEATHER_BASE.isNotBlank()) fetchViaProxy(place) else fetchDirect(place)
+        }
+
+    /**
+     * 坐标统一保留两位小数。
+     *
+     * 用 [Locale.US] 而不是默认 locale：德语/法语环境下 `String.format("%.2f")`
+     * 会输出 `23,16`，拼进 query 就是两个参数了。
+     */
+    private fun coord(v: Double): String = String.format(java.util.Locale.US, "%.2f", v)
 
     /**
      * 走自己的云函数（推荐）。
      *
      * 函数负责签 JWT、缓存、限流；App 这边只知道两个路径：
-     * `/weather/now` 和 `/weather/7d`。**城市也在服务端写死**，
-     * 客户端连 location 参数都不用传 —— 参数越少，能被滥用的面越小。
+     * `/weather/now` 和 `/weather/7d`，地点用 `lat`/`lon` 两个 query 参数给。
+     * 不传时服务端回落到默认城市（广州），所以老版本 App 也不会坏。
      */
-    private fun fetchViaProxy(): Info? {
+    private fun fetchViaProxy(place: WeatherPlace): Info? {
         val base = BuildConfig.WEATHER_BASE.trimEnd('/')
+        val query = "lat=${coord(place.lat)}&lon=${coord(place.lon)}"
         return try {
-            val nowRaw = getOrThrow("$base/weather/now", withAppToken = true)
-            val now = parseNow(nowRaw, System.currentTimeMillis())
+            val nowRaw = getOrThrow("$base/weather/now?$query", withAppToken = true)
+            val now = parseNow(nowRaw, System.currentTimeMillis(), place.label)
             if (now == null) {
                 lastError = "天气服务返回异常（${apiCodeOf(nowRaw) ?: "无 code"}）"
                 return null
             }
             val daysRaw = runCatching {
-                getOrThrow("$base/weather/7d", withAppToken = true)
+                getOrThrow("$base/weather/7d?$query", withAppToken = true)
             }.getOrNull().orEmpty()
             lastError = null
             withDays(now, parseDays(daysRaw))
@@ -296,17 +307,22 @@ object Weather {
      *
      * 保留这条路只为了「自己一个人用、懒得部署函数」的场景。
      * **JWT 模式走不通这里** —— JWT 需要 Ed25519 私钥现签，私钥不能进 APK。
+     *
+     * 和风的位置参数是 `location=经度,纬度` —— **经度在前**，和别家相反。
+     * 写反了不会报错，只会静默返回地球上另一个角落的天气（南海里），
+     * 所以这里把 lon 放在前面这件事有注释钉着。
      */
-    private suspend fun fetchDirect(): Info? = withContext(Dispatchers.IO) {
+    private suspend fun fetchDirect(place: WeatherPlace): Info? = withContext(Dispatchers.IO) {
 
         val key = BuildConfig.WEATHER_KEY
         if (key.isBlank()) {
             lastError = "未配置天气密钥"
             return@withContext null
         }
+        val loc = "${coord(place.lon)},${coord(place.lat)}"
         try {
-            val nowRaw = getOrThrow("${base()}/v7/weather/now?location=$Location&key=$key")
-            val now = parseNow(nowRaw, System.currentTimeMillis())
+            val nowRaw = getOrThrow("${base()}/v7/weather/now?location=$loc&key=$key")
+            val now = parseNow(nowRaw, System.currentTimeMillis(), place.label)
             if (now == null) {
                 lastError = apiCodeOf(nowRaw)?.let { code ->
                     if (code == "401" || code == "403") "天气服务未授权（key 或 host 不对）"
@@ -315,7 +331,7 @@ object Weather {
                 return@withContext null
             }
             val daysRaw = runCatching {
-                getOrThrow("${base()}/v7/weather/7d?location=$Location&key=$key")
+                getOrThrow("${base()}/v7/weather/7d?location=$loc&key=$key")
             }.getOrNull().orEmpty()
             lastError = null
             withDays(now, parseDays(daysRaw))
