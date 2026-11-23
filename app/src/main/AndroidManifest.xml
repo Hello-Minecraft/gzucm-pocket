@@ -19,18 +19,31 @@
     <!--
         天气地点里的「使用当前位置」。
 
-        **只要粗略定位**：天气按 0.01°（约 1 公里）取格点，精确到街道毫无意义，
-        而「精确位置」在系统弹窗上更容易让人警觉 —— 为一个天气卡不值。
+        ## 为什么 COARSE 和 FINE 都要声明
+
+        功能上只需要粗略定位：天气按 0.01°（约 1 公里）取格点，精确到街道毫无意义。
+
+        但**只声明 COARSE 时，部分国产 ROM（实测 HyperOS / MIUI 的机型）的
+        定位回调压根不触发**：系统状态栏的定位图标亮了，说明请求确实发出去了，
+        回调却永远不来，最后只能超时。这是 OEM 对「大致位置」请求的实现问题 ——
+        它拿不到满足内部精度要求的定位时既不给结果也不报错。
+
+        所以 FINE 在这里是**为了让回调能回来**，不是为了提高精度：
+        Android 12+ 的弹窗由用户自己选「精确 / 大致」，选「大致」时系统只给
+        COARSE 精度的坐标，功能一切正常（我们本来就只用这一级精度）。
+
+        ## 申请时机不变
 
         这个权限**不会在启动时申请**：只有用户在设置里点「使用当前位置」的那一刻，
-        才通过 RequestPermission 弹窗（见 ui/settings/WeatherPlaceSheet.kt）。
+        才通过 RequestMultiplePermissions 弹窗（见 ui/settings/WeatherPlaceSheet.kt）。
+        拿到 COARSE 就算通过（FINE 被拒不影响使用）；两个权限认一个即可。
         坐标只写本机 SharedPreferences，不上传、不写日志。
 
-        不要加 ACCESS_FINE_LOCATION / ACCESS_BACKGROUND_LOCATION：
-        前者会把权限弹窗升级成「精确位置」并暴露更细的坐标，
-        后者意味着退出 App 后还能定位 —— 这个功能一次都不需要。
+        仍然不要加 ACCESS_BACKGROUND_LOCATION：退出 App 后还能定位 ——
+        这个功能一次都不需要。
     -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
     <!--
         Android 11 起 App 默认看不到别的包。

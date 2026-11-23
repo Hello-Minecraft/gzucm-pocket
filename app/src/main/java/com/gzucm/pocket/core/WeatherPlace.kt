@@ -7,7 +7,7 @@ import android.content.Context
  *
  * ## 为什么坐标写死在代码里
  *
- * 四个预设都是「用户真正会待着的地方」——两个校区、两家实习医院。
+ * 五个预设都是「用户真正会待着的地方」——两个校区、深圳三处院区。
  * 写死的好处是：点一下就出天气，不用等定位、不申请任何权限，
  * 坐标也不会因为手机定位漂移而每天变一次。
  *
@@ -21,7 +21,7 @@ import android.content.Context
  * 多给的位数一个都不会被用上，存下来反而像是「我们在精确追踪你」。
  */
 data class WeatherPlace(
-    /** `sanyuanli` / `daxuecheng` / `baoan` / `sz` / `current` */
+    /** `sanyuanli` / `daxuecheng` / `baoan` / `szfutian` / `szguangming` / `current` */
     val id: String,
     /** 显示名。天气卡标题和设置页都用它 */
     val label: String,
@@ -42,12 +42,20 @@ data class WeatherPlace(
          * 预设地点。**顺序就是设置页里的顺序**，第一个是默认值。
          *
          * 默认必须还是三元里：老用户升级上来，天气卡一个字都不该变。
+         *
+         * id 用 `szfutian` / `szguangming` 而不是笼统的 `sz`：两家院区隔着
+         * 二十多公里，天气不一定一样；而且 id 一旦被存进
+         * SharedPreferences，就必须能唯一对应到一个固定的坐标，
+         * 含糊的 id 以后没法再拆。
          */
         val presets: List<WeatherPlace> = listOf(
             WeatherPlace("sanyuanli", "广中医三元里校区", 23.16, 113.26),
             WeatherPlace("daxuecheng", "广中医大学城校区", 23.05, 113.39),
             WeatherPlace("baoan", "深圳市宝安区中医院", 22.56, 113.88),
-            WeatherPlace("sz", "深圳市中医院", 22.54, 114.07),
+            // 福田区福华路 1 号：22.5366 / 114.0858
+            WeatherPlace("szfutian", "深圳市中医院（福田）", 22.54, 114.09),
+            // 光明区凤凰街道长圳路东 218 号：22.7252 / 113.9455
+            WeatherPlace("szguangming", "深圳市中医院（光明）", 22.73, 113.95),
         )
 
         val default: WeatherPlace = presets.first()
@@ -87,7 +95,7 @@ data class WeatherPlace(
  *
  * 四个字段分别存，坏了一个不至于整条读不出来；而且 [place] 的读取逻辑里
  * 有一层「存的 id 是预设就返回预设本身」的校正 —— 以后改预设坐标，
- * 老用户不用手动重新选一次。
+ * 老用户不用手动重新选一次。认不出的 id（被拆掉的老预设）回落到默认。
  */
 class WeatherPlaceStore(context: Context) {
 
@@ -98,6 +106,15 @@ class WeatherPlaceStore(context: Context) {
             val id = sp.getString(KEY_ID, null) ?: return WeatherPlace.default
             // 预设：直接给常量里那份（label/坐标都以代码为准，改预设能立刻生效）
             WeatherPlace.presetOf(id)?.let { return it }
+            /*
+             * 剩下的 id 只可能是「当前位置」。
+             *
+             * 其它 id 一律视为已下线的预设 —— 比如老的 `sz` 被拆成了
+             * `szfutian` / `szguangming`。老用户存着 `sz` 和当时那对坐标，
+             * 若按「自定义坐标」读回来，就会停在一个代码里已经不存在的院区上，
+             * 设置页里既没有勾、也改不了；回落到默认（三元里）才是可解释的状态。
+             */
+            if (id != WeatherPlace.CurrentId) return WeatherPlace.default
             // 自定义（当前位置）：必须存过坐标
             val lat = sp.getString(KEY_LAT, null)?.toDoubleOrNull() ?: return WeatherPlace.default
             val lon = sp.getString(KEY_LON, null)?.toDoubleOrNull() ?: return WeatherPlace.default

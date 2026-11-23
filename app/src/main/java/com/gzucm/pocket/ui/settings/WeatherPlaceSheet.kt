@@ -2,6 +2,7 @@ package com.gzucm.pocket.ui.settings
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -15,6 +16,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -32,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.gzucm.pocket.core.LocateResult
 import com.gzucm.pocket.core.WeatherLocation
 import com.gzucm.pocket.core.WeatherPlace
 import com.gzucm.pocket.ui.components.G3CornerShape
@@ -50,8 +54,11 @@ import java.util.Locale
  * 1. **权限只在点这一行时申请**。这个函数里 `askLocation.launch` 只出现在
  *    「使用当前位置」的点击回调里。启动、进入设置页、渲染这个列表，全都不申请、
  *    不检查（`checkSelfPermission` 也只在用户点了之后才调）。
- * 2. **只要粗略定位**。`ACCESS_COARSE_LOCATION` 就够了 —— 天气只要知道
- *    「在广州还是深圳」，精确到宿舍隔壁那条街没有任何用，反而更敏感。
+ * 2. **精度仍然只要粗略的**。天气只要知道「在广州还是深圳」，精确到宿舍隔壁
+ *    那条街没有任何用，反而更敏感。清单里同时声明了 `ACCESS_FINE_LOCATION`，
+ *    但那是为了让国产 ROM 的定位回调能回来（见 AndroidManifest 注释，
+ *    只声明 COARSE 时 HyperOS 上会出现「回调永远不来」），不是要提高精度；
+ *    判定通过与否也只看 COARSE。
  * 3. **坐标不出本机**。存进 SharedPreferences 后只作为天气请求的 `lat`/`lon`
  *    发出去（那是取天气必须给的），不写日志、不上传别处。
  *
@@ -75,11 +82,19 @@ fun WeatherPlaceContent(
     var locating by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    /** 只在用户点过之后才用得上的判断，**不要**放到启动路径里 */
-    fun coarseGranted(): Boolean =
+    /**
+     * 只在用户点过之后才用得上的判断，**不要**放到启动路径里。
+     *
+     * 两个权限认一个就算通过：功能上只需要 COARSE，但 FINE 单独被授予
+     * （或系统只回了 FINE）时没必要再弹一次窗 —— 系统给 FINE 必然连带 COARSE。
+     */
+    fun locationGranted(): Boolean =
         ContextCompat.checkSelfPermission(
             ctx, Manifest.permission.ACCESS_COARSE_LOCATION,
-        ) == PackageManager.PERMISSION_GRANTED
+        ) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(
+                ctx, Manifest.permission.ACCESS_FINE_LOCATION,
+            ) == PackageManager.PERMISSION_GRANTED
 
     // 定位：挂起函数，拿到坐标才回来。Dispatchers.IO 让整段离开主线程，
     // 回调本身仍然走系统给的主线程 Executor（不阻塞）
@@ -88,32 +103,67 @@ fun WeatherPlaceContent(
         locating = true
         error = null
         scope.launch {
-            val fix = withContext(Dispatchers.IO) { WeatherLocation.current(ctx) }
+            val result = withContext(Dispatchers.IO) { WeatherLocation.current(ctx) }
             locating = false
-            if (fix == null) {
-                // 超时 / 定位服务关着 / provider 不可用 —— 一句人话，不抛异常
-                error = "没拿到位置，换一个预设或者稍后再试"
-                return@launch
+            /*
+             * 按原因给不同的话：三种失败要用户做的事完全不一样
+             * （去开权限 / 去开系统定位 / 原地再试一次），
+             * 收敛成「没拿到位置」等于让用户自己猜。
+             */
+            when (result) {
+                is LocateResult.Ok -> {
+                    /*
+                     * 缓存位置（几分钟前的）照样用，但要告诉用户一声：
+                     * 否则「人明明到深圳了天气还是广州」会被当成 bug。
+                     * 这一页紧接着就会被上层关掉，没法在页内显示，用 Toast。
+                     */
+                    if (result.fromCache) {
+                        Toast.makeText(
+                            ctx, "刚才没定上，用的是上次定位的位置", Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                    onPick(WeatherPlace.ofCurrent(result.lat, result.lon))
+                }
+
+                LocateResult.NoPermission ->
+                    error = "没给定位权限。只在用这个功能时才需要它，不给也能选上面的预设"
+
+                LocateResult.ProviderDisabled ->
+                    error = "手机的定位服务是关着的，去系统设置里打开「位置信息」再回来试"
+
+                LocateResult.Timeout ->
+                    error = "定位超时了。室内或刚开定位时容易这样，再试一次或者选预设"
             }
-            onPick(WeatherPlace.ofCurrent(fix.latitude, fix.longitude))
         }
     }
 
     /*
-     * 权限结果回来：授权了才定位。
+     * 权限结果回来：两个权限认一个就定位（功能上只要 COARSE 精度）。
      * 拒绝就只提示 —— 不弹「去设置开启」的对话框，也不反复申请，
      * 用户不想要定位这件事本身是合理的，预设地点照样能用。
+     *
+     * 请求里带 FINE 不是为了提高精度，而是因为只声明 COARSE 时部分国产 ROM
+     * 的定位回调压根不触发（见 AndroidManifest 里的注释）；Android 12+ 的弹窗
+     * 由用户自己选「精确 / 大致」，选大致也算通过。
      */
     val askLocation = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
+        ActivityResultContracts.RequestMultiplePermissions()
     ) { granted ->
-        if (granted) startLocate()
-        else error = "没有位置权限。可以先用上面的预设地点，想用定位再到系统设置里开。"
+        // 两个认一个就算通过（功能上只需要 COARSE，FINE 被拒也能用）
+        val ok = granted[Manifest.permission.ACCESS_COARSE_LOCATION] == true ||
+            granted[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        if (ok) startLocate()
+        else error = "没给定位权限。只在用这个功能时才需要它，不给也能选上面的预设"
     }
 
     Column(
         Modifier
             .fillMaxWidth()
+            /*
+             * 五个预设 + 一行「当前位置」+ 错误提示，小屏（尤其开着大字体）
+             * 一屏放不下。加滚动而不是砍行数或写死高度：预设数量以后还会变。
+             */
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp)
             .padding(bottom = 26.dp),
     ) {
@@ -171,14 +221,21 @@ fun WeatherPlaceContent(
                 subtitle = if (current.isCurrent) {
                     "已使用定位：${coordText(current.lat)}, ${coordText(current.lon)}"
                 } else {
-                    "用手机定位取一次坐标，只申请粗略定位权限"
+                    // 不再写「只申请粗略定位」：清单里 COARSE/FINE 都声明了，
+                    // 系统弹窗会问一次，选「大致位置」就够用
+                    "用手机定位取一次坐标，系统会问一次位置权限"
                 },
                 selected = current.isCurrent,
                 enabled = !locating,
                 trailing = if (locating) "定位中…" else null,
             ) {
-                if (coarseGranted()) startLocate()
-                else askLocation.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
+                if (locationGranted()) startLocate()
+                else askLocation.launch(
+                    arrayOf(
+                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                    )
+                )
             }
         }
 
