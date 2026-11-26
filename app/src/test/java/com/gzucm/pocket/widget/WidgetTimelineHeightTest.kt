@@ -1,11 +1,15 @@
 package com.gzucm.pocket.widget
 
+import android.appwidget.AppWidgetManager
+import android.content.ComponentName
 import android.content.Context
+import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.FrameLayout
 import androidx.test.core.app.ApplicationProvider
 import com.gzucm.pocket.R
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -90,12 +94,36 @@ class WidgetTimelineHeightTest {
         root.layout(0, 0, w, h)
     }
 
-    /** 7 行全显示时每行分到多少：布局本身的上限，和 MAX_ROWS 无关 */
+    /** 7 行全显示时每行分到多少：布局本身的上限，和时间轴行数策略无关 */
     private fun measureAllSeven(heightDp: Int): List<Double> {
         val root = LayoutInflater.from(context)
             .inflate(R.layout.widget_timeline, FrameLayout(context), false)
         layoutAt(root, heightDp)
         return rowIds.map { px2dp(root.findViewById<View>(it).height) }
+    }
+
+    /**
+     * 注册一个带格子高度的部件实例，让 Provider 的 maxRows 读到宿主给的值。
+     *
+     * 生产路径读的是 `getAppWidgetOptions(id).getInt(OPTION_APPWIDGET_MIN_HEIGHT)`，
+     * 所以测试必须把 options 真的写进 ShadowAppWidgetManager，不能直接传行数 ——
+     * 否则测的就不是「高度 → 行数」这条链路了。
+     */
+    @Suppress("DEPRECATION") // putWidgetInfo 是 Robolectric 的公开登记入口，没有替代品
+    private fun widgetWithHeight(heightDp: Int): Int {
+        val mgr = AppWidgetManager.getInstance(context)
+        val id = 900 + heightDp
+        val info = android.appwidget.AppWidgetProviderInfo().apply {
+            provider = ComponentName(context, TimelineWidget::class.java)
+        }
+        org.robolectric.Shadows.shadowOf(mgr).putWidgetInfo(id, info)
+        mgr.updateAppWidgetOptions(
+            id,
+            Bundle().apply {
+                putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, heightDp)
+            },
+        )
+        return id
     }
 
     private data class Shot(
@@ -110,9 +138,9 @@ class WidgetTimelineHeightTest {
             get() = visible.filter { sideNeed[it] > rows[it] + 0.5 }
     }
 
-    /** 走 Provider 的真实渲染路径（含 MAX_ROWS 截断） */
+    /** 走 Provider 的真实渲染路径（含按宿主高度算出的行数截断） */
     private fun measureWidget(heightDp: Int): Shot {
-        val views = TimelineWidget().build(context, 1, sevenCourses(), now)
+        val views = TimelineWidget().build(context, widgetWithHeight(heightDp), sevenCourses(), now)
         val root = views.apply(context, FrameLayout(context))
             ?: error("widget_timeline inflate 失败")
         layoutAt(root, heightDp)
@@ -172,19 +200,29 @@ class WidgetTimelineHeightTest {
     }
 
     @Test
-    fun `MAX_ROWS的超额课不参与高度分配`() {
-        val shot = measureWidget(180)
-        // 前 MAX_ROWS 行有高度，其余 GONE（高度 0），不能留半截空行
-        assertEqualsNull(shot.rows.drop(TimelineWidget.MAX_ROWS))
+    fun `行数由宿主高度决定_180dp四行_267dp七行`() {
+        assertEquals(4, WidgetRender.timelineRowsFor(180))
+        assertEquals(7, WidgetRender.timelineRowsFor(267))
+
+        val shot180 = measureWidget(180)
+        // 180dp 只放得下 4 行：第 5 行起必须 GONE（高度 0），不能留半截空行
+        assertEqualsNull(shot180.rows.drop(4))
         assertTrue(
-            "MAX_ROWS=${TimelineWidget.MAX_ROWS} 但 180dp 下只画出 ${shot.visible.size} 行",
-            shot.visible.size == TimelineWidget.MAX_ROWS,
+            "180dp 应画 4 行，实际 ${shot180.visible.size} 行",
+            shot180.visible.size == 4,
+        )
+
+        val shot267 = measureWidget(267)
+        // 267dp 是小米 14 的 4x3 格：7 门课全都要显示，不能还停在 4 行
+        assertTrue(
+            "267dp 应画 7 行，实际 ${shot267.visible.size} 行",
+            shot267.visible.size == 7,
         )
     }
 
     private fun assertEqualsNull(rest: List<Double>) {
         rest.forEach {
-            assertTrue("超出 MAX_ROWS 的行还占着 ${"%.1f".format(it)}dp", it == 0.0)
+            assertTrue("超出已算行数的行还占着 ${"%.1f".format(it)}dp", it == 0.0)
         }
     }
 }

@@ -15,6 +15,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
@@ -33,6 +34,7 @@ import com.gzucm.pocket.ui.grades.GradesScreen
 import com.gzucm.pocket.ui.power.PowerScreen
 import com.gzucm.pocket.ui.schedule.ScheduleScreen
 import com.gzucm.pocket.ui.theme.GzucmTheme
+import com.gzucm.pocket.widget.WidgetSnapshot
 import com.gzucm.pocket.ui.today.TodayScreen
 import org.junit.Rule
 import androidx.compose.foundation.layout.padding
@@ -1166,6 +1168,101 @@ class ScreenshotTest {
                 lastSyncText = "10-30 12:05",
                 semesterText = "2026-2027 学年 第一学期",
             )
+        }
+    }
+
+    /**
+     * 添加到桌面小组件教程页（2026-11-26）。
+     *
+     * 两个角度各拍一张：顶部是四家机型的操作路径，往下一张是尺寸预览 ——
+     * 预览用的就是上面这份课表快照，和用户在桌面上看到的是同一套数据。
+     */
+    @Test
+    fun widgetGuideTop() {
+        saveWidgetSnapshot()
+        shot("17_widget_guide_top") {
+            com.gzucm.pocket.ui.settings.WidgetGuideScreen()
+        }
+    }
+
+    @Test
+    fun widgetGuidePreview() {
+        saveWidgetSnapshot()
+        shot(
+            "18_widget_guide_preview",
+            scrollUp = 3,
+            prepare = {
+                rule.onNodeWithText("4×3 今日课程").performScrollTo().performClick()
+            },
+        ) {
+            com.gzucm.pocket.ui.settings.WidgetGuideScreen()
+        }
+    }
+
+    /**
+     * 把一周的课写进部件快照：教程页读的是这份，不是上面 week=8 的演示课表。
+     *
+     * 七个星期都写，三日 / 周视图才有东西可看；最后加一节晚上 21:00 的课，
+     * 无论什么时候跑截图，4x3 时间轴至少有一行是「正在上」（能看出加粗和 26% 底）。
+     */
+    private fun saveWidgetSnapshot() {
+        val ctx = androidx.test.core.app.ApplicationProvider
+            .getApplicationContext<android.content.Context>()
+        val today = LocalDate.now()
+        val week = semester.weekOf(today).coerceAtLeast(1)
+        val all = (1..7).flatMap { wd ->
+            listOf(
+                s("中医诊断学", wd, 1, 2, "08:30", "10:00", "综教楼101", week = week),
+                s("中药学", wd, 3, 4, "10:20", "11:50", "综教楼203", week = week),
+                s("方剂学", wd, 5, 6, "12:00", "13:30", "综教楼305", week = week),
+                s("中医骨伤科学", wd, 7, 8, "13:40", "15:10", "骨伤楼201", week = week),
+                s("外科学", wd, 9, 10, "15:20", "16:50", "综教楼401", week = week),
+                s("针灸学", wd, 11, 11, "17:00", "17:40", "针推楼102", week = week),
+                s("推拿学", wd, 12, 12, "21:00", "23:59", "针推楼203", week = week),
+            )
+        }
+        WidgetSnapshot.save(ctx, semester, all)
+    }
+
+    @Test
+    fun widgetGuideWide() {
+        saveWidgetSnapshot()
+        shot(
+            "21_widget_guide_wide",
+            scrollUp = 3,
+            prepare = {
+                rule.onNodeWithText("4×2 今日+地点").performScrollTo().performClick()
+            },
+        ) {
+            com.gzucm.pocket.ui.settings.WidgetGuideScreen()
+        }
+    }
+
+    @Test
+    fun widgetGuideThreeDays() {
+        saveWidgetSnapshot()
+        shot(
+            "19_widget_guide_three_days",
+            scrollUp = 3,
+            prepare = {
+                rule.onNodeWithText("4×3 三日").performScrollTo().performClick()
+            },
+        ) {
+            com.gzucm.pocket.ui.settings.WidgetGuideScreen()
+        }
+    }
+
+    @Test
+    fun widgetGuideWeek() {
+        saveWidgetSnapshot()
+        shot(
+            "20_widget_guide_week",
+            scrollUp = 3,
+            prepare = {
+                rule.onNodeWithText("4×3 周视图").performScrollTo().performClick()
+            },
+        ) {
+            com.gzucm.pocket.ui.settings.WidgetGuideScreen()
         }
     }
 

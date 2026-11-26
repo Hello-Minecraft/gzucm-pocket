@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 4x3 今日课程：一门课一行（最多 4 门），右侧地点 / 老师。250×180dp = 4×3 格
+<!-- 4x3 今日课程：一门课一行，右侧地点 / 老师。250×180dp = 4×3 格
      为什么 4x3 而不是 4x4：4x4 在小米 14 上渲染成 330×357dp，每行 78dp，空得发慌。
-     180dp 最坏情况下 4 行各约 33dp，右侧「地点 + 老师」两行文字 28.5dp 刚好装得下；
-     7 行时每行只有 18dp，文字会被裁，所以 Provider 的 MAX_ROWS 收到 4。 -->
+     行数不写死：Provider 读宿主的 OPTION_APPWIDGET_MIN_HEIGHT 现算，
+     180dp → 4 行（每行约 33.5dp），267dp（小米 14 的 4x3 格）→ 7 行（每行约 30.5dp），
+     每行不低于 30dp 才不会裁掉右侧「地点 + 老师」两行文字（WidgetTimelineHeightTest 量过）。 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:initialLayout="@layout/widget_timeline"
     android:minWidth="250dp"

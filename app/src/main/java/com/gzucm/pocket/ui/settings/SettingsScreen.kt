@@ -93,6 +93,8 @@ fun SettingsScreen(
     onOpenFeedback: () -> Unit = {},
     /** 打开「今日页显示」子页面（电费 / 天气 / 接下来 / 本周概览 的开关 + 提前天数） */
     onOpenTodaySections: () -> Unit = {},
+    /** 打开「添加到桌面小组件」教程页（各机型步骤 + 尺寸预览） */
+    onOpenWidgetGuide: () -> Unit = {},
     /** 当前天气地点名，显示在「天气位置」右侧 */
     weatherPlaceLabel: String = com.gzucm.pocket.core.WeatherPlace.default.label,
     /** 这个构建有没有天气服务（没配 key 时隐藏「天气位置」，否则是一个点进去也没用的入口） */
@@ -482,6 +484,31 @@ fun SettingsScreen(
         }
 
         /*
+         * 添加到桌面小组件（教程）。
+         *
+         * 位置：紧跟「导出课表数据」那张操作卡之后、问题反馈之前。
+         * 这两个入口是同一类 ——「把课表带到 App 外面去」（一个导文件、一个放桌面），
+         * 摆在一起用户找的时候不用上下翻。
+         *
+         * 为什么需要一整页：六个部件都是标准安卓小部件，大部分 ROM 把它们埋在
+         * 「全部应用 → 安卓小组件」最底部，用户按「添加卡片」的直觉根本翻不到。
+         */
+        Spacer(Modifier.height(16.dp))
+
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .micaPanel(14.dp),
+        ) {
+            ActionRow(
+                "添加到桌面小组件",
+                AppIcons.GridView,
+                onOpenWidgetGuide,
+                subtitle = "各机型操作步骤 + 尺寸预览",
+            )
+        }
+
+        /*
          * 云母化（2026-11-19）：这张卡原来**紧贴**上面的操作卡，中间没有间距 ——
          * 两张同色 surface 贴在一起，看起来像一张卡的下半部分。
          * 现在每张卡都带阴影，紧贴会让两圈阴影在缝里叠成一条黑线，
@@ -848,6 +875,8 @@ private fun ActionRow(
     danger: Boolean = false,
     /** 右侧的小提示（如「检测到新版本」），红点 + 主色字 */
     badge: String? = null,
+    /** 第二行说明。只有需要解释「点进去能干什么」的入口才填 */
+    subtitle: String? = null,
     /**
      * 水平内边距。默认 16dp。
      *
@@ -867,7 +896,20 @@ private fun ActionRow(
     ) {
         Icon(icon, contentDescription = null, modifier = Modifier.size(19.dp), tint = tint)
         Spacer(Modifier.width(12.dp))
-        Text(label, fontSize = 13.5.sp, color = tint, modifier = Modifier.weight(1f))
+        if (subtitle == null) {
+            Text(label, fontSize = 13.5.sp, color = tint, modifier = Modifier.weight(1f))
+        } else {
+            Column(Modifier.weight(1f)) {
+                Text(label, fontSize = 13.5.sp, color = tint)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    subtitle,
+                    fontSize = 10.5.sp,
+                    lineHeight = 15.sp,
+                    color = scheme.onSurfaceVariant.copy(alpha = 0.8f),
+                )
+            }
+        }
         if (badge != null) {
             // 小红点跟首页设置按钮上那颗呼应，一眼能串起来「就是那个更新」
             Box(

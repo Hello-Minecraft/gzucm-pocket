@@ -14,6 +14,12 @@ import java.time.temporal.ChronoUnit
 const val WeekRowHeightDp = 24
 
 /**
+ * 4x3 时间轴声明的 `minHeight`。宿主拿不到 `OPTION_APPWIDGET_MIN_HEIGHT`
+ * （options 还没写、或某些 ROM 返回空）时按它算行数，和以前行为一致。
+ */
+const val TimelineMinHeightDp = 180
+
+/**
  * 周视图固定 12 节。
  *
  * **不能按当天有几节课来定行数**：ListView 的 setScrollPosition 收的是行号，
@@ -532,6 +538,26 @@ object WidgetRender {
         )
 
         return TodayList(remaining.take(max).map(::row), null)
+    }
+
+    /**
+     * 4x3 时间轴按**宿主实际给的格子高度**算最多画几门课。
+     *
+     * 宿主给的格子和声明的 minHeight 不是一个数：4x3 声明 180dp，小米 14 上
+     * 实际是 267dp。以前固定 4 行，课多的日子会白藏 2~3 门。
+     *
+     * 高度账（和 widget_timeline.xml 对齐）：
+     *   上下 padding 10dp×2 + 表头 14dp + 表头下间隔 6dp = 42dp 不参与分行；
+     *   每行最少 30dp —— 右侧「地点 + 老师」两行文字自然高 28.5dp，
+     *   再矮就会被 LinearLayout 裁掉（WidgetTimelineHeightTest 量过）。
+     *
+     * 结果钳在 4..7：最少 4（少课的日子卡片不高过 1/4 格），最多 7（布局只有 7 个槽位）。
+     *
+     * 180 → 4、220 → 5、267 → 7；[heightDp] <= 0（宿主还没量过）按 180 处理。
+     */
+    fun timelineRowsFor(heightDp: Int): Int {
+        val h = if (heightDp <= 0) TimelineMinHeightDp else heightDp
+        return ((h - 42) / 30).coerceIn(4, 7)
     }
 
     /**

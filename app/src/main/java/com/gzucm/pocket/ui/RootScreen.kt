@@ -507,6 +507,8 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
     var showFeedback by remember { mutableStateOf(false) }
     // 「今日页显示」子页面（电费 / 天气 / 接下来 / 本周概览 开关 + 提前天数）
     var showTodaySectionsInSettings by remember { mutableStateOf(false) }
+    // 「添加到桌面小组件」教程页（各机型步骤 + 尺寸预览），和关于页同一层级
+    var showWidgetGuide by remember { mutableStateOf(false) }
     /*
      * 天气地点。
      *
@@ -1109,6 +1111,7 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 showAbout = false
                 showExport = false
                 showTodaySectionsInSettings = false
+                showWidgetGuide = false
                 showWeatherPlaceInSettings = false
                 showSettings = false
             },
@@ -1119,6 +1122,7 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 showExport -> "导出课表"
                 showTodaySectionsInSettings -> "今日页显示"
                 showWeatherPlaceInSettings -> "天气位置"
+                showWidgetGuide -> "添加到桌面小组件"
                 else -> "设置"
             },
             // 设置页和关于页正文自带 verticalScroll，这里必须关掉
@@ -1137,7 +1141,7 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
              */
             androidx.activity.compose.BackHandler(
                 enabled = showAbout || showDonate || showExport || showFeedback ||
-                    showTodaySectionsInSettings || showWeatherPlaceInSettings,
+                    showTodaySectionsInSettings || showWeatherPlaceInSettings || showWidgetGuide,
             ) {
                 showAbout = false
                 showDonate = false
@@ -1145,6 +1149,7 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 showFeedback = false
                 showTodaySectionsInSettings = false
                 showWeatherPlaceInSettings = false
+                showWidgetGuide = false
             }
             if (showFeedback) {
                 com.gzucm.pocket.ui.settings.FeedbackSheet(
@@ -1312,6 +1317,12 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
              * 选中之后：先落 state（让设置页那行的名字立刻变），再交给 ViewModel
              * 存盘 + 清缓存 + 绕过节流重拉；最后关掉这一页。
              */
+            if (showWidgetGuide) {
+                com.gzucm.pocket.ui.settings.WidgetGuideScreen(
+                    onBack = { showWidgetGuide = false },
+                )
+                return@AdaptiveSheet
+            }
             if (showWeatherPlaceInSettings) {
                 com.gzucm.pocket.ui.settings.WeatherPlaceContent(
                     current = weatherPlace,
@@ -1360,6 +1371,7 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                  * 「太长就导出为 json，发文件就可以」—— 于是入口改成先让他选。
                  */
                 onOpenExport = { showExport = true },
+                onOpenWidgetGuide = { showWidgetGuide = true },
                 onOpenTodaySections = { showTodaySectionsInSettings = true },
                 weatherPlaceLabel = weatherPlace.label,
                 weatherAvailable = com.gzucm.pocket.core.Weather.enabled,

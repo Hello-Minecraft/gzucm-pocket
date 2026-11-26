@@ -59,10 +59,20 @@ abstract class BaseWidgetProvider : AppWidgetProvider() {
     /** 空间太紧张的不放刷新图标（2x1、2x2） */
     protected open val hasRefresh: Boolean get() = true
 
+    /**
+     * 这个实例最多画几行/几门课。默认不限 —— 只有内容随格子高度变化的部件
+     * （目前是 4x3 时间轴）才需要覆盖。
+     *
+     * 为什么是「每次 bind 现算」而不是构造时算一次：宿主改了格子尺寸只回调
+     * [onAppWidgetOptionsChanged]，本类会重新 [push]，现算才能拿到新值。
+     */
+    protected open fun maxRows(context: Context, appWidgetId: Int): Int = Int.MAX_VALUE
+
     /** 把快照渲染进 RemoteViews。实现里只做 set 调用，不要做 IO */
     protected abstract fun bind(
         views: RemoteViews,
         context: Context,
+        appWidgetId: Int,
         snapshot: WidgetSnapshotData?,
         now: LocalDateTime,
     )
@@ -171,7 +181,7 @@ abstract class BaseWidgetProvider : AppWidgetProvider() {
         now: LocalDateTime,
     ): RemoteViews {
         val views = RemoteViews(context.packageName, layoutId)
-        runCatching { bind(views, context, snapshot, now) }
+        runCatching { bind(views, context, appWidgetId, snapshot, now) }
             .onFailure { android.util.Log.w(TAG, "渲染 ${javaClass.simpleName} 失败", it) }
         runCatching { afterBind(views, context, appWidgetId, snapshot, now) }
             .onFailure { android.util.Log.w(TAG, "绑定 ${javaClass.simpleName} 的后续内容失败", it) }
@@ -341,6 +351,7 @@ class CurrentCourseWidget : BaseWidgetProvider() {
     override fun bind(
         views: RemoteViews,
         context: Context,
+        appWidgetId: Int,
         snapshot: WidgetSnapshotData?,
         now: LocalDateTime,
     ) {
@@ -376,6 +387,7 @@ class TodayWidget : BaseWidgetProvider() {
     override fun bind(
         views: RemoteViews,
         context: Context,
+        appWidgetId: Int,
         snapshot: WidgetSnapshotData?,
         now: LocalDateTime,
     ) {
@@ -428,6 +440,7 @@ class TodayHorizontalWidget : BaseWidgetProvider() {
     override fun bind(
         views: RemoteViews,
         context: Context,
+        appWidgetId: Int,
         snapshot: WidgetSnapshotData?,
         now: LocalDateTime,
     ) {
@@ -475,28 +488,48 @@ class TodayHorizontalWidget : BaseWidgetProvider() {
 // ── 4x3 今日课程（课程条目）────────────────────────────────────────────
 
 /**
- * 一门课一行，最多 4 门；已上完的课不占位。
+ * 一门课一行；显示几行**由宿主实际给的格子高度决定**（[maxRows]）。
  *
  * 行高靠 weight 分配：前 n 行 VISIBLE，接着到 [WidgetRender.widgetRowsToAllot]
- * 行 INVISIBLE（不画但**仍参与分配**），其余 GONE（不参与）。这样 1~4 门课时
- * 卡片只占四分之一到一半高度，不会被一门课撑成一整块。
+ * 行 INVISIBLE（不画但**仍参与分配**），其余 GONE（不参与）。这样少课的
+ * 日子卡片只占四分之一到一半高度，不会被一门课撑成一整块。
  *
- * 上限 4 而不是 7：4x3 最坏只有 180dp，7 行每行 18dp，右侧「地点 + 老师」
- * 两行文字（28.5dp）会被裁；4 行时每行 33dp 才装得下（WidgetTimelineHeightTest 量过）。
+ * 为什么不再固定 4 行：4x3 声明的 minHeight 是 180dp，但小米 14 上宿主实际
+ * 给 267dp —— 本来放得下 7 行（每行 30.5dp），固定 4 行会把当天第 5~7 门藏掉。
+ * 现在按 `(高 - 42) / 30` 现算再钳到 4..7，见 [WidgetRender.timelineRowsFor]。
  */
 class TimelineWidget : BaseWidgetProvider() {
 
     override val layoutId = R.layout.widget_timeline
 
+    /**
+     * 竖屏取 `OPTION_APPWIDGET_MIN_HEIGHT`；取不到 / <= 0 回退 180dp。
+     *
+     * 不用 MAX_HEIGHT：竖屏下宿主的 max 是「宽和高里较大的那个」，
+     * 4x3 的 267×253 会拿到 267 之外的值，行数算出来不对。
+     */
+    override fun maxRows(context: Context, appWidgetId: Int): Int {
+        val h = runCatching {
+            AppWidgetManager.getInstance(context)
+                .getAppWidgetOptions(appWidgetId)
+                .getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0)
+        }.getOrDefault(0)
+        val rows = WidgetRender.timelineRowsFor(h)
+        // 真机上核对宿主到底给了多少 dp —— 这个数只信 logcat，别信文档
+        android.util.Log.d("WidgetProvider", "今日课程行数=$rows 高度=${h}dp")
+        return rows
+    }
+
     override fun bind(
         views: RemoteViews,
         context: Context,
+        appWidgetId: Int,
         snapshot: WidgetSnapshotData?,
         now: LocalDateTime,
     ) {
         views.setTextViewText(R.id.widget_header, WidgetRender.header(snapshot, now.toLocalDate()))
 
-        val data = WidgetRender.todayCourses(snapshot, now, MAX_ROWS)
+        val data = WidgetRender.todayCourses(snapshot, now, maxRows(context, appWidgetId))
         if (data.emptyText != null) {
             ROW_IDS.forEach { views.setViewVisibility(it, View.GONE) }
             views.setViewVisibility(R.id.widget_empty, View.VISIBLE)
@@ -565,9 +598,6 @@ class TimelineWidget : BaseWidgetProvider() {
     }
 
     internal companion object {
-        /** 时间轴最多画几门课；4x3（180dp）下高度只够 4 行（每行约 33dp） */
-        const val MAX_ROWS = 4
-
         val ROW_IDS = intArrayOf(
             R.id.tl1, R.id.tl2, R.id.tl3, R.id.tl4,
             R.id.tl5, R.id.tl6, R.id.tl7,
@@ -619,6 +649,7 @@ class ThreeDaysWidget : BaseWidgetProvider() {
     override fun bind(
         views: RemoteViews,
         context: Context,
+        appWidgetId: Int,
         snapshot: WidgetSnapshotData?,
         now: LocalDateTime,
     ) {
@@ -757,6 +788,7 @@ class WeekWidget : BaseWidgetProvider() {
     override fun bind(
         views: RemoteViews,
         context: Context,
+        appWidgetId: Int,
         snapshot: WidgetSnapshotData?,
         now: LocalDateTime,
     ) {

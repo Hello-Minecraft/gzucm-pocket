@@ -506,6 +506,23 @@ class WidgetRenderTest {
         assertEquals(7, WidgetRender.widgetRowsToAllot(8))
     }
 
+    @Test
+    fun `4x3_时间轴行数按格子高度算出4到7行`() {
+        // 内容区 = 高 - 42（上下 padding 20 + 表头 14 + 间隔 8），每行至少 30dp
+        assertEquals(4, WidgetRender.timelineRowsFor(150))
+        assertEquals(4, WidgetRender.timelineRowsFor(180))
+        assertEquals(5, WidgetRender.timelineRowsFor(220))
+        assertEquals(7, WidgetRender.timelineRowsFor(267))
+        assertEquals(7, WidgetRender.timelineRowsFor(400))
+        // 宿主还没量过（0 / 负数）按声明的 180dp 处理，不能算出 0 行
+        assertEquals(4, WidgetRender.timelineRowsFor(0))
+        assertEquals(4, WidgetRender.timelineRowsFor(-1))
+        assertEquals(4, WidgetRender.timelineRowsFor(191))
+        assertEquals(5, WidgetRender.timelineRowsFor(192))
+        assertEquals(6, WidgetRender.timelineRowsFor(240))
+        assertEquals(7, WidgetRender.timelineRowsFor(252))
+    }
+
     // ── 4x3 周视图 ────────────────────────────────────────────────
 
     @Test
