@@ -54,7 +54,6 @@ import com.gzucm.pocket.widget.WidgetRender
 import com.gzucm.pocket.widget.WidgetSnapshot
 import com.gzucm.pocket.widget.WidgetSnapshotData
 import java.time.LocalDateTime
-import kotlin.math.min
 
 /**
  * 「添加到桌面小组件」教程页。
@@ -228,7 +227,8 @@ fun WidgetGuideScreen(onBack: () -> Unit = {}) {
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            "预览按真机比例缩放，实际显示以桌面为准。添加时把部件拖到桌面上，大小还能拖动边缘调整。",
+            "预览按真机比例缩放（2×2 的格子只有 4×3 一半宽，桌面上也是这样），实际显示以桌面为准。" +
+                "添加时把部件拖到桌面上，还能拖动边缘调整大小。",
             fontSize = 10.5.sp,
             lineHeight = 15.sp,
             color = scheme.onSurfaceVariant.copy(alpha = 0.75f),
@@ -305,11 +305,21 @@ private val MachineGuides = listOf(
 // ── 预览容器 ────────────────────────────────────────────────────────────
 
 /**
- * 「桌面」底板 + 等比缩放后的部件。
+ * 六个尺寸共用的预览缩放系数。
  *
- * 缩放 = `min(2.4, 330 / 部件宽)`：2x1 只有 150dp 宽，放大 2.2 倍才看得清文字；
- * 4x3 是 350dp，0.94 倍正好铺满内容宽 330dp。两种都居中放，
- * 外面这圈淡边框表示「桌面上的那一格」。
+ * 按**最大的 4 列（350dp）铺满内容宽 330dp** 算：330 / 350 ≈ 0.94。
+ *
+ * 关键是**不能按各自宽度分别铺满**（以前是 `min(2.4, 330 / 部件宽)`）：那样
+ * 2 列 150dp 会被放大 2.2 倍、4 列 350dp 缩到 0.94 倍，屏幕上两块一样宽，
+ * 2×2 反而显得比 4×3 还大，跟桌面上的真实比例完全不符。
+ * 共用一个系数后，2 列显示 141dp、4 列 330dp，正好是桌面上「一半宽」的关系。
+ */
+private val PreviewScale = 330f / 350f
+
+/**
+ * 「桌面」底板 + 按 [PreviewScale] 缩放后的部件。
+ *
+ * 所有尺寸都居中放，外面这圈淡边框表示「桌面上的那一格」。
  */
 @Composable
 private fun PreviewFrame(
@@ -319,7 +329,7 @@ private fun PreviewFrame(
 ) {
     val scheme = MaterialTheme.colorScheme
     val empty = snapshot == null || snapshot.sessions.isEmpty()
-    val scale = min(2.4f, 330f / variant.widthDp)
+    val scale = PreviewScale
     val w = variant.widthDp * scale
     val h = variant.heightDp * scale
 
