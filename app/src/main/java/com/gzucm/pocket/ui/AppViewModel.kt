@@ -290,7 +290,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     weatherError = Weather.lastError ?: "天气暂时取不到",
                 )
             } else {
-                Weather.save(store, info)
+                Weather.save(getApplication(), store, info)
                 state.copy(weather = info, weatherRefreshing = false, weatherError = null)
             }
         }
@@ -1318,6 +1318,65 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         reschedule()
+    }
+
+    // ── 天气提醒 ────────────────────────────────────────────────────────
+    //
+    // 早晨 / 晚上两条独立提醒，各自有开关和时间。声明成 Compose 状态，
+    // 否则改完 prefs 界面不重组，Switch 和滚轮都停在旧值上。
+    //
+    // 时间和开关一样是「改了就生效」：没有保存按钮，改完立刻重排闹钟。
+
+    private val alertStore = com.gzucm.pocket.core.WeatherAlertStore(getApplication())
+
+    var weatherMorningOn by mutableStateOf(alertStore.morningOn)
+        private set
+    var weatherMorningTime by mutableStateOf(alertStore.morningTime)
+        private set
+    var weatherEveningOn by mutableStateOf(alertStore.eveningOn)
+        private set
+    var weatherEveningTime by mutableStateOf(alertStore.eveningTime)
+        private set
+
+    fun setWeatherMorning(on: Boolean) {
+        weatherMorningOn = on
+        alertStore.morningOn = on
+        rescheduleWeatherAlert()
+    }
+
+    fun changeWeatherMorningTime(hhmm: String) {
+        if (hhmm == weatherMorningTime) return
+        weatherMorningTime = hhmm
+        alertStore.morningTime = hhmm
+        rescheduleWeatherAlert()
+    }
+
+    fun setWeatherEvening(on: Boolean) {
+        weatherEveningOn = on
+        alertStore.eveningOn = on
+        rescheduleWeatherAlert()
+    }
+
+    fun changeWeatherEveningTime(hhmm: String) {
+        if (hhmm == weatherEveningTime) return
+        weatherEveningTime = hhmm
+        alertStore.eveningTime = hhmm
+        rescheduleWeatherAlert()
+    }
+
+    /**
+     * 重排天气提醒。丢到 IO 线程：里面要读 prefs + 两次 AlarmManager 的 binder 调用，
+     * 不该占着点开关/滚时间那一帧。
+     *
+     * [com.gzucm.pocket.core.WeatherAlert.schedule] 内部是「先全撤再按开关排」，
+     * 所以关掉一个开关时自然也把那条撤销了，不用在这里分情况。
+     */
+    private fun rescheduleWeatherAlert() {
+        val app = getApplication<android.app.Application>()
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { com.gzucm.pocket.core.WeatherAlert.schedule(app) }
+                .onFailure { android.util.Log.w("WeatherAlert", "重排失败", it) }
+        }
     }
 
     private val store = Graph.store

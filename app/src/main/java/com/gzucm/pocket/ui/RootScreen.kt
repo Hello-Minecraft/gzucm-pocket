@@ -1391,6 +1391,25 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                         }
                     }
                 },
+                weatherMorning = vm.weatherMorningOn,
+                onWeatherMorningChange = { on ->
+                    vm.setWeatherMorning(on)
+                    // 开着却发不出通知 = 白开；和上课提醒一样，点开就顺手要权限
+                    if (on && !notifyGranted()) askNotify.launch(
+                        android.Manifest.permission.POST_NOTIFICATIONS
+                    )
+                },
+                weatherMorningTime = vm.weatherMorningTime,
+                onWeatherMorningTimeChange = { vm.changeWeatherMorningTime(it) },
+                weatherEvening = vm.weatherEveningOn,
+                onWeatherEveningChange = { on ->
+                    vm.setWeatherEvening(on)
+                    if (on && !notifyGranted()) askNotify.launch(
+                        android.Manifest.permission.POST_NOTIFICATIONS
+                    )
+                },
+                weatherEveningTime = vm.weatherEveningTime,
+                onWeatherEveningTimeChange = { vm.changeWeatherEveningTime(it) },
             )
         }
     }

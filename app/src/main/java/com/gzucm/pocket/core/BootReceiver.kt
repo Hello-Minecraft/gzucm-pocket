@@ -34,6 +34,9 @@ class BootReceiver : BroadcastReceiver() {
                 // 同一次系统事件里各排各的，互不影响
                 runCatching { AgendaReminder.rescheduleFromCache(app) }
                     .onFailure { android.util.Log.w("AgendaReminder", "$action 后重排失败", it) }
+                // 天气提醒：两条独立的每日闹钟，同样要在开机/改时间后按本地配置重排
+                runCatching { WeatherAlert.rescheduleFromStore(app) }
+                    .onFailure { android.util.Log.w("WeatherAlert", "$action 后重排失败", it) }
             } finally {
                 pending.finish()
             }

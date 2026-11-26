@@ -48,6 +48,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -96,6 +97,16 @@ fun SettingsScreen(
     weatherAvailable: Boolean = com.gzucm.pocket.core.Weather.enabled,
     /** 打开「天气位置」子页面（预设地点 + 使用当前位置） */
     onOpenWeatherPlace: () -> Unit = {},
+    /** 早晨天气提醒：每天的温差 / 高温 / 低温 / 有没有雨 */
+    weatherMorning: Boolean = true,
+    onWeatherMorningChange: (Boolean) -> Unit = {},
+    weatherMorningTime: String = "08:00",
+    onWeatherMorningTimeChange: (String) -> Unit = {},
+    /** 明日带伞提醒：明天有雨雪才发，平时静默 */
+    weatherEvening: Boolean = true,
+    onWeatherEveningChange: (Boolean) -> Unit = {},
+    weatherEveningTime: String = "22:00",
+    onWeatherEveningTimeChange: (String) -> Unit = {},
 ) {
     val scheme = MaterialTheme.colorScheme
     val scrollState = rememberScrollState()
@@ -360,6 +371,32 @@ fun SettingsScreen(
             }
         }
 
+        /*
+         * 天气提醒（2026-11-26）。
+         *
+         * 紧挨着「上课提醒」：两张卡都是「每天到点给你一条通知」，用户找提醒设置时
+         * 只在同一个区域扫一遍就够了。没配天气服务时整张卡不出现 —— 开关打开了
+         * 也永远取不到数据，比看不到更让人困惑。
+         *
+         * 时间改法用内联滚轮（展开在行下面），不叠 Dialog：项目里一个面板就是一个
+         * Dialog，再叠一层，按返回键的层级会乱。
+         */
+        if (weatherAvailable) {
+            Spacer(Modifier.height(16.dp))
+            WeatherAlertCard(
+                morningOn = weatherMorning,
+                morningTime = weatherMorningTime,
+                onMorningChange = onWeatherMorningChange,
+                onMorningTimeChange = onWeatherMorningTimeChange,
+                eveningOn = weatherEvening,
+                eveningTime = weatherEveningTime,
+                onEveningChange = onWeatherEveningChange,
+                onEveningTimeChange = onWeatherEveningTimeChange,
+                notifyGranted = notifyGranted,
+                onRequestNotify = onRequestNotify,
+            )
+        }
+
         Spacer(Modifier.height(16.dp))
 
         Column(
@@ -496,6 +533,213 @@ private fun InfoRow(label: String, value: String) {
         Spacer(Modifier.weight(1f))
         Text(value, fontSize = 13.sp)
     }
+}
+
+/**
+ * 天气提醒卡片：两行独立开关，各自可改时间。
+ *
+ * 时间选择做成**行下内联展开**（复用 AgendaSheet 里的滚轮），不弹 Dialog：
+ * 这个设置页本身就在一个 AdaptiveSheet 里，再叠一层 Dialog 按返回键会先关掉一层，
+ * 层级一乱就出现「退回桌面」。
+ */
+@Composable
+private fun WeatherAlertCard(
+    morningOn: Boolean,
+    morningTime: String,
+    onMorningChange: (Boolean) -> Unit,
+    onMorningTimeChange: (String) -> Unit,
+    eveningOn: Boolean,
+    eveningTime: String,
+    onEveningChange: (Boolean) -> Unit,
+    onEveningTimeChange: (String) -> Unit,
+    notifyGranted: Boolean,
+    onRequestNotify: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    // null / "morning" / "evening"。同时只展开一个：两个 132dp 的滚轮上下叠着没法用
+    var open by remember { mutableStateOf<String?>(null) }
+
+    // 关掉开关时收起滚轮，否则留着展开的面板会让人以为时间还在生效
+    LaunchedEffect(morningOn, eveningOn) {
+        if (!morningOn && open == "morning") open = null
+        if (!eveningOn && open == "evening") open = null
+    }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .micaPanel(14.dp),
+    ) {
+        WeatherAlertSwitchRow(
+            title = "天气提醒",
+            hint = "每天 $morningTime 告诉你今天的温差和天气",
+            checked = morningOn,
+            onChange = onMorningChange,
+        )
+        if (morningOn) {
+            TimeRow(
+                value = morningTime,
+                expanded = open == "morning",
+                onClick = { open = if (open == "morning") null else "morning" },
+            )
+            if (open == "morning") {
+                HourMinuteWheel(morningTime, onMorningTimeChange)
+            }
+        }
+
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .height(0.7.dp)
+                .background(scheme.onSurfaceVariant.copy(alpha = 0.12f)),
+        )
+
+        WeatherAlertSwitchRow(
+            title = "明日带伞",
+            hint = "每天 $eveningTime 提醒你明天要不要带伞",
+            checked = eveningOn,
+            onChange = onEveningChange,
+        )
+        if (eveningOn) {
+            TimeRow(
+                value = eveningTime,
+                expanded = open == "evening",
+                onClick = { open = if (open == "evening") null else "evening" },
+            )
+            if (open == "evening") {
+                HourMinuteWheel(eveningTime, onEveningTimeChange)
+            }
+        }
+
+        // 两张提醒都是靠通知送达的：没权限就明说，给一个能点的出口
+        if ((morningOn || eveningOn) && !notifyGranted) {
+            Text(
+                "通知权限未开启，提醒不会弹出 · 点这里开启",
+                fontSize = 10.5.sp,
+                color = scheme.error,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onRequestNotify)
+                    .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp),
+            )
+        }
+    }
+}
+
+/** 一行开关，样式照「上课提醒」那行，只是标题/副标题不同 */
+@Composable
+private fun WeatherAlertSwitchRow(
+    title: String,
+    hint: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Row(
+        Modifier
+            .fillMaxWidth()
+            // toggleable 单点处理；Switch 不接点击，避免一次点击翻两次
+            .toggleable(
+                value = checked,
+                role = androidx.compose.ui.semantics.Role.Switch,
+                onValueChange = onChange,
+            )
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 13.5.sp)
+            Text(
+                hint,
+                fontSize = 10.5.sp,
+                lineHeight = 15.sp,
+                color = scheme.onSurfaceVariant.copy(alpha = 0.8f),
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        androidx.compose.material3.Switch(checked = checked, onCheckedChange = null)
+    }
+}
+
+/** 「提醒时间  08:00 ▼」，点一下展开/收起滚轮 */
+@Composable
+private fun TimeRow(value: String, expanded: Boolean, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(G3CornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(start = 16.dp, end = 16.dp, top = 9.dp, bottom = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("提醒时间", fontSize = 12.sp, color = scheme.onSurfaceVariant)
+        Spacer(Modifier.weight(1f))
+        Text(value, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = scheme.primary)
+        Spacer(Modifier.width(6.dp))
+        Text(
+            "▼",
+            fontSize = 8.sp,
+            color = scheme.onSurfaceVariant.copy(alpha = 0.7f),
+            modifier = Modifier.graphicsLayer {
+                rotationZ = if (expanded) 180f else 0f
+            },
+        )
+    }
+}
+
+/**
+ * 小时 + 分钟两列滚轮。
+ *
+ * 复用 `ui/schedule/AgendaSheet.kt` 里那份 [WheelColumn] —— 它已经处理了
+ * 「固定高度 + 上下半屏 contentPadding」这两个硬约束，重写一份只会踩同样的坑。
+ */
+@Composable
+private fun HourMinuteWheel(value: String, onChange: (String) -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val minutes = minutesOf(value)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        com.gzucm.pocket.ui.schedule.WheelColumn(
+            count = 24,
+            initialIndex = minutes / 60,
+            label = { "%02d".format(it) },
+            onSelect = { h ->
+                val text = "%02d:%02d".format(h, minutes % 60)
+                // 展开时会先回掉一次当前值，值没变就别重排闹钟
+                if (text != value) onChange(text)
+            },
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            ":",
+            fontSize = 16.sp,
+            color = scheme.onSurfaceVariant,
+            modifier = Modifier.align(Alignment.CenterVertically),
+        )
+        com.gzucm.pocket.ui.schedule.WheelColumn(
+            count = 60,
+            initialIndex = minutes % 60,
+            label = { "%02d".format(it) },
+            onSelect = { m ->
+                val text = "%02d:%02d".format(minutes / 60, m)
+                if (text != value) onChange(text)
+            },
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+/** "08:00" → 一天里的第几分钟；解析不了按 8 点算（[WeatherAlertStore] 已保证存的是合法值） */
+private fun minutesOf(hhmm: String): Int {
+    val t = runCatching { java.time.LocalTime.parse(hhmm.trim()) }.getOrNull()
+        ?: java.time.LocalTime.of(8, 0)
+    return t.hour * 60 + t.minute
 }
 
 /**

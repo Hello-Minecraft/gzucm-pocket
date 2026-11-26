@@ -121,6 +121,12 @@
             android:name=".core.AgendaReminderReceiver"
             android:exported="false" />
 
+        <!-- 每日天气提醒（早晨温差 / 晚间带伞）。两条闹钟共用这一个 Receiver，
+             kind 由 Intent extra 区分 -->
+        <receiver
+            android:name=".core.WeatherAlertReceiver"
+            android:exported="false" />
+
         <!--
           导出课表 JSON：把 cache/exports/ 下的文件以 content:// 交给系统分享。
 

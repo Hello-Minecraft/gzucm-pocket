@@ -8,6 +8,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.Request
+import java.time.LocalDate
 import java.util.concurrent.TimeUnit
 
 /**
@@ -357,7 +358,84 @@ object Weather {
         return if (isFresh(info.fetchedAt, System.currentTimeMillis())) info else null
     }
 
-    fun save(store: SessionStore, info: Info) {
+    fun save(ctx: Context, store: SessionStore, info: Info) {
         store.weatherCache = runCatching { json.encodeToString(info) }.getOrNull()
+        /*
+         * 顺手记下「今天」的最高/最低温。
+         *
+         * 和风的 3d 预报只有今天/明天/后天，没有昨天；而天气提醒要讲
+         * 「今天比昨天冷几度」。所以每次成功拉取都把今天这一条落盘，
+         * 明天早上读昨天那一笔就有了基准。
+         *
+         * 放在 save 里而不是各个调用点：只要拉到了就一定会存，
+         * 少一处调用就少一条「明天没有昨天数据」。
+         */
+        WeatherSnapshot.record(ctx, info.days)
     }
+}
+
+/**
+ * 每日最高/最低温快照（按日期一条，只留最近 7 天）。
+ *
+ * 独立一个 prefs 文件，不和会话/课表混在一起 —— 它只是一份「历史温度」，
+ * 丢了最多让某天的温差判断退化成「只讲高温/低温/有雨」，不影响任何主流程。
+ */
+object WeatherSnapshot {
+
+    private const val PREFS = "weather_snap"
+
+    /** 需求里指定的 key 前缀：`wx_snap_2026-11-26` */
+    private const val PREFIX = "wx_snap_"
+
+    /** 只留 7 天：再早的没人看，留着只是让 prefs 慢慢长大 */
+    const val KEEP_DAYS = 7
+
+    data class Snap(val max: Int, val min: Int)
+
+    /** 从一次成功的拉取里记下今天；预报里找不到今天（跨天/接口异常）就什么都不做 */
+    fun record(ctx: Context, days: List<Weather.Day>, today: LocalDate = LocalDate.now()) {
+        val iso = today.toString()
+        val d = days.firstOrNull { it.date == iso } ?: return
+        prefs(ctx).edit().putString(PREFIX + iso, "${d.max},${d.min}").apply()
+        prune(ctx, today)
+    }
+
+    /** 读某一天的快照；没有或存坏了返回 null（调用方据此跳过温差判断） */
+    fun of(ctx: Context, date: LocalDate): Snap? {
+        val raw = prefs(ctx).getString(PREFIX + date, null) ?: return null
+        val parts = raw.split(',')
+        if (parts.size != 2) return null
+        val max = parts[0].trim().toIntOrNull() ?: return null
+        val min = parts[1].trim().toIntOrNull() ?: return null
+        return Snap(max, min)
+    }
+
+    fun prune(ctx: Context, today: LocalDate = LocalDate.now()) {
+        val sp = prefs(ctx)
+        val dead = expiredKeys(sp.all.keys.filter { it.startsWith(PREFIX) }, today)
+        if (dead.isEmpty()) return
+        val e = sp.edit()
+        dead.forEach { e.remove(it) }
+        e.apply()
+    }
+
+    /**
+     * 哪些 key 该删。抽成纯函数方便单测 —— 保留窗口算错会悄悄删掉「昨天」，
+     * 表现就是每天都没有温差，很难查。
+     */
+    internal fun expiredKeys(
+        keys: Collection<String>,
+        today: LocalDate,
+        keepDays: Int = KEEP_DAYS,
+    ): List<String> {
+        val oldest = today.minusDays((keepDays - 1).toLong())
+        return keys.filter { k ->
+            val d = runCatching { LocalDate.parse(k.removePrefix(PREFIX)) }.getOrNull()
+            // 解析不出来的（旧格式 / 手改）一并清掉
+            d == null || d < oldest
+        }
+    }
+
+    private fun prefs(ctx: Context) =
+        ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 }

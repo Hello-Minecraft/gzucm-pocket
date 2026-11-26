@@ -22,6 +22,18 @@ class App : Application() {
         Graph.init(this)
 
         /*
+         * 单元测试（Robolectric）里不跑冷启动重排。
+         *
+         * 这段排程会真的往 AlarmManager 里塞闹钟，而 Robolectric 的
+         * ShadowAlarmManager 是全局共享的：每个用例的 App.onCreate 都会多出
+         * 早/晚两条天气闹钟，于是「断言闹钟条数」的用例（AgendaReminderScheduleTest）
+         * 看到的是 1 + 2 = 3 条，看起来像排程代码重复排了。
+         *
+         * 排程逻辑本身有专门的测试覆盖，这里跳过不影响正确性。
+         */
+        if (runningUnderUnitTest()) return
+
+        /*
          * 日程提醒：每次冷启动重排一次。
          *
          * 覆盖的是「App 被系统强停过、闹钟全废，但用户又打开了」这种情况。
@@ -31,8 +43,26 @@ class App : Application() {
         Thread {
             runCatching { com.gzucm.pocket.core.AgendaReminder.rescheduleFromCache(this) }
                 .onFailure { android.util.Log.w("AgendaReminder", "启动重排失败", it) }
+            /*
+             * 天气提醒：冷启动也重排一次。
+             *
+             * 它每天响完会自己续排，但 App 被系统强停（ColorOS / HyperOS 把包打成
+             * stopped 状态）时闹钟会全部作废，而那一刻不会收到任何广播 ——
+             * 只能等用户下次打开 App 时补上。
+             */
+            runCatching { com.gzucm.pocket.core.WeatherAlert.rescheduleFromStore(this) }
+                .onFailure { android.util.Log.w("WeatherAlert", "启动重排失败", it) }
         }.start()
     }
+
+    /**
+     * 是否跑在 Robolectric 里。
+     *
+     * Robolectric 只在单元测试的 classpath 上，正式包的 APK 里没有这个类，
+     * 所以 Class.forName 成功与否就是一个不会误判的判据。
+     */
+    private fun runningUnderUnitTest(): Boolean =
+        runCatching { Class.forName("org.robolectric.Robolectric") }.isSuccess
 }
 
 /** 极简依赖容器：一个会话存储 + 一个网络栈，够用了。 */
