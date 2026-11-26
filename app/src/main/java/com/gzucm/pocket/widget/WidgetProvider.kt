@@ -529,9 +529,19 @@ class TimelineWidget : BaseWidgetProvider() {
             views.setTextViewText(UNIT_IDS[i], row.unitText)
             views.setTextViewText(TIME_IDS[i], row.timeText)
             views.setTextViewText(NAME_IDS[i], if (ongoing) bold(row.name) else row.name)
-            // 地点没填就整栏收掉，别留一截空白把课名挤窄
-            views.setViewVisibility(ROOM_IDS[i], if (row.room.isBlank()) View.GONE else View.VISIBLE)
+
+            // 右侧竖排两行：地点（次色）在上、老师（弱色）在下，各空各收；
+            // 两行都空时连容器一起 GONE，别留一截空白把课名挤窄
+            val hasRoom = row.room.isNotBlank()
+            val hasTeacher = row.teacher.isNotBlank()
+            views.setViewVisibility(
+                SIDE_IDS[i],
+                if (hasRoom || hasTeacher) View.VISIBLE else View.GONE,
+            )
+            views.setViewVisibility(ROOM_IDS[i], if (hasRoom) View.VISIBLE else View.GONE)
+            views.setViewVisibility(TEACHER_IDS[i], if (hasTeacher) View.VISIBLE else View.GONE)
             views.setTextViewText(ROOM_IDS[i], row.room)
+            views.setTextViewText(TEACHER_IDS[i], row.teacher)
 
             if (ongoing) {
                 // 正在上：块底换 26% 变体、课名加粗、文字用块内文字色
@@ -540,11 +550,13 @@ class TimelineWidget : BaseWidgetProvider() {
                 views.setTextColor(TIME_IDS[i], ink)
                 views.setTextColor(NAME_IDS[i], ink)
                 views.setTextColor(ROOM_IDS[i], ink)
+                views.setTextColor(TEACHER_IDS[i], ink)
             } else {
                 views.setTextColor(UNIT_IDS[i], weak)
                 views.setTextColor(TIME_IDS[i], dim)
                 views.setTextColor(NAME_IDS[i], text)
-                views.setTextColor(ROOM_IDS[i], weak)
+                views.setTextColor(ROOM_IDS[i], dim)
+                views.setTextColor(TEACHER_IDS[i], weak)
             }
         }
     }
@@ -571,6 +583,15 @@ class TimelineWidget : BaseWidgetProvider() {
         val ROOM_IDS = intArrayOf(
             R.id.tl1_room, R.id.tl2_room, R.id.tl3_room, R.id.tl4_room,
             R.id.tl5_room, R.id.tl6_room, R.id.tl7_room,
+        )
+        val TEACHER_IDS = intArrayOf(
+            R.id.tl1_teacher, R.id.tl2_teacher, R.id.tl3_teacher, R.id.tl4_teacher,
+            R.id.tl5_teacher, R.id.tl6_teacher, R.id.tl7_teacher,
+        )
+        /** 地点 + 老师那两行的容器；两个都空时整块收掉 */
+        val SIDE_IDS = intArrayOf(
+            R.id.tl1_side, R.id.tl2_side, R.id.tl3_side, R.id.tl4_side,
+            R.id.tl5_side, R.id.tl6_side, R.id.tl7_side,
         )
         val DOT_IDS = intArrayOf(
             R.id.tl1_dot, R.id.tl2_dot, R.id.tl3_dot, R.id.tl4_dot,

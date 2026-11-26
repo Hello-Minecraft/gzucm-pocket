@@ -143,6 +143,8 @@ data class TodayRow(
     val timeText: String,
     val name: String,
     val room: String,
+    /** 任课老师（只取第一个，理由见 [WidgetCourse.teacherText]）；空串 = 不显示 */
+    val teacher: String = "",
     val state: TodayRowState,
     /** 这门课的配色下标（0..7） */
     val colorIndex: Int = 0,
@@ -524,6 +526,7 @@ object WidgetRender {
             timeText = c.startText,
             name = c.name,
             room = c.room,
+            teacher = c.teacherText,
             state = if (nowMinute >= c.startMinute) TodayRowState.ONGOING else TodayRowState.UPCOMING,
             colorIndex = colorIndexFor(c.name),
         )

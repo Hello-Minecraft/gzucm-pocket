@@ -110,17 +110,39 @@
                     android:textColor="@color/widget_text"
                     android:textSize="11.5sp" />
 
-                <TextView
-                    android:id="@+id/tl1_room"
+                <!-- 右侧两行：地点在上、老师在下，各占一行，都右对齐。
+                     LinearLayout 不认 android:maxWidth，120dp 的宽度上限写在
+                     两个 TextView 上（效果一样：容器最宽 120dp）。 -->
+                <LinearLayout
+                    android:id="@+id/tl1_side"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="6dp"
-                    android:ellipsize="end"
-                    android:gravity="end"
-                    android:maxLines="1"
-                    android:maxWidth="60dp"
-                    android:textColor="@color/widget_text_weak"
-                    android:textSize="9sp" />
+                    android:gravity="end|center_vertical"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/tl1_room"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:gravity="end"
+                        android:maxLines="1"
+                        android:maxWidth="120dp"
+                        android:textColor="@color/widget_text_dim"
+                        android:textSize="9.5sp" />
+
+                    <TextView
+                        android:id="@+id/tl1_teacher"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:gravity="end"
+                        android:maxLines="1"
+                        android:maxWidth="120dp"
+                        android:textColor="@color/widget_text_weak"
+                        android:textSize="9sp" />
+                </LinearLayout>
             </LinearLayout>
 
             <LinearLayout
@@ -170,17 +192,36 @@
                     android:textColor="@color/widget_text"
                     android:textSize="11.5sp" />
 
-                <TextView
-                    android:id="@+id/tl2_room"
+                <LinearLayout
+                    android:id="@+id/tl2_side"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="6dp"
-                    android:ellipsize="end"
-                    android:gravity="end"
-                    android:maxLines="1"
-                    android:maxWidth="60dp"
-                    android:textColor="@color/widget_text_weak"
-                    android:textSize="9sp" />
+                    android:gravity="end|center_vertical"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/tl2_room"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:gravity="end"
+                        android:maxLines="1"
+                        android:maxWidth="120dp"
+                        android:textColor="@color/widget_text_dim"
+                        android:textSize="9.5sp" />
+
+                    <TextView
+                        android:id="@+id/tl2_teacher"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:gravity="end"
+                        android:maxLines="1"
+                        android:maxWidth="120dp"
+                        android:textColor="@color/widget_text_weak"
+                        android:textSize="9sp" />
+                </LinearLayout>
             </LinearLayout>
 
             <LinearLayout
@@ -230,17 +271,36 @@
                     android:textColor="@color/widget_text"
                     android:textSize="11.5sp" />
 
-                <TextView
-                    android:id="@+id/tl3_room"
+                <LinearLayout
+                    android:id="@+id/tl3_side"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="6dp"
-                    android:ellipsize="end"
-                    android:gravity="end"
-                    android:maxLines="1"
-                    android:maxWidth="60dp"
-                    android:textColor="@color/widget_text_weak"
-                    android:textSize="9sp" />
+                    android:gravity="end|center_vertical"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/tl3_room"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:gravity="end"
+                        android:maxLines="1"
+                        android:maxWidth="120dp"
+                        android:textColor="@color/widget_text_dim"
+                        android:textSize="9.5sp" />
+
+                    <TextView
+                        android:id="@+id/tl3_teacher"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:gravity="end"
+                        android:maxLines="1"
+                        android:maxWidth="120dp"
+                        android:textColor="@color/widget_text_weak"
+                        android:textSize="9sp" />
+                </LinearLayout>
             </LinearLayout>
 
             <LinearLayout
@@ -290,17 +350,36 @@
                     android:textColor="@color/widget_text"
                     android:textSize="11.5sp" />
 
-                <TextView
-                    android:id="@+id/tl4_room"
+                <LinearLayout
+                    android:id="@+id/tl4_side"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="6dp"
-                    android:ellipsize="end"
-                    android:gravity="end"
-                    android:maxLines="1"
-                    android:maxWidth="60dp"
-                    android:textColor="@color/widget_text_weak"
-                    android:textSize="9sp" />
+                    android:gravity="end|center_vertical"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/tl4_room"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:gravity="end"
+                        android:maxLines="1"
+                        android:maxWidth="120dp"
+                        android:textColor="@color/widget_text_dim"
+                        android:textSize="9.5sp" />
+
+                    <TextView
+                        android:id="@+id/tl4_teacher"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:gravity="end"
+                        android:maxLines="1"
+                        android:maxWidth="120dp"
+                        android:textColor="@color/widget_text_weak"
+                        android:textSize="9sp" />
+                </LinearLayout>
             </LinearLayout>
 
             <LinearLayout
@@ -350,17 +429,36 @@
                     android:textColor="@color/widget_text"
                     android:textSize="11.5sp" />
 
-                <TextView
-                    android:id="@+id/tl5_room"
+                <LinearLayout
+                    android:id="@+id/tl5_side"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="6dp"
-                    android:ellipsize="end"
-                    android:gravity="end"
-                    android:maxLines="1"
-                    android:maxWidth="60dp"
-                    android:textColor="@color/widget_text_weak"
-                    android:textSize="9sp" />
+                    android:gravity="end|center_vertical"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/tl5_room"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:gravity="end"
+                        android:maxLines="1"
+                        android:maxWidth="120dp"
+                        android:textColor="@color/widget_text_dim"
+                        android:textSize="9.5sp" />
+
+                    <TextView
+                        android:id="@+id/tl5_teacher"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:gravity="end"
+                        android:maxLines="1"
+                        android:maxWidth="120dp"
+                        android:textColor="@color/widget_text_weak"
+                        android:textSize="9sp" />
+                </LinearLayout>
             </LinearLayout>
 
             <LinearLayout
@@ -410,17 +508,36 @@
                     android:textColor="@color/widget_text"
                     android:textSize="11.5sp" />
 
-                <TextView
-                    android:id="@+id/tl6_room"
+                <LinearLayout
+                    android:id="@+id/tl6_side"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="6dp"
-                    android:ellipsize="end"
-                    android:gravity="end"
-                    android:maxLines="1"
-                    android:maxWidth="60dp"
-                    android:textColor="@color/widget_text_weak"
-                    android:textSize="9sp" />
+                    android:gravity="end|center_vertical"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/tl6_room"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:gravity="end"
+                        android:maxLines="1"
+                        android:maxWidth="120dp"
+                        android:textColor="@color/widget_text_dim"
+                        android:textSize="9.5sp" />
+
+                    <TextView
+                        android:id="@+id/tl6_teacher"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:gravity="end"
+                        android:maxLines="1"
+                        android:maxWidth="120dp"
+                        android:textColor="@color/widget_text_weak"
+                        android:textSize="9sp" />
+                </LinearLayout>
             </LinearLayout>
 
             <LinearLayout
@@ -470,17 +587,36 @@
                     android:textColor="@color/widget_text"
                     android:textSize="11.5sp" />
 
-                <TextView
-                    android:id="@+id/tl7_room"
+                <LinearLayout
+                    android:id="@+id/tl7_side"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="6dp"
-                    android:ellipsize="end"
-                    android:gravity="end"
-                    android:maxLines="1"
-                    android:maxWidth="60dp"
-                    android:textColor="@color/widget_text_weak"
-                    android:textSize="9sp" />
+                    android:gravity="end|center_vertical"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/tl7_room"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:gravity="end"
+                        android:maxLines="1"
+                        android:maxWidth="120dp"
+                        android:textColor="@color/widget_text_dim"
+                        android:textSize="9.5sp" />
+
+                    <TextView
+                        android:id="@+id/tl7_teacher"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:gravity="end"
+                        android:maxLines="1"
+                        android:maxWidth="120dp"
+                        android:textColor="@color/widget_text_weak"
+                        android:textSize="9sp" />
+                </LinearLayout>
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>

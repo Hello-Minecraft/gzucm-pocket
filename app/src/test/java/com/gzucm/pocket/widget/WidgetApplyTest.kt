@@ -86,6 +86,11 @@ class WidgetApplyTest {
         "今天有课" to snapshot(
             s("中药学", weekday = 1, startUnit = 1, endUnit = 2, startTime = "08:30", endTime = "10:00"),
             s("中医诊断学", weekday = 1, startUnit = 3, endUnit = 4, startTime = "10:20", endTime = "11:50"),
+            // 地点、老师都空：4x4 右侧整块要 GONE，这条路径只在 apply 里能走到
+            s(
+                "就业指导", weekday = 1, startUnit = 7, endUnit = 8,
+                startTime = "13:10", endTime = "14:40", room = "", teacher = "",
+            ),
         ),
         // sessions 非空但今天（周一）一条都没有 → 走「今天没课了」那条路径
         "今天没课" to snapshot(

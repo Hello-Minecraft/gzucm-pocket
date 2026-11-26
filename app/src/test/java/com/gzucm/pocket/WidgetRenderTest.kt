@@ -428,6 +428,28 @@ class WidgetRenderTest {
     }
 
     @Test
+    fun `4x4_行里带老师且多个老师只取第一个`() {
+        // 4x4 的右侧两行是「地点 / 老师」，老师口径和 4x2 一致：只取第一个
+        val data = snapshot(
+            s(
+                "外科学", weekday = 1, startUnit = 3, endUnit = 4,
+                startTime = "10:20", endTime = "11:50", teacher = "张伟,李娜",
+            ),
+        )
+        val row = WidgetRender.todayCourses(data, at(0, 10, 40)).rows.first()
+
+        assertEquals("张伟", row.teacher)
+        assertEquals("综教楼101", row.room)
+    }
+
+    @Test
+    fun `4x4_没有老师字段时行为空串`() {
+        // 老快照没有 teacher：布局侧靠空串把这一行收掉，这里只保证不崩、不填脏值
+        val list = WidgetRender.todayCourses(normalMonday(), at(0, 10, 40))
+        assertEquals("", list.rows.first().teacher)
+    }
+
+    @Test
     fun `4x4_上完的课被过滤正在上的保留`() {
         // 10:40：中药学（10:00 下课）不该再出现，中医诊断学正在上要留着
         val list = WidgetRender.todayCourses(normalMonday(), at(0, 10, 40))
