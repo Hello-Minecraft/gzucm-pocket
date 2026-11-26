@@ -509,6 +509,8 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
     var showTodaySectionsInSettings by remember { mutableStateOf(false) }
     // 「添加到桌面小组件」教程页（各机型步骤 + 尺寸预览），和关于页同一层级
     var showWidgetGuide by remember { mutableStateOf(false) }
+    // 「天气提醒」二级页（两档开关 + 时间滚轮 + 立即预览），和小组件教程页同一层级
+    var showWeatherAlertInSettings by remember { mutableStateOf(false) }
     /*
      * 天气地点。
      *
@@ -1112,6 +1114,7 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 showExport = false
                 showTodaySectionsInSettings = false
                 showWidgetGuide = false
+                showWeatherAlertInSettings = false
                 showWeatherPlaceInSettings = false
                 showSettings = false
             },
@@ -1123,6 +1126,7 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 showTodaySectionsInSettings -> "今日页显示"
                 showWeatherPlaceInSettings -> "天气位置"
                 showWidgetGuide -> "添加到桌面小组件"
+                showWeatherAlertInSettings -> "天气提醒"
                 else -> "设置"
             },
             // 设置页和关于页正文自带 verticalScroll，这里必须关掉
@@ -1141,7 +1145,8 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
              */
             androidx.activity.compose.BackHandler(
                 enabled = showAbout || showDonate || showExport || showFeedback ||
-                    showTodaySectionsInSettings || showWeatherPlaceInSettings || showWidgetGuide,
+                    showTodaySectionsInSettings || showWeatherPlaceInSettings || showWidgetGuide ||
+                    showWeatherAlertInSettings,
             ) {
                 showAbout = false
                 showDonate = false
@@ -1150,6 +1155,7 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 showTodaySectionsInSettings = false
                 showWeatherPlaceInSettings = false
                 showWidgetGuide = false
+                showWeatherAlertInSettings = false
             }
             if (showFeedback) {
                 com.gzucm.pocket.ui.settings.FeedbackSheet(
@@ -1323,6 +1329,46 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 )
                 return@AdaptiveSheet
             }
+            /*
+             * 天气提醒（2026-11-26）。
+             *
+             * 从设置页那张卡改成二级页：原来两档开关 + 两个时间行 + 两个预览按钮
+             * 加权限提示约 300dp，把「立即同步 / 退出登录」都挤出首屏。
+             * 行为与原来完全一致（开关顺手要通知权限、预览走同一个 ViewModel 入口），
+             * 只是正文换了一页。
+             */
+            if (showWeatherAlertInSettings) {
+                com.gzucm.pocket.ui.settings.WeatherAlertScreen(
+                    morningOn = vm.weatherMorningOn,
+                    morningTime = vm.weatherMorningTime,
+                    onMorningChange = { on ->
+                        vm.setWeatherMorning(on)
+                        // 开着却发不出通知 = 白开；和上课提醒一样，点开就顺手要权限
+                        if (on && !notifyGranted()) askNotify.launch(
+                            android.Manifest.permission.POST_NOTIFICATIONS
+                        )
+                    },
+                    onMorningTimeChange = { vm.changeWeatherMorningTime(it) },
+                    eveningOn = vm.weatherEveningOn,
+                    eveningTime = vm.weatherEveningTime,
+                    onEveningChange = { on ->
+                        vm.setWeatherEvening(on)
+                        if (on && !notifyGranted()) askNotify.launch(
+                            android.Manifest.permission.POST_NOTIFICATIONS
+                        )
+                    },
+                    onEveningTimeChange = { vm.changeWeatherEveningTime(it) },
+                    notifyGranted = notifyOk,
+                    onRequestNotify = {
+                        askNotify.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    },
+                    onPreviewMorning = { vm.previewWeatherAlert(morning = true) },
+                    onPreviewEvening = { vm.previewWeatherAlert(morning = false) },
+                    previewBusy = vm.weatherPreviewBusy,
+                    onBack = { showWeatherAlertInSettings = false },
+                )
+                return@AdaptiveSheet
+            }
             if (showWeatherPlaceInSettings) {
                 com.gzucm.pocket.ui.settings.WeatherPlaceContent(
                     current = weatherPlace,
@@ -1372,6 +1418,7 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                  */
                 onOpenExport = { showExport = true },
                 onOpenWidgetGuide = { showWidgetGuide = true },
+                onOpenWeatherAlert = { showWeatherAlertInSettings = true },
                 onOpenTodaySections = { showTodaySectionsInSettings = true },
                 weatherPlaceLabel = weatherPlace.label,
                 weatherAvailable = com.gzucm.pocket.core.Weather.enabled,
