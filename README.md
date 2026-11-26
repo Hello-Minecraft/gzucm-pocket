@@ -107,20 +107,25 @@
 
 ## 截图
 
-| 今日 | 课表 |
+| 今日 | 课表 · 周视图 |
 |:---:|:---:|
-| ![今日](docs/screenshots/today.jpg) | ![课表](docs/screenshots/schedule.jpg) |
-| 当天课程、下次上课、本周概览、宿舍电量 | 按周课表，支持自定义背景 |
+| ![今日](docs/screenshots/today.jpg) | ![课表周视图](docs/screenshots/schedule-week.jpg) |
+| 今天的课、天气、宿舍电量，一屏看完 | 一周全表，可换自己的背景图 |
+
+| 课表 · 日视图 | 工作台 |
+|:---:|:---:|
+| ![课表日视图](docs/screenshots/schedule-day.jpg) | ![工作台](docs/screenshots/workbench.jpg) |
+| 一天一列，老师、教室写全 | 成绩、校内服务，不用记网址 |
 
 | 成绩 | 电费 |
 |:---:|:---:|
 | ![成绩](docs/screenshots/grades.jpg) | ![电费](docs/screenshots/power.jpg) |
-| 加权绩点、学分构成、分级列表 | 余额、趋势、每日明细、手动更新 |
+| 加权绩点、学分构成、逐门课程 | 余额、趋势、每日明细、手动更新 |
 
-| 桌面小部件：2×1 / 2×2 / 4×2 / 整周 | 三天视图与今日时间轴 |
+| 待办与日程 | 桌面小部件：2×1 / 2×2 / 4×2 / 整周 |
 |:---:|:---:|
-| ![小部件尺寸](docs/screenshots/widget-sizes.jpg) | ![三天与时间轴](docs/screenshots/widget-three-days.jpg) |
-| 一行、方形、横排、整周，四种尺寸 | 三列三日视图、按节次排的今日列表 |
+| ![待办与日程](docs/screenshots/agenda.jpg) | ![桌面小部件](docs/screenshots/widget-sizes.jpg) |
+| 截止任务、班级日程，勾一下就完 | 一行、方形、横排、整周，四种尺寸 |
 
 ## 安装
 
