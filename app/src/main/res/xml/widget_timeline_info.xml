@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 4x4 今日时间轴：1-12 节纵向排开，右侧课程块。250×250dp = 4×4 格 -->
+<!-- 4x3 今日课程：一门课一行（最多 4 门），右侧地点 / 老师。250×180dp = 4×3 格
+     为什么 4x3 而不是 4x4：4x4 在小米 14 上渲染成 330×357dp，每行 78dp，空得发慌。
+     180dp 最坏情况下 4 行各约 33dp，右侧「地点 + 老师」两行文字 28.5dp 刚好装得下；
+     7 行时每行只有 18dp，文字会被裁，所以 Provider 的 MAX_ROWS 收到 4。 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:initialLayout="@layout/widget_timeline"
     android:minWidth="250dp"
-    android:minHeight="250dp"
+    android:minHeight="180dp"
     android:previewLayout="@layout/widget_timeline"
     android:resizeMode="horizontal|vertical"
     android:updatePeriodMillis="0"

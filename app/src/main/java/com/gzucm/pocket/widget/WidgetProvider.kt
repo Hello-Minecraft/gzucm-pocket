@@ -472,14 +472,17 @@ class TodayHorizontalWidget : BaseWidgetProvider() {
     }
 }
 
-// ── 4x4 今日课程（课程条目）────────────────────────────────────────────
+// ── 4x3 今日课程（课程条目）────────────────────────────────────────────
 
 /**
- * 一门课一行，最多 7 门；已上完的课不占位。
+ * 一门课一行，最多 4 门；已上完的课不占位。
  *
  * 行高靠 weight 分配：前 n 行 VISIBLE，接着到 [WidgetRender.widgetRowsToAllot]
  * 行 INVISIBLE（不画但**仍参与分配**），其余 GONE（不参与）。这样 1~4 门课时
  * 卡片只占四分之一到一半高度，不会被一门课撑成一整块。
+ *
+ * 上限 4 而不是 7：4x3 最坏只有 180dp，7 行每行 18dp，右侧「地点 + 老师」
+ * 两行文字（28.5dp）会被裁；4 行时每行 33dp 才装得下（WidgetTimelineHeightTest 量过）。
  */
 class TimelineWidget : BaseWidgetProvider() {
 
@@ -561,8 +564,9 @@ class TimelineWidget : BaseWidgetProvider() {
         }
     }
 
-    private companion object {
-        const val MAX_ROWS = 7
+    internal companion object {
+        /** 时间轴最多画几门课；4x3（180dp）下高度只够 4 行（每行约 33dp） */
+        const val MAX_ROWS = 4
 
         val ROW_IDS = intArrayOf(
             R.id.tl1, R.id.tl2, R.id.tl3, R.id.tl4,

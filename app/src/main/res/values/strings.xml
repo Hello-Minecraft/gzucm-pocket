@@ -11,7 +11,7 @@
     <string name="widget_current_label">课表 · 当前课程</string>
     <string name="widget_today_label">课表 · 今日 2×2</string>
     <string name="widget_today_horizontal_label">课表 · 今日 4×2</string>
-    <string name="widget_timeline_label">课表 · 今日 4×4</string>
+    <string name="widget_timeline_label">课表 · 今日 4×3</string>
     <string name="widget_three_days_label">课表 · 三天 4×3</string>
     <string name="widget_week_label">课表 · 周视图 4×3</string>
 

@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    4x4 今日课程：表头 + **课程条目**（一门课一行，最多 7 门）。
+    4x3 今日课程：表头 + **课程条目**（一门课一行，最多 4 门；多了高度不够，
+    见 WidgetTimelineHeightTest 的 180dp 实测）。
 
     ## 为什么是「课」不是「节」
 
@@ -10,15 +11,16 @@
     ## 行高怎么自适应
 
     RemoteViews 改不了 layout_height（setViewLayoutHeight 要 API 31），所以
-    7 行全部 `height=0dp + weight=1`，靠 Provider 控制可见性：
+    7 个槽位全部 `height=0dp + weight=1`，靠 Provider 控制可见性：
       前 n 行 VISIBLE，接着到 max(n,4) 行 **INVISIBLE**（不画但仍参与分配），
       其余 GONE（不参与分配）。
-    结果是 1~4 门课时每行占 1/4 高（约 52dp），5 门 1/5，7 门 1/7（约 29dp）——
-    卡片永远铺满，一门课也不会被撑成一整块。
+    MAX_ROWS 收到 4 之后：
+      180dp（4x3 最坏情况）1~4 门课时每行 1/4 高（约 33.5dp）；
+      267dp（小米 14 的 4x3 格）每行约 55dp。一门课也不会被撑成一整块。
 
     ## 圆角
 
-    用 a 档（radius 22dp）：行高在 29~52dp 之间时 22dp 都会被 clamp 成半高，
+    用 a 档（radius 22dp）：行高在 33~55dp 之间时 22dp 都会被 clamp 成半高，
     所以不管几门课都接近胶囊，不需要再按行高换 drawable。
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
