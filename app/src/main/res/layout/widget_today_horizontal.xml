@@ -9,6 +9,11 @@
     地点 / 老师为空时整栏由 Kotlin 收掉（老快照没有 teacher 字段），
     不会留一条空白把课名挤窄。
 
+    地点 / 老师两列的 maxWidth 是 **108dp**（4x3 时间轴那套是 120dp）：
+    4x2 的实际格子约 352dp，右侧占 108 后左侧课名还剩 ~190dp，够「中医各家学说」；
+    108dp 能完整放下「综教楼808（智慧课室）」（2026-11-26 真机量到 105.7dp）。
+    原来是 72dp，只放得下 7 个字，真机上地点被截成「综教楼808（…」。
+
     第三档圆角用 b（16dp）：34dp 高的胶囊，radius 被 clamp 成半高。
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -106,7 +111,7 @@
                     android:ellipsize="end"
                     android:gravity="end"
                     android:maxLines="1"
-                    android:maxWidth="72dp"
+                    android:maxWidth="108dp"
                     android:textColor="@color/widget_text_dim"
                     android:textSize="9.5sp" />
 
@@ -117,7 +122,7 @@
                     android:ellipsize="end"
                     android:gravity="end"
                     android:maxLines="1"
-                    android:maxWidth="72dp"
+                    android:maxWidth="108dp"
                     android:textColor="@color/widget_text_weak"
                     android:textSize="9sp" />
             </LinearLayout>
@@ -182,7 +187,7 @@
                     android:ellipsize="end"
                     android:gravity="end"
                     android:maxLines="1"
-                    android:maxWidth="72dp"
+                    android:maxWidth="108dp"
                     android:textColor="@color/widget_text_dim"
                     android:textSize="9.5sp" />
 
@@ -193,7 +198,7 @@
                     android:ellipsize="end"
                     android:gravity="end"
                     android:maxLines="1"
-                    android:maxWidth="72dp"
+                    android:maxWidth="108dp"
                     android:textColor="@color/widget_text_weak"
                     android:textSize="9sp" />
             </LinearLayout>

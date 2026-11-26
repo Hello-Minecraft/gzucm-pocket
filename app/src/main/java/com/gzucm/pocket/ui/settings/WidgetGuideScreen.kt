@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,13 +36,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.gzucm.pocket.R
 import com.gzucm.pocket.ui.components.G3CornerShape
 import com.gzucm.pocket.ui.components.micaPanel
 import com.gzucm.pocket.ui.icons.AppIcons
@@ -51,7 +50,6 @@ import com.gzucm.pocket.widget.TodayCards
 import com.gzucm.pocket.widget.TodayRow
 import com.gzucm.pocket.widget.TodayRowState
 import com.gzucm.pocket.widget.WeekCellRole
-import com.gzucm.pocket.widget.WeekUnitCount
 import com.gzucm.pocket.widget.WidgetRender
 import com.gzucm.pocket.widget.WidgetSnapshot
 import com.gzucm.pocket.widget.WidgetSnapshotData
@@ -72,8 +70,9 @@ import kotlin.math.min
  *
  * 截图会随版本过期（改一个字就要重拍），而且深色模式对不上。
  * 这里直接调 [WidgetRender] 的纯函数拿**用户自己的今日课表**，再用 Compose
- * 按真机版式画出来 —— 和部件本身共用同一套数据与配色资源，绝不会出现
- * 「教程里是一种样子，桌面上是另一种样子」。
+ * 按真机版式画出来 —— 和部件本身共用同一套数据与配色数值（[WidgetPalette]
+ * 照抄 `widget_*` 的两套颜色资源），绝不会出现「教程里是一种样子，
+ * 桌面上是另一种样子」。
  *
  * 版式口径（和 widget_*.xml 对齐）：24dp 圆角卡片、10dp 内边距、表头 10sp 次色、
  * 课程块用 widget_k1..k8 + 胶囊圆角、圆点用 widget_k{n}_dot、
@@ -229,7 +228,7 @@ fun WidgetGuideScreen(onBack: () -> Unit = {}) {
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            "预览按真机比例等比缩小，实际显示以桌面为准。添加时把部件拖到桌面上，大小可以再拖动边缘调整。",
+            "预览按真机比例缩放，实际显示以桌面为准。添加时把部件拖到桌面上，大小还能拖动边缘调整。",
             fontSize = 10.5.sp,
             lineHeight = 15.sp,
             color = scheme.onSurfaceVariant.copy(alpha = 0.75f),
@@ -244,8 +243,12 @@ fun WidgetGuideScreen(onBack: () -> Unit = {}) {
 /**
  * 六个可添加的尺寸。
  *
- * [widthDp] / [heightDp] 取各自 `appwidget-provider` 里声明的 minWidth / minHeight ——
- * 预览按这个比例画，用户看到的就是桌面上「最小也是这样」的形态。
+ * [widthDp] / [heightDp] 是**小米 14（houji，1200×2670，480dpi，5 列桌面）实测的
+ * 格子尺寸**，不是 `appwidget-provider` 里声明的 minWidth / minHeight：
+ * 官方那套 AOSP 最小宽度公式（70n-30）偏小（2 列算 110、4 列算 250），真机给的
+ * 实际是 150 / 350，按 minWidth 画会让预览里的课名被挤到截断（真机不截断）。
+ *
+ * 其它机型（4 列桌面、平板、折叠屏）的格子尺寸会有出入，预览只对齐这一台。
  */
 private enum class WidgetPreviewSize(
     val label: String,
@@ -253,12 +256,12 @@ private enum class WidgetPreviewSize(
     val heightDp: Float,
     val caption: String,
 ) {
-    Current("2×1 一行", 110f, 40f, "一行显示正在上 / 下一节"),
-    Today("2×2 今日", 110f, 110f, "今天剩下的两节"),
-    TodayWide("4×2 今日+地点", 250f, 110f, "两节 + 地点老师"),
-    Timeline("4×3 今日课程", 250f, 180f, "剩下的课，最多 7 门"),
-    ThreeDays("4×3 三日", 250f, 180f, "今天 / 明天 / 后天"),
-    Week("4×3 周视图", 250f, 180f, "整周，同一门课跨节连成一块"),
+    Current("2×1 一行", 150f, 89f, "一行显示正在上 / 下一节"),
+    Today("2×2 今日", 150f, 173f, "今天剩下的两节"),
+    TodayWide("4×2 今日+地点", 350f, 173f, "两节 + 地点老师"),
+    Timeline("4×3 今日课程", 350f, 267f, "剩下的课，最多 7 门"),
+    ThreeDays("4×3 三日", 350f, 267f, "今天 / 明天 / 后天"),
+    Week("4×3 周视图", 350f, 267f, "整周，同一门课跨节连成一块"),
 }
 
 private data class MachineGuide(val title: String, val steps: List<String>)
@@ -304,9 +307,9 @@ private val MachineGuides = listOf(
 /**
  * 「桌面」底板 + 等比缩放后的部件。
  *
- * 缩放 = `min(2.4, 330 / 部件宽)`：2x1 只有 110dp 宽，直接把 110dp 画出来太小
- * 看不清文字，所以放大到 2.4 倍封顶；4x3 是 250dp，1.32 倍正好铺满内容宽 330dp。
- * 两种都居中放，外面这圈淡边框表示「桌面上的那一格」。
+ * 缩放 = `min(2.4, 330 / 部件宽)`：2x1 只有 150dp 宽，放大 2.2 倍才看得清文字；
+ * 4x3 是 350dp，0.94 倍正好铺满内容宽 330dp。两种都居中放，
+ * 外面这圈淡边框表示「桌面上的那一格」。
  */
 @Composable
 private fun PreviewFrame(
@@ -378,6 +381,9 @@ private fun PreviewFrame(
                         data = WidgetRender.todayCards(snapshot, now),
                         header = WidgetRender.header(snapshot, now.toLocalDate()),
                         gapDp = 6,
+                        // 真机 widget_today_horizontal.xml：maxWidth 108dp（原 72dp 放不下
+                        // 「综教楼808（智慧课室）」，真机上被截成「综教楼808（…」）
+                        sideMaxWidthDp = 108f,
                     )
 
                     WidgetPreviewSize.Timeline -> PreviewTimeline(
@@ -430,7 +436,7 @@ private fun WidgetSurface(
             Modifier
                 .size(w.dp, h.dp)
                 .clip(RoundedCornerShape(24.dp))
-                .background(colorResource(R.color.widget_bg)),
+                .background(widgetPalette().bg),
             content = content,
         )
     }
@@ -439,6 +445,7 @@ private fun WidgetSurface(
 /** 2x1：圆点 + 时间在上、课名在下 */
 @Composable
 private fun PreviewCurrent(w: Float, h: Float, info: CurrentInfo) {
+    val palette = widgetPalette()
     WidgetSurface(w, h) {
         Box(
             Modifier
@@ -450,7 +457,7 @@ private fun PreviewCurrent(w: Float, h: Float, info: CurrentInfo) {
                 Text(
                     info.emptyText,
                     fontSize = 11.sp,
-                    color = colorResource(R.color.widget_text_weak),
+                    color = palette.textWeak,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -462,14 +469,14 @@ private fun PreviewCurrent(w: Float, h: Float, info: CurrentInfo) {
                         Text(
                             info.time,
                             fontSize = 9.sp,
-                            color = colorResource(R.color.widget_text_dim),
+                            color = palette.textDim,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
                             info.name,
                             fontSize = 11.5.sp,
-                            color = colorResource(R.color.widget_text),
+                            color = palette.text,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -488,7 +495,10 @@ private fun PreviewCards(
     data: TodayCards,
     header: String?,
     gapDp: Int,
+    /** 右侧地点 / 老师列的宽度上限，和真机 XML 的 maxWidth 同口径；2x2 没有这一列 */
+    sideMaxWidthDp: Float = 0f,
 ) {
+    val palette = widgetPalette()
     WidgetSurface(w, h) {
         Column(
             Modifier
@@ -499,7 +509,7 @@ private fun PreviewCards(
                 Text(
                     header,
                     fontSize = 10.sp,
-                    color = colorResource(R.color.widget_text_dim),
+                    color = palette.textDim,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.height(14.dp),
@@ -512,15 +522,23 @@ private fun PreviewCards(
                     Text(
                         data.emptyText,
                         fontSize = 11.sp,
-                        color = colorResource(R.color.widget_text_weak),
+                        color = palette.textWeak,
                         maxLines = 2,
                         textAlign = TextAlign.Center,
                     )
                 }
             } else {
-                TodayCardBlock(data.cards.getOrNull(0), showSide = header != null)
+                TodayCardBlock(
+                    data.cards.getOrNull(0),
+                    showSide = header != null,
+                    sideMaxWidthDp = sideMaxWidthDp,
+                )
                 Spacer(Modifier.height(gapDp.dp))
-                TodayCardBlock(data.cards.getOrNull(1), showSide = header != null)
+                TodayCardBlock(
+                    data.cards.getOrNull(1),
+                    showSide = header != null,
+                    sideMaxWidthDp = sideMaxWidthDp,
+                )
             }
         }
     }
@@ -528,16 +546,21 @@ private fun PreviewCards(
 
 /** 一张课卡。null = 今天只剩一节课，空槽也要留着（否则第一张会被撑满整块） */
 @Composable
-private fun ColumnScope.TodayCardBlock(card: TodayCard?, showSide: Boolean) {
+private fun ColumnScope.TodayCardBlock(
+    card: TodayCard?,
+    showSide: Boolean,
+    sideMaxWidthDp: Float,
+) {
     if (card == null) {
         Spacer(Modifier.fillMaxWidth().weight(1f))
         return
     }
+    val palette = widgetPalette()
     val i = kIndex(card.colorIndex)
     val ongoing = card.ongoing
-    val ink = if (ongoing) colorResource(KText[i]) else colorResource(R.color.widget_text)
-    val sub = if (ongoing) ink else colorResource(R.color.widget_text_dim)
-    val weak = if (ongoing) ink else colorResource(R.color.widget_text_weak)
+    val ink = if (ongoing) palette.kText[i] else palette.text
+    val sub = if (ongoing) ink else palette.textDim
+    val weak = if (ongoing) ink else palette.textWeak
 
     Row(
         Modifier
@@ -545,7 +568,7 @@ private fun ColumnScope.TodayCardBlock(card: TodayCard?, showSide: Boolean) {
             .weight(1f)
             // 只给底色切圆角、不裁内容：真机的背景 drawable 也不裁子视图，
             // 裁了之后胶囊两端会把「地点 / 老师」的边角切掉（截图里已验证）
-            .background(colorResource(if (ongoing) KNow[i] else KBg[i]), RoundedCornerShape(50))
+            .background(if (ongoing) palette.kNow[i] else palette.kBg[i], RoundedCornerShape(50))
             .padding(start = 10.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -571,7 +594,13 @@ private fun ColumnScope.TodayCardBlock(card: TodayCard?, showSide: Boolean) {
         }
         if (showSide) {
             Column(
-                Modifier.padding(start = 7.dp),
+                Modifier
+                    // 真机 widget_today_horizontal.xml 里地点 / 老师是
+                    // `marginStart=7dp + wrap_content + android:maxWidth=108dp`，
+                    // 所以 padding 必须在 widthIn **外面**：写在里面会把内容宽度
+                    // 压成 101dp，「综教楼808（智慧课室）」正好被截成「（智慧课…」
+                    .padding(start = 7.dp)
+                    .widthIn(max = sideMaxWidthDp.dp),
                 horizontalAlignment = Alignment.End,
             ) {
                 if (card.room.isNotBlank()) {
@@ -601,7 +630,7 @@ private fun ColumnScope.TodayCardBlock(card: TodayCard?, showSide: Boolean) {
     }
 }
 
-/** 4x3 今日课程：表头 + 一门课一行（行数按 180dp 的格子算，和真机同口径） */
+/** 4x3 今日课程：表头 + 一门课一行（行数按 267dp 的实测格子算，和真机同口径） */
 @Composable
 private fun PreviewTimeline(
     w: Float,
@@ -609,9 +638,10 @@ private fun PreviewTimeline(
     snapshot: WidgetSnapshotData?,
     now: LocalDateTime,
 ) {
-    // 预览按 180dp 的声明尺寸画，所以这里是 4 行；桌面上格子更大（小米 14 是 267dp）
-    // 时部件自己会算到 7 行 —— 两边同一个算式
+    // 预览按小米 14 实测的 267dp 画，所以这里算到 7 行；桌面上格子更小时部件自己
+    // 会算到 4 行 —— 两边同一个算式
     val data = WidgetRender.todayCourses(snapshot, now, WidgetRender.timelineRowsFor(h.toInt()))
+    val palette = widgetPalette()
 
     WidgetSurface(w, h) {
         Column(
@@ -622,7 +652,7 @@ private fun PreviewTimeline(
             Text(
                 WidgetRender.header(snapshot, now.toLocalDate()),
                 fontSize = 10.sp,
-                color = colorResource(R.color.widget_text_dim),
+                color = palette.textDim,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.height(14.dp),
@@ -635,7 +665,7 @@ private fun PreviewTimeline(
                         Text(
                             data.emptyText,
                             fontSize = 11.sp,
-                            color = colorResource(R.color.widget_text_weak),
+                            color = palette.textWeak,
                             maxLines = 2,
                             textAlign = TextAlign.Center,
                         )
@@ -664,18 +694,19 @@ private fun PreviewTimeline(
 
 @Composable
 private fun ColumnScope.TimelineRowBlock(row: TodayRow, first: Boolean) {
+    val palette = widgetPalette()
     val i = kIndex(row.colorIndex)
     val ongoing = row.state == TodayRowState.ONGOING
-    val ink = if (ongoing) colorResource(KText[i]) else colorResource(R.color.widget_text)
-    val sub = if (ongoing) ink else colorResource(R.color.widget_text_dim)
-    val weak = if (ongoing) ink else colorResource(R.color.widget_text_weak)
+    val ink = if (ongoing) palette.kText[i] else palette.text
+    val sub = if (ongoing) ink else palette.textDim
+    val weak = if (ongoing) ink else palette.textWeak
 
     Row(
         Modifier
             .fillMaxWidth()
             .weight(1f)
             .padding(top = if (first) 0.dp else 2.dp)
-            .background(colorResource(if (ongoing) KNow[i] else KBg[i]), RoundedCornerShape(50))
+            .background(if (ongoing) palette.kNow[i] else palette.kBg[i], RoundedCornerShape(50))
             .padding(start = 10.dp, end = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -707,7 +738,12 @@ private fun ColumnScope.TimelineRowBlock(row: TodayRow, first: Boolean) {
         )
         if (row.room.isNotBlank() || row.teacher.isNotBlank()) {
             Column(
-                Modifier.padding(start = 6.dp),
+                Modifier
+                    // 真机 widget_timeline.xml 的 tl{n}_room / tl{n}_teacher 是
+                    // `marginStart=6dp + android:maxWidth=120dp`，padding 要在
+                    // widthIn 外面，否则内容只剩 114dp
+                    .padding(start = 6.dp)
+                    .widthIn(max = 120.dp),
                 horizontalAlignment = Alignment.End,
             ) {
                 if (row.room.isNotBlank()) {
@@ -744,10 +780,11 @@ private fun PreviewThreeDays(
     now: LocalDateTime,
 ) {
     val columns = WidgetRender.threeDays(snapshot, now, 4)
-    val accent = colorResource(R.color.widget_accent)
-    val text = colorResource(R.color.widget_text)
-    val dim = colorResource(R.color.widget_text_dim)
-    val weak = colorResource(R.color.widget_text_weak)
+    val palette = widgetPalette()
+    val accent = palette.accent
+    val text = palette.text
+    val dim = palette.textDim
+    val weak = palette.textWeak
     val nowMinute = now.hour * 60 + now.minute
 
     WidgetSurface(w, h) {
@@ -807,7 +844,7 @@ private fun PreviewThreeDays(
                                     val ongoing = nowMinute >= course.startMinute &&
                                         nowMinute < course.endMinute
                                     val ink = if (ongoing) {
-                                        colorResource(KText[ci])
+                                        palette.kText[ci]
                                     } else {
                                         text
                                     }
@@ -816,7 +853,7 @@ private fun PreviewThreeDays(
                                             .fillMaxWidth()
                                             .weight(1f)
                                             .background(
-                                                colorResource(if (ongoing) KNow[ci] else KBg[ci]),
+                                                if (ongoing) palette.kNow[ci] else palette.kBg[ci],
                                                 RoundedCornerShape(50),
                                             )
                                             .padding(horizontal = 6.dp),
@@ -865,7 +902,7 @@ private fun ColumnScope.Slot(label: String, color: Color) {
     }
 }
 
-/** 4x3 周视图：表头 + 星期行 + 从当前节次开始的 5 行网格 */
+/** 4x3 周视图：表头 + 星期行 + 1~9 节网格（真机首屏就是这么几行，可往下滚） */
 @Composable
 private fun PreviewWeek(
     w: Float,
@@ -874,11 +911,13 @@ private fun PreviewWeek(
     now: LocalDateTime,
 ) {
     val grid = WidgetRender.weekGrid(snapshot, now)
-    val dim = colorResource(R.color.widget_text_dim)
-    val accent = colorResource(R.color.widget_accent)
-    val unitRows = 5
-    // 真机是 ListView 打开就滚到当前节次，这里照同样口径截一段窗口
-    val start = WidgetRender.currentRow(now).coerceIn(0, (WeekUnitCount - unitRows).coerceAtLeast(0))
+    val palette = widgetPalette()
+    val dim = palette.textDim
+    val accent = palette.accent
+    // 真机 4x3 的 ListView 首屏显示 1~9 节（第 10~12 节要往下滚），预览也画 9 行，
+    // 不再按当前节次截窗 —— 打开时定位到当前节次只是 ListView 的行为，不是版式
+    val unitRows = 9
+    val nowRow = WidgetRender.currentRow(now)
 
     WidgetSurface(w, h) {
         Column(
@@ -925,13 +964,19 @@ private fun PreviewWeek(
             }
             Spacer(Modifier.height(2.dp))
 
-            (start until start + unitRows).forEach { idx ->
-                val unit = idx + 1
-                Row(Modifier.fillMaxWidth().weight(1f)) {
+            (1..unitRows).forEach { unit ->
+                // 当前节次：整行一条淡色横带 + 节次号变主题色（和 WidgetWeekService 一致）
+                val isNow = unit - 1 == nowRow
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .background(if (isNow) palette.weekRowNow else Color.Transparent),
+                ) {
                     Text(
                         "$unit",
                         fontSize = 8.sp,
-                        color = dim,
+                        color = if (isNow) accent else dim,
                         maxLines = 1,
                         modifier = Modifier.width(26.dp),
                     )
@@ -946,7 +991,7 @@ private fun PreviewWeek(
                                 .padding(start = 1.dp, top = 1.dp, bottom = 1.dp)
                                 .clip(weekCellShape(cell.role))
                                 .background(
-                                    if (hasCourse) colorResource(KBg[ci]) else Color.Transparent,
+                                    if (hasCourse) palette.kBg[ci] else Color.Transparent,
                                 )
                                 .padding(horizontal = 2.dp),
                             contentAlignment = Alignment.Center,
@@ -957,7 +1002,7 @@ private fun PreviewWeek(
                                     cell.name,
                                     fontSize = 7.5.sp,
                                     lineHeight = 8.5.sp,
-                                    color = colorResource(R.color.widget_text),
+                                    color = palette.text,
                                     maxLines = cell.span,
                                     overflow = TextOverflow.Ellipsis,
                                     textAlign = TextAlign.Center,
@@ -986,34 +1031,12 @@ private const val KCount = 8
 /** 越界按环形取，和 WidgetProvider 里的 kIndex 同口径，绝不抛异常 */
 private fun kIndex(raw: Int): Int = ((raw % KCount) + KCount) % KCount
 
-private val KBg = intArrayOf(
-    R.color.widget_k1, R.color.widget_k2, R.color.widget_k3, R.color.widget_k4,
-    R.color.widget_k5, R.color.widget_k6, R.color.widget_k7, R.color.widget_k8,
-)
-
-/** 「正在上」的 26% 底 */
-private val KNow = intArrayOf(
-    R.color.widget_k1_now, R.color.widget_k2_now, R.color.widget_k3_now, R.color.widget_k4_now,
-    R.color.widget_k5_now, R.color.widget_k6_now, R.color.widget_k7_now, R.color.widget_k8_now,
-)
-
-/** 块内文字色（块底上的同色系深 / 亮色） */
-private val KText = intArrayOf(
-    R.color.widget_k1_text, R.color.widget_k2_text, R.color.widget_k3_text, R.color.widget_k4_text,
-    R.color.widget_k5_text, R.color.widget_k6_text, R.color.widget_k7_text, R.color.widget_k8_text,
-)
-
-private val KDot = intArrayOf(
-    R.color.widget_k1_dot, R.color.widget_k2_dot, R.color.widget_k3_dot, R.color.widget_k4_dot,
-    R.color.widget_k5_dot, R.color.widget_k6_dot, R.color.widget_k7_dot, R.color.widget_k8_dot,
-)
-
 @Composable
 private fun Dot(diameter: Int, colorIndex: Int) {
     Box(
         Modifier
             .size(diameter.dp)
             .clip(CircleShape)
-            .background(colorResource(KDot[kIndex(colorIndex)])),
+            .background(widgetPalette().kDot[kIndex(colorIndex)]),
     )
 }
