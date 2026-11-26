@@ -1,9 +1,14 @@
 package com.gzucm.pocket
 
 import com.gzucm.pocket.widget.SnapshotSession
+import com.gzucm.pocket.widget.TodayRowState
+import com.gzucm.pocket.widget.WeekColorCount
+import com.gzucm.pocket.widget.WeekRowHeightDp
+import com.gzucm.pocket.widget.WeekUnitCount
 import com.gzucm.pocket.widget.WidgetRender
 import com.gzucm.pocket.widget.WidgetSnapshotData
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -33,6 +38,7 @@ class WidgetRenderTest {
         endTime: String,
         week: Int = 1,
         room: String = "综教楼101",
+        teacher: String = "",
     ) = SnapshotSession(
         week = week,
         weekday = weekday,
@@ -42,6 +48,7 @@ class WidgetRenderTest {
         endTime = endTime,
         name = name,
         room = room,
+        teacher = teacher,
     )
 
     private fun snapshot(vararg sessions: SnapshotSession) = WidgetSnapshotData(
@@ -316,5 +323,217 @@ class WidgetRenderTest {
             s("中药学", weekday = 1, startUnit = 1, endUnit = 2, startTime = "08:30", endTime = "10:00"),
         )
         assertEquals(1, WidgetRender.coursesOn(data, monday).size)
+    }
+
+    // ── 2x2 / 4x2 两张卡片 ────────────────────────────────────────
+
+    @Test
+    fun `两卡片_正在上课时第一张卡是当前课且高亮`() {
+        val data = WidgetRender.todayCards(normalMonday(), at(0, 10, 40))
+
+        assertNull("有课时不该给空态文案", data.emptyText)
+        assertEquals(1, data.cards.size)
+        val first = data.cards.first()
+        assertEquals("中医诊断学", first.name)
+        assertEquals("10:20", first.startText)
+        assertEquals("11:50", first.endText)
+        assertTrue("正在上的课必须高亮", first.ongoing)
+    }
+
+    @Test
+    fun `两卡片_正在上课时第二张卡是再下一节`() {
+        val data = snapshot(
+            s("外科学(2)", weekday = 1, startUnit = 3, endUnit = 4, startTime = "10:20", endTime = "11:50", room = "综教808", teacher = "张伟"),
+            s("中医骨伤科学", weekday = 1, startUnit = 5, endUnit = 6, startTime = "13:10", endTime = "14:40", room = "新课室202", teacher = "李娜"),
+        )
+        val cards = WidgetRender.todayCards(data, at(0, 10, 40)).cards
+
+        assertEquals(2, cards.size)
+        assertEquals("外科学(2)", cards[0].name)
+        assertTrue(cards[0].ongoing)
+        assertEquals("中医骨伤科学", cards[1].name)
+        assertFalse("下一节不能用主题色", cards[1].ongoing)
+        // 4x2 才有的两栏
+        assertEquals("综教808", cards[0].room)
+        assertEquals("张伟", cards[0].teacher)
+        assertEquals("新课室202", cards[1].room)
+    }
+
+    @Test
+    fun `两卡片_课间时第一张卡是下一节且不高亮`() {
+        // 10:00 下课、10:20 上课，10:05 是课间
+        val data = WidgetRender.todayCards(normalMonday(), at(0, 10, 5))
+
+        assertEquals("中医诊断学", data.cards.first().name)
+        assertFalse("课间不能高亮，否则用户以为已经上课了", data.cards.first().ongoing)
+    }
+
+    @Test
+    fun `两卡片_课都上完后合并成今天没课了`() {
+        val data = WidgetRender.todayCards(normalMonday(), at(0, 21, 0))
+
+        assertTrue(data.cards.isEmpty())
+        assertEquals("今天没课了", data.emptyText)
+    }
+
+    @Test
+    fun `两卡片_周日合并成今天没课了`() {
+        val data = WidgetRender.todayCards(normalMonday(), at(6, 10, 0))
+        assertTrue(data.cards.isEmpty())
+        assertEquals("今天没课了", data.emptyText)
+    }
+
+    @Test
+    fun `两卡片_没同步过提示去App同步`() {
+        val data = WidgetRender.todayCards(null, at(0, 10, 0))
+        assertTrue(data.cards.isEmpty())
+        assertEquals("打开 App 同步课表", data.emptyText)
+    }
+
+    @Test
+    fun `多个老师只取第一个`() {
+        val data = snapshot(
+            s("外科学", weekday = 1, startUnit = 3, endUnit = 4, startTime = "10:20", endTime = "11:50", teacher = "张伟,李娜"),
+        )
+        assertEquals("张伟", WidgetRender.todayCards(data, at(0, 10, 40)).cards.first().teacher)
+    }
+
+    @Test
+    fun `老快照没有老师字段时老师为空串不崩`() {
+        // SnapshotSession.teacher 有默认值，老 JSON 解出来就是 ""
+        val data = snapshot(
+            s("外科学", weekday = 1, startUnit = 3, endUnit = 4, startTime = "10:20", endTime = "11:50"),
+        )
+        val card = WidgetRender.todayCards(data, at(0, 10, 40)).cards.first()
+        assertEquals("", card.teacher)
+        assertEquals("综教楼101", card.room)
+    }
+
+    // ── 4x4 节次列表 ──────────────────────────────────────────────
+
+    @Test
+    fun `节次列表给出节次标签和时间并标状态`() {
+        val list = WidgetRender.todayList(normalMonday(), at(0, 10, 40), max = 7)
+
+        assertNull(list.emptyText)
+        assertEquals(listOf("1-2", "3-4"), list.rows.map { it.unitText })
+        assertEquals(listOf("08:30", "10:20"), list.rows.map { it.timeText })
+        assertEquals(listOf("中药学", "中医诊断学"), list.rows.map { it.name })
+        assertEquals(TodayRowState.PAST, list.rows[0].state)
+        assertEquals(TodayRowState.ONGOING, list.rows[1].state)
+    }
+
+    @Test
+    fun `节次列表空的时候给空态文案`() {
+        val list = WidgetRender.todayList(snapshot(), at(0, 10, 0))
+        assertTrue(list.rows.isEmpty())
+        assertEquals("打开 App 同步课表", list.emptyText)
+    }
+
+    @Test
+    fun `节次列表超出行数时最后一行是还有N节`() {
+        val data = snapshot(
+            *(1..4).map { i ->
+                s("课$i", weekday = 1, startUnit = i, endUnit = i, startTime = "%02d:00".format(8 + i), endTime = "%02d:40".format(8 + i))
+            }.toTypedArray(),
+        )
+        val list = WidgetRender.todayList(data, at(0, 7, 0), max = 3)
+
+        assertEquals(3, list.rows.size)
+        assertEquals(1, list.overflow)
+        assertEquals("还有 1 节", list.rows.last().name)
+    }
+
+    // ── 4x3 周视图 ────────────────────────────────────────────────
+
+    @Test
+    fun `周视图同一门课跨周颜色一致`() {
+        val data = snapshot(
+            s("中医骨伤科学", weekday = 1, startUnit = 3, endUnit = 4, startTime = "10:20", endTime = "11:50", week = 1),
+            s("中医骨伤科学", weekday = 1, startUnit = 3, endUnit = 4, startTime = "10:20", endTime = "11:50", week = 2),
+        )
+        // 列 1 = 周一
+        val week1 = WidgetRender.weekGrid(data, at(0, 7, 0))
+        val week2 = WidgetRender.weekGrid(data, at(7, 7, 0))
+
+        assertTrue(week1.cell(3, 1).colorIndex in 0 until WeekColorCount)
+        assertEquals(week1.cell(3, 1).colorIndex, week2.cell(3, 1).colorIndex)
+        assertEquals(week1.cell(3, 1).colorIndex, WidgetRender.colorIndexFor("中医骨伤科学"))
+    }
+
+    @Test
+    fun `周视图第1到2节连上的课跨两行`() {
+        val data = snapshot(
+            s("外科学", weekday = 1, startUnit = 1, endUnit = 2, startTime = "08:30", endTime = "10:00"),
+        )
+        val grid = WidgetRender.weekGrid(data, at(0, 7, 0))
+
+        val start = grid.cell(1, 1)
+        assertTrue(start.isStart)
+        assertEquals(2, start.span)
+        assertEquals(WeekRowHeightDp * 2, start.heightDp)
+        assertEquals("外科学", start.name)
+        assertEquals("08:30", start.time)
+
+        // 第 2 节是同色留空的续格
+        val second = grid.cell(2, 1)
+        assertTrue(second.covered)
+        assertFalse(second.isStart)
+        assertNull(second.name)
+        assertEquals(start.colorIndex, second.colorIndex)
+    }
+
+    @Test
+    fun `周视图是7列12节且今天列按周日在前算`() {
+        // 2026-09-07 是周一 → 列 1
+        val grid = WidgetRender.weekGrid(normalMonday(), at(0, 7, 0))
+
+        assertEquals(84, grid.cells.size)
+        assertEquals(1, grid.todayCol)
+        assertEquals(listOf("日", "一", "二", "三", "四", "五", "六"), grid.weekdays)
+        // 周日在前：9月7日那周的周日是 9月6日
+        assertEquals("6", grid.dates.first())
+        assertEquals("12", grid.dates.last())
+        // 周一的课落在列 1
+        assertEquals("中药学", grid.cell(1, 1).name)
+        assertNull(grid.cell(1, 0).name)
+    }
+
+    @Test
+    fun `周视图表头说明今天的状态`() {
+        assertEquals("第 1 周 · 正在上 中医诊断学", WidgetRender.weekHeader(normalMonday(), at(0, 10, 40)))
+        assertEquals("第 1 周 · 下一节 10:20", WidgetRender.weekHeader(normalMonday(), at(0, 10, 5)))
+        assertEquals("第 1 周 · 今日课程已结束", WidgetRender.weekHeader(normalMonday(), at(0, 21, 0)))
+        assertEquals("打开 App 同步课表", WidgetRender.weekHeader(null, at(0, 10, 0)))
+    }
+
+    @Test
+    fun `周视图行数固定12节 行号才等于节次`() {
+        assertEquals(12, WeekUnitCount)
+        // 一节课都没有时也要有 12 行占位，否则 ListView 的行号对不上节次
+        val empty = WidgetRender.weekGrid(snapshot(), at(0, 9, 0))
+        assertEquals(WeekUnitCount, empty.units.size)
+        assertEquals(WeekUnitCount * 7, empty.cells.size)
+    }
+
+    @Test
+    fun `当前节次行号按课时表算且课间落在下一节`() {
+        // 早于第一节 → 第 1 行
+        assertEquals(0, WidgetRender.currentRow(at(0, 7, 0)))
+        assertEquals(0, WidgetRender.currentRow(at(0, 8, 30)))
+
+        // 09:10–09:20 是第 1、2 节之间的课间 → 停在还没开始的第 2 节
+        assertEquals(1, WidgetRender.currentRow(at(0, 9, 15)))
+        assertEquals(1, WidgetRender.currentRow(at(0, 9, 30)))
+
+        // 10:00–10:20 大课间 → 第 3 节
+        assertEquals(2, WidgetRender.currentRow(at(0, 10, 10)))
+
+        // 12:00 午休 → 下午第一节（第 5 节）
+        assertEquals(4, WidgetRender.currentRow(at(0, 12, 59)))
+
+        // 最后一节之后不越界
+        assertEquals(WeekUnitCount - 1, WidgetRender.currentRow(at(0, 21, 30)))
+        assertEquals(WeekUnitCount - 1, WidgetRender.currentRow(at(0, 23, 59)))
     }
 }

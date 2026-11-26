@@ -27,6 +27,14 @@ data class SnapshotSession(
     val endTime: String,
     val name: String,
     val room: String,
+    /**
+     * 任课老师（`CourseSession.teachers`，可能是「张伟,李娜」这种逗号串）。
+     *
+     * **必须带默认值**：升级前写下的老快照里没有这个字段，
+     * kotlinx.serialization 靠默认值才能把老 JSON 解出来。
+     * 老数据读出来是空串，4x2 会整栏隐藏，不会留一片空白。
+     */
+    val teacher: String = "",
 )
 
 /**
@@ -82,6 +90,7 @@ object WidgetSnapshot {
                     endTime = it.endTime,
                     name = it.name,
                     room = it.room,
+                    teacher = it.teachers,
                 )
             }.distinct(),
             savedAt = System.currentTimeMillis(),

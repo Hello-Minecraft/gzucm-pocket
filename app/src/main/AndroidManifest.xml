@@ -164,10 +164,10 @@
         </receiver>
 
         <!--
-            ── 桌面课表部件（5 个独立部件）─────────────────────────────────
+            ── 桌面课表部件（6 个独立部件）─────────────────────────────────
 
             每个部件都是**独立的 receiver + 独立的 appwidget-provider 配置**，
-            所以桌面「添加小部件」列表里是 5 条并列的条目，而不是一个部件里的
+            所以桌面「添加小部件」列表里是 6 条并列的条目，而不是一个部件里的
             模式切换。label 见 values/strings.xml（统一前缀「课表 · 」）。
 
             几条硬约束（都是查证过的，不要「优化」掉）：
@@ -243,6 +243,36 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_three_days_info" />
         </receiver>
+
+        <receiver
+            android:name=".widget.WeekWidget"
+            android:exported="false"
+            android:label="@string/widget_week_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_week_info" />
+        </receiver>
+
+        <!--
+            周视图 4x3 的列表数据源（ListView 的 RemoteViewsService）。
+
+            为什么只有它有 Service：其余五个部件的内容是固定的几个 View，
+            一次 RemoteViews 就能画完；周视图是 12 节 × 7 天，而且需要
+            「滚到当前节次」—— 只有 ListView 的 setScrollPosition 能做到，
+            ListView 在 RemoteViews 里的数据必须由 RemoteViewsService 提供。
+
+            BIND_REMOTEVIEWS：系统（宿主进程）绑定这个 Service 时校验它，
+            没有这条声明，部件里会是一个永远转圈的空列表。
+            exported=false：绑定方是系统 AppWidget 服务，走的是权限校验，
+            不需要导出。
+        -->
+        <service
+            android:name=".widget.WidgetWeekService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
 
 </application>
 

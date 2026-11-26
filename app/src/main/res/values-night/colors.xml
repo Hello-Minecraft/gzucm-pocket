@@ -15,10 +15,34 @@
     <color name="widget_text">#E9EDF0</color>
     <color name="widget_text_dim">#9AA3AE</color>
     <color name="widget_accent">#4ADE9B</color>
-    <color name="widget_block">#1A2620</color>
+    <color name="widget_block">#26382F</color>
     <color name="widget_block_text">#CFE9DC</color>
     <color name="widget_block_now">#4ADE9B</color>
     <color name="widget_block_now_text">#00281A</color>
-    <color name="widget_block_past">#191D23</color>
+    <color name="widget_block_past">#20262E</color>
     <color name="widget_block_past_text">#6B747E</color>
+
+    <!-- 周视图配色：深色模式反过来 —— 深底 + 浅字，色相和浅色一一对应 -->
+    <color name="widget_c1">#26382F</color>
+    <color name="widget_c1_text">#CFE9DC</color>
+    <color name="widget_c2">#1E3348</color>
+    <color name="widget_c2_text">#CFE3F7</color>
+    <color name="widget_c3">#3D2E1C</color>
+    <color name="widget_c3_text">#F7DFC0</color>
+    <color name="widget_c4">#32263F</color>
+    <color name="widget_c4_text">#E4D6F5</color>
+    <color name="widget_c5">#3D2222</color>
+    <color name="widget_c5_text">#F5D6D6</color>
+    <color name="widget_c6">#29361F</color>
+    <color name="widget_c6_text">#DCEFC8</color>
+    <color name="widget_c7">#1F3535</color>
+    <color name="widget_c7_text">#CDEAEA</color>
+    <color name="widget_c8">#33301F</color>
+    <color name="widget_c8_text">#EAE4CC</color>
+
+    <!--
+        深色下不能照抄浅色的 8% 黑系叠加：底色本来就深，再压一层看不出来。
+        改用浅色主题色按 12% 叠，效果同样是「微微提亮一档」。
+    -->
+    <color name="widget_week_row_now">#1F4ADE9B</color>
 </resources>

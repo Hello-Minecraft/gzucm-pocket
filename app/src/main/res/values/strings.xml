@@ -9,10 +9,11 @@
         必须一眼区分出尺寸/内容，所以统一前缀「课表 · 」。
     -->
     <string name="widget_current_label">课表 · 当前课程</string>
-    <string name="widget_today_label">课表 · 今日</string>
-    <string name="widget_today_horizontal_label">课表 · 今日横排</string>
-    <string name="widget_timeline_label">课表 · 今日时间轴</string>
-    <string name="widget_three_days_label">课表 · 三天</string>
+    <string name="widget_today_label">课表 · 今日 2×2</string>
+    <string name="widget_today_horizontal_label">课表 · 今日 4×2</string>
+    <string name="widget_timeline_label">课表 · 今日 4×4</string>
+    <string name="widget_three_days_label">课表 · 三天 4×3</string>
+    <string name="widget_week_label">课表 · 周视图 4×3</string>
 
     <string name="widget_refresh">刷新课表</string>
 

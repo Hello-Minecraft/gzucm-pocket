@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    周视图的一行：2dp 指示线 + 节次列 + 7 个日列。
+
+    这个布局由 WidgetWeekService 逐行 inflate（RemoteViewsService 的
+    getViewAt 返回 RemoteViews），所以**不能**在里面放 ScrollView / ListView；
+    7 个日列只能用 LinearLayout 平铺。
+
+    行高固定：2dp 线 + 24dp 内容 = 26dp。线在非当前行是透明色而不是 GONE ——
+    一旦某行矮 2dp，ListView 的 item 高度就不一致，行号也就不能当节次用了。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <!--
+        当前节次的指示线。用 FrameLayout 而不是裸 <View>：RemoteViews 的
+        inflate 只放行 android.widget.* 里的类，裸 View 在部分 ROM 上直接失败。
+        颜色和显隐都由 Kotlin 侧 setBackgroundColor 控制。
+    -->
+    <FrameLayout
+        android:id="@+id/wk_row_line"
+        android:layout_width="match_parent"
+        android:layout_height="2dp"
+        android:background="@android:color/transparent" />
+
+    <LinearLayout
+        android:id="@+id/wk_row_body"
+        android:layout_width="match_parent"
+        android:layout_height="24dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/wk_row_unit"
+            android:layout_width="30dp"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:maxLines="2"
+            android:textColor="@color/widget_text_dim"
+            android:textSize="7sp" />
+
+        <TextView
+            android:id="@+id/wk_row_c0"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="1dp"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="2"
+            android:paddingStart="1dp"
+            android:paddingEnd="1dp"
+            android:textColor="@color/widget_text"
+            android:textSize="7sp" />
+
+        <TextView
+            android:id="@+id/wk_row_c1"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="1dp"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="2"
+            android:paddingStart="1dp"
+            android:paddingEnd="1dp"
+            android:textColor="@color/widget_text"
+            android:textSize="7sp" />
+
+        <TextView
+            android:id="@+id/wk_row_c2"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="1dp"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="2"
+            android:paddingStart="1dp"
+            android:paddingEnd="1dp"
+            android:textColor="@color/widget_text"
+            android:textSize="7sp" />
+
+        <TextView
+            android:id="@+id/wk_row_c3"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="1dp"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="2"
+            android:paddingStart="1dp"
+            android:paddingEnd="1dp"
+            android:textColor="@color/widget_text"
+            android:textSize="7sp" />
+
+        <TextView
+            android:id="@+id/wk_row_c4"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="1dp"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="2"
+            android:paddingStart="1dp"
+            android:paddingEnd="1dp"
+            android:textColor="@color/widget_text"
+            android:textSize="7sp" />
+
+        <TextView
+            android:id="@+id/wk_row_c5"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="1dp"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="2"
+            android:paddingStart="1dp"
+            android:paddingEnd="1dp"
+            android:textColor="@color/widget_text"
+            android:textSize="7sp" />
+
+        <TextView
+            android:id="@+id/wk_row_c6"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="1dp"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="2"
+            android:paddingStart="1dp"
+            android:paddingEnd="1dp"
+            android:textColor="@color/widget_text"
+            android:textSize="7sp" />
+    </LinearLayout>
+</LinearLayout>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    4x3 周视图：7 天 × 12 节的网格，照小米自带课表的样子。
+
+    尺寸 250×180dp = 4×3 格。网格本身比视口高（12 节 × 26dp ≈ 312dp），
+    正文是 ListView（数据来自 WidgetWeekService），点开时自动滚到当前节次。
+    预览图里列表区域是空的：RemoteViews 的 previewLayout 不跑
+    RemoteViewsService，表头和日期行照常显示。
+
+    只用 minWidth/minHeight，不写 targetCell*；updatePeriodMillis = 0；
+    不声明 android:configure（荣耀 MagicOS 会把带 configure 的添加流程丢掉）。
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:initialLayout="@layout/widget_week"
+    android:minWidth="250dp"
+    android:minHeight="180dp"
+    android:previewLayout="@layout/widget_week"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

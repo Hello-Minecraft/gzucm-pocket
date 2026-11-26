@@ -8,6 +8,23 @@ import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
 
 /**
+ * 周视图一行（一节课）的内容高度。**必须和 widget_week_row.xml 里
+ * `wk_row_body` 的 24dp 一致**（行上方另有 2dp 指示线，不算在这里）。
+ */
+const val WeekRowHeightDp = 24
+
+/**
+ * 周视图固定 12 节。
+ *
+ * **不能按当天有几节课来定行数**：ListView 的 setScrollPosition 收的是行号，
+ * 只有「第 n 行就是第 n 节」这个前提成立，定位才算得准。没课的节次也要占位。
+ */
+const val WeekUnitCount = 12
+
+/** 周视图的配色数量，对应 @color/widget_c1..c8 和 @drawable/widget_week_1..8 */
+const val WeekColorCount = 8
+
+/**
  * 一节课，只带渲染要用的字段。
  *
  * 时间和节次两套坐标都留着：显示用时间，判断「正在上」优先用时间
@@ -20,6 +37,8 @@ data class WidgetCourse(
     val endTime: String,
     val startUnit: Int,
     val endUnit: Int,
+    /** 任课老师，可能是「张伟,李娜」。老快照没有这个字段时是空串 */
+    val teacher: String = "",
 ) {
     /** 显示用的上课时间。数据里没有就按节次表补 —— 和 App 内 `timesOf()` 同一口径 */
     val startText: String get() = startTime.ifBlank { SlotTimes[startUnit].orEmpty() }
@@ -35,6 +54,20 @@ data class WidgetCourse(
         // 退回「上课 + 40 分钟」（广中医一节课的长度）。
         if (it == Int.MAX_VALUE) startMinute + 40 else it
     }
+
+    /**
+     * 4x2 的老师列只有 34dp，两个老师的逗号串一定显示不下。
+     * 取第一个 —— 用户在桌面上要的是「这门课谁上的」这个线索，不是完整名单。
+     */
+    val teacherText: String
+        get() = teacher.split(',', '，', '、', ';', '；')
+            .firstOrNull { it.isNotBlank() }
+            ?.trim()
+            .orEmpty()
+
+    /** 节次标签：「1-2」/「3」 */
+    val unitText: String
+        get() = if (endUnit > startUnit) "$startUnit-$endUnit" else "$startUnit"
 }
 
 /** 4x2 横排：最多 max 块 + 「还有 N 节」 */
@@ -67,6 +100,95 @@ data class DayColumn(
 )
 
 /**
+ * 2x2 / 4x2 的一张卡片。
+ *
+ * 两张卡片的版式一样，差别只在 4x2 多两栏（地点、老师），所以数据层不区分尺寸，
+ * 由 Provider 决定填几个字段。
+ */
+data class TodayCard(
+    val startText: String,
+    val endText: String,
+    val name: String,
+    val room: String,
+    val teacher: String,
+    /** true = 正在上，整张卡用主题色 */
+    val ongoing: Boolean,
+)
+
+/**
+ * 2x2 / 4x2 的卡片数据。
+ *
+ * [emptyText] 非空 = 两张卡合并成一句话（「今天没课了」/「打开 App 同步课表」），
+ * 这时 [cards] 一定为空 —— 两个状态互斥，Provider 不用再判一次。
+ */
+data class TodayCards(
+    val cards: List<TodayCard>,
+    val emptyText: String?,
+)
+
+/** 一节次列表行的状态。样式由 Provider 按它选背景/文字色 */
+enum class TodayRowState { UPCOMING, ONGOING, PAST }
+
+/** 4x4 节次列表的一行 */
+data class TodayRow(
+    val unitText: String,
+    val timeText: String,
+    val name: String,
+    val room: String,
+    val state: TodayRowState,
+)
+
+/** 4x4 节次列表的数据。[overflow] > 0 时最后一行是「还有 N 节」 */
+data class TodayList(
+    val rows: List<TodayRow>,
+    val overflow: Int,
+    val emptyText: String?,
+)
+
+/**
+ * 周视图的一个格子。
+ *
+ * 跨节的课（第 1-2 节连上）在数据层就是两个格子：
+ * 起始格 [isStart] = true、[span] = 2、带课名和时间；后续格 [covered] = true、
+ * 只有颜色没有字。视觉上两格同色相接 = 一个高块。
+ *
+ * 为什么不在运行时把起始格的 layout_height 改成两倍：RemoteViews 的
+ * `setInt(..., "setMinimumHeight", ...)` 不是 @RemotableViewMethod，宿主要抛
+ * ActionException；能改高度的 `setViewLayoutHeight` 要 API 31，本项目 minSdk 26。
+ */
+data class WeekCell(
+    val unit: Int,
+    /** 0..6，0 = 周日（和表头一致） */
+    val col: Int,
+    val name: String?,
+    val time: String?,
+    /** -1 = 这格没课 */
+    val colorIndex: Int,
+    val isStart: Boolean,
+    val covered: Boolean,
+    /** 只有起始格有意义：这门课跨几节 */
+    val span: Int,
+) {
+    /** 块高度 = 跨的节数 × 行高。仅起始格有意义 */
+    val heightDp: Int get() = if (isStart) span * WeekRowHeightDp else 0
+}
+
+/** 周视图网格。[cells] 行优先：`(unit-1) * 7 + col` */
+data class WeekGrid(
+    val header: String,
+    val weekdays: List<String>,
+    /** 表头第二行的日期数字 */
+    val dates: List<String>,
+    /** 今天在第几列，-1 = 今天不在这一周（学期外） */
+    val todayCol: Int,
+    val units: List<Int>,
+    val cells: List<WeekCell>,
+    val emptyText: String?,
+) {
+    fun cell(unit: Int, col: Int): WeekCell = cells[(unit - 1) * 7 + col]
+}
+
+/**
  * 部件渲染的**纯函数**层：快照 + 时间 → 要显示的内容。
  *
  * 全部逻辑都在这里，Provider 只负责把结果塞进 RemoteViews。
@@ -83,6 +205,9 @@ object WidgetRender {
     const val NoMoreText = "今天没课了"
 
     private val WEEKDAY_NAMES = arrayOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+
+    /** 周视图表头用的单字，顺序是**周日在前** */
+    private val WEEKDAY_CHARS = arrayOf("日", "一", "二", "三", "四", "五", "六")
 
     /**
      * 这一天属于第几周。
@@ -119,6 +244,7 @@ object WidgetRender {
                     endTime = it.endTime,
                     startUnit = it.startUnit,
                     endUnit = it.endUnit,
+                    teacher = it.teacher,
                 )
             }
             // 教务偶尔同一节课给两条（合班/分班各算一次），只留一条
@@ -254,5 +380,197 @@ object WidgetRender {
                 isToday = offset == 0,
             )
         }
+    }
+
+    // ── 2x2 / 4x2 两张卡片 ──────────────────────────────────────────
+
+    /**
+     * 两张卡片的内容。
+     *
+     * 三种情况（对应三个真机场景）：
+     *   · 正在上课 → 上卡就是这节课（主题色底），下卡是再下一节
+     *   · 课间 / 早上第一节课前 → 上卡是下一节，下卡是再下一节，都用普通色
+     *   · 今天没课了 / 从没同步过 → [TodayCards.emptyText] 非空，两卡合并成一句话
+     *
+     * 为什么课间不用主题色：用户看到的「正在上」必须真的是在上课，
+     * 课间高亮会让人以为已经上课了。
+     */
+    fun todayCards(snapshot: WidgetSnapshotData?, now: LocalDateTime): TodayCards {
+        val today = snapshot?.let { coursesOn(it, now.toLocalDate()) }.orEmpty()
+        val nowMinute = now.hour * 60 + now.minute
+
+        val ongoing = today.firstOrNull { nowMinute >= it.startMinute && nowMinute < it.endMinute }
+        val cards = if (ongoing != null) {
+            val next = today.firstOrNull { it !== ongoing && it.startMinute > nowMinute }
+            listOfNotNull(ongoing.toCard(ongoing = true), next?.toCard(ongoing = false))
+        } else {
+            today.filter { it.endMinute > nowMinute }
+                .take(2)
+                .map { it.toCard(ongoing = false) }
+        }
+        return TodayCards(cards, if (cards.isEmpty()) emptyText(snapshot) else null)
+    }
+
+    private fun WidgetCourse.toCard(ongoing: Boolean) = TodayCard(
+        startText = startText,
+        endText = endText,
+        name = name,
+        room = room,
+        teacher = teacherText,
+        ongoing = ongoing,
+    )
+
+    // ── 4x4 节次列表 ────────────────────────────────────────────────
+
+    /**
+     * 今天的课按节次排成一列，最多 [max] 行。
+     *
+     * 超过 [max] 时**最后一行换成「还有 N 节」**，而不是硬截断 ——
+     * 一眼能看到「今天还有课」，不至于以为课表就到这儿了。
+     */
+    fun todayList(snapshot: WidgetSnapshotData?, now: LocalDateTime, max: Int = 7): TodayList {
+        val today = snapshot?.let { coursesOn(it, now.toLocalDate()) }.orEmpty()
+        if (today.isEmpty()) return TodayList(emptyList(), 0, emptyText(snapshot))
+
+        val nowMinute = now.hour * 60 + now.minute
+        fun row(c: WidgetCourse) = TodayRow(
+            unitText = c.unitText,
+            timeText = c.startText,
+            name = c.name,
+            room = c.room,
+            state = when {
+                nowMinute < c.startMinute -> TodayRowState.UPCOMING
+                nowMinute < c.endMinute -> TodayRowState.ONGOING
+                else -> TodayRowState.PAST
+            },
+        )
+
+        val overflow = (today.size - max).coerceAtLeast(0)
+        if (overflow == 0) return TodayList(today.map(::row), 0, null)
+
+        val shown = today.take(max - 1).map(::row) +
+            TodayRow("", "", "还有 $overflow 节", "", TodayRowState.PAST)
+        return TodayList(shown, overflow, null)
+    }
+
+    // ── 4x3 周视图 ──────────────────────────────────────────────────
+
+    /**
+     * 课程名 → 配色下标，同一门课永远同一个颜色（跨周、跨刷新都一致）。
+     *
+     * 用 String.hashCode 而不是 Kotlin 的 `hashCode()` 随机种子：它是有定义的
+     * 稳定算法（s[0]*31^(n-1) + ...），换设备、换进程、隔一周算出来都一样。
+     */
+    fun colorIndexFor(name: String): Int =
+        ((name.hashCode() % WeekColorCount) + WeekColorCount) % WeekColorCount
+
+    /** 周视图表头：「第 12 周 · 今日课程已结束」 */
+    fun weekHeader(snapshot: WidgetSnapshotData?, now: LocalDateTime): String {
+        if (snapshot == null || snapshot.sessions.isEmpty()) return EmptyText
+        val week = weekOf(snapshot, now.toLocalDate())
+        val prefix = if (week != null) "第 $week 周" else "课表"
+        val today = coursesOn(snapshot, now.toLocalDate())
+        val nowMinute = now.hour * 60 + now.minute
+        val ongoing = today.firstOrNull { nowMinute >= it.startMinute && nowMinute < it.endMinute }
+        val status = when {
+            ongoing != null -> "正在上 ${ongoing.name}"
+            else -> today.firstOrNull { it.startMinute > nowMinute }
+                ?.let { "下一节 ${it.startText}" }
+                ?: "今日课程已结束"
+        }
+        return "$prefix · $status"
+    }
+
+    /**
+     * 课时表里「此刻」对应的**行号**（0 起，等于节次 - 1）。
+     *
+     * 定位用，不判断有没有课：课间和早上第一节课前都要停在「接下来那一节」，
+     * 而不是停在上一节已经上完的课。规则：
+     *   · 正在某一节 → 这一节
+     *   · 课间（10:00–10:20）→ 下一节
+     *   · 早于第一节（8:30 前）→ 第 1 节
+     *   · 晚上最后一节之后 → 第 12 节（不越界，ListView 不会滚到空白处）
+     *
+     * 口径和 App 内一样，时间来自 [SlotTimes] / [SlotEndTimes]。
+     */
+    fun currentRow(now: LocalDateTime, units: Int = WeekUnitCount): Int {
+        val nowMinute = now.hour * 60 + now.minute
+        for (unit in 1..units) {
+            val end = timeToMinutes(SlotEndTimes[unit].orEmpty())
+            // 这一节还没下课 → 就是它（含「还没开始」）
+            if (nowMinute < end) return unit - 1
+        }
+        return (units - 1).coerceAtLeast(0)
+    }
+
+    /**
+     * 7 天 × [units] 节的网格。
+     *
+     * 列是**周日在前**（日 一 二 三 四 五 六），和小米自带课表一致；
+     * 课程数据里 weekday 是 1=周一，所以列 0 对应 weekday 7。
+     *
+     * 跨节的课在 [WeekCell] 里展开成多个格子：起始格带字，后续格同色留空。
+     */
+    fun weekGrid(snapshot: WidgetSnapshotData?, now: LocalDateTime, units: Int = WeekUnitCount): WeekGrid {
+        val today = now.toLocalDate()
+        val todayCol = today.dayOfWeek.value % 7
+        val sunday = today.minusDays(todayCol.toLong())
+        val dates = (0..6).map { sunday.plusDays(it.toLong()) }
+
+        // 每一天：unit → (这门课, 是否起始节)
+        val perDay: List<Map<Int, Pair<WidgetCourse, Boolean>>> = dates.map { date ->
+            snapshot?.let { coursesOn(it, date) }.orEmpty()
+                .flatMap { c -> (c.startUnit..c.endUnit).map { u -> u to (c to (u == c.startUnit)) } }
+                .toMap()
+        }
+
+        val cells = ArrayList<WeekCell>(units * 7)
+        for (unit in 1..units) {
+            for (col in 0..6) {
+                val hit = perDay[col][unit]
+                when {
+                    hit == null -> cells += WeekCell(unit, col, null, null, -1, false, false, 0)
+
+                    hit.second -> {
+                        val c = hit.first
+                        cells += WeekCell(
+                            unit = unit,
+                            col = col,
+                            name = c.name,
+                            time = c.startText,
+                            colorIndex = colorIndexFor(c.name),
+                            isStart = true,
+                            covered = false,
+                            span = (c.endUnit - c.startUnit + 1).coerceAtLeast(1),
+                        )
+                    }
+
+                    else -> {
+                        val c = hit.first
+                        cells += WeekCell(
+                            unit = unit,
+                            col = col,
+                            name = null,
+                            time = null,
+                            colorIndex = colorIndexFor(c.name),
+                            isStart = false,
+                            covered = true,
+                            span = 0,
+                        )
+                    }
+                }
+            }
+        }
+
+        val inSemester = snapshot != null && weekOf(snapshot, today) != null
+        return WeekGrid(
+            header = weekHeader(snapshot, now),
+            weekdays = WEEKDAY_CHARS.toList(),
+            dates = dates.map { it.dayOfMonth.toString() },
+            todayCol = if (inSemester) todayCol else -1,
+            units = (1..units).toList(),
+            cells = cells,
+            emptyText = if (snapshot == null || snapshot.sessions.isEmpty()) EmptyText else null,
+        )
     }
 }

@@ -20,13 +20,47 @@
     <color name="widget_text">#14181C</color>
     <color name="widget_text_dim">#5C646E</color>
     <color name="widget_accent">#1D9E75</color>
-    <!-- 课程块底色 / 块内文字 -->
-    <color name="widget_block">#E9F6F0</color>
+    <!--
+        课程块底色 / 块内文字。
+
+        #CFE9DC 而不是更淡的 #E9F6F0：真机（小米 HyperOS）上后者和白底只差
+        4%，用户看到的是一片灰 —— 白底上必须一眼看出「这里有个块」。
+    -->
+    <color name="widget_block">#CFE9DC</color>
     <color name="widget_block_text">#0B3B29</color>
     <!-- 正在上的课：反色块，一眼能看出来 -->
     <color name="widget_block_now">#1D9E75</color>
     <color name="widget_block_now_text">#FFFFFF</color>
-    <!-- 已经上完的课：整块压暗 -->
-    <color name="widget_block_past">#F1F3F5</color>
-    <color name="widget_block_past_text">#8A929B</color>
+    <!-- 已经上完的课：整块压暗（但要和正常块拉开层次，不能又是接近白） -->
+    <color name="widget_block_past">#E4E7EA</color>
+    <color name="widget_block_past_text">#6B747E</color>
+
+    <!--
+        周视图的课程配色：按**课程名的 hash** 取一组，同一门课永远同一个颜色。
+
+        浅色模式：淡底 + 深字，8 组在色相上尽量拉开（绿蓝橙紫红青棕灰），
+        避免两门相邻的课撞色。
+    -->
+    <color name="widget_c1">#CFE9DC</color>
+    <color name="widget_c1_text">#14503A</color>
+    <color name="widget_c2">#D7E8F7</color>
+    <color name="widget_c2_text">#17456B</color>
+    <color name="widget_c3">#FBE3C8</color>
+    <color name="widget_c3_text">#6B3F0E</color>
+    <color name="widget_c4">#EADCF6</color>
+    <color name="widget_c4_text">#4A2A6B</color>
+    <color name="widget_c5">#F8DADA</color>
+    <color name="widget_c5_text">#6B2020</color>
+    <color name="widget_c6">#DDEFD3</color>
+    <color name="widget_c6_text">#2F4F14</color>
+    <color name="widget_c7">#D3E9E9</color>
+    <color name="widget_c7_text">#124A4A</color>
+    <color name="widget_c8">#E8E4D5</color>
+    <color name="widget_c8_text">#4D4630</color>
+
+    <!--
+        周视图「当前节次」那一行的底色：主题色按 8% 透明度叠上去。
+        只做轻微提亮 —— 真正的指示是行顶那条 2dp 实色线，底色是辅助。
+    -->
+    <color name="widget_week_row_now">#141D9E75</color>
 </resources>

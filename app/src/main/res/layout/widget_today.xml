@@ -1,9 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    2x2 今日课程：今天接下来最多 3 节（课程名 + 时间）。
+    2x2 今日课程：**上下两张卡片**（各 50% 高）。
 
-    每行两个 TextView 而不是拼一个字符串：时间用次要色、课程名用主色，
-    这样扫一眼时「几点」和「上什么」是分开的。
+    上一版是「表头 + 3 行」，真机上表头占掉一行、3 行又各自均分剩余高度，
+    结果中间那条空白比字还多。现在不放表头（连刷新图标一起删掉，2x2 太小），
+    两张卡正好是用户扫一眼要的两件事：
+        上：正在上的课（或课间时的下一节）
+        下：再下一节
+
+    卡片内部两行：
+        · 08:30          ← 开始时间（带圆点，提醒「这是一节的起点」）
+          09:40  外科学   ← 结束时间 + 课名（结束时间缩进到圆点右边，和上行对齐）
+
+    整块的背景 / 文字颜色在 Kotlin 里按状态 set（正在上 → widget_block_now），
+    这里给的 @drawable/widget_block 只是「没绑数据时」的兜底，
+    保证预览和加载中也不是一片白。
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
@@ -11,131 +22,120 @@
     android:layout_height="match_parent"
     android:background="@drawable/widget_bg"
     android:orientation="vertical"
-    android:paddingStart="12dp"
+    android:paddingStart="10dp"
     android:paddingTop="10dp"
-    android:paddingEnd="12dp"
+    android:paddingEnd="10dp"
     android:paddingBottom="10dp">
 
     <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
-
-        <TextView
-            android:id="@+id/widget_header"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:textColor="@color/widget_text_dim"
-            android:textSize="10sp" />
-
-        <ImageView
-            android:id="@+id/widget_refresh"
-            android:layout_width="16dp"
-            android:layout_height="16dp"
-            android:contentDescription="@string/widget_refresh"
-            android:src="@drawable/ic_widget_refresh" />
-    </LinearLayout>
-
-    <LinearLayout
-        android:id="@+id/widget_rows"
+        android:id="@+id/card1"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:orientation="vertical">
+        android:background="@drawable/widget_block"
+        android:gravity="center_vertical"
+        android:orientation="vertical"
+        android:paddingStart="8dp"
+        android:paddingTop="6dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="6dp">
+
+        <TextView
+            android:id="@+id/card1_start"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="@color/widget_text_dim"
+            android:textSize="9sp" />
 
         <LinearLayout
-            android:id="@+id/row1"
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="1dp"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
             <TextView
-                android:id="@+id/row1_time"
+                android:id="@+id/card1_end"
                 android:layout_width="38dp"
                 android:layout_height="wrap_content"
+                android:layout_marginStart="7dp"
                 android:maxLines="1"
                 android:textColor="@color/widget_text_dim"
-                android:textSize="10sp" />
+                android:textSize="9sp" />
 
             <TextView
-                android:id="@+id/row1_name"
+                android:id="@+id/card1_name"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:ellipsize="end"
                 android:maxLines="1"
                 android:textColor="@color/widget_text"
-                android:textSize="12sp" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/row2"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <TextView
-                android:id="@+id/row2_time"
-                android:layout_width="38dp"
-                android:layout_height="wrap_content"
-                android:maxLines="1"
-                android:textColor="@color/widget_text_dim"
-                android:textSize="10sp" />
-
-            <TextView
-                android:id="@+id/row2_name"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textColor="@color/widget_text"
-                android:textSize="12sp" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/row3"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <TextView
-                android:id="@+id/row3_time"
-                android:layout_width="38dp"
-                android:layout_height="wrap_content"
-                android:maxLines="1"
-                android:textColor="@color/widget_text_dim"
-                android:textSize="10sp" />
-
-            <TextView
-                android:id="@+id/row3_name"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textColor="@color/widget_text"
-                android:textSize="12sp" />
+                android:textSize="11sp" />
         </LinearLayout>
     </LinearLayout>
 
+    <LinearLayout
+        android:id="@+id/card2"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="4dp"
+        android:layout_weight="1"
+        android:background="@drawable/widget_block"
+        android:gravity="center_vertical"
+        android:orientation="vertical"
+        android:paddingStart="8dp"
+        android:paddingTop="6dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="6dp">
+
+        <TextView
+            android:id="@+id/card2_start"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="@color/widget_text_dim"
+            android:textSize="9sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="1dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/card2_end"
+                android:layout_width="38dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="7dp"
+                android:maxLines="1"
+                android:textColor="@color/widget_text_dim"
+                android:textSize="9sp" />
+
+            <TextView
+                android:id="@+id/card2_name"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textColor="@color/widget_text"
+                android:textSize="11sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- 今天课都上完了 / 周末：两张卡合并成一句话 -->
     <TextView
         android:id="@+id/widget_empty"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
         android:ellipsize="end"
-        android:gravity="center_vertical"
+        android:gravity="center"
         android:maxLines="2"
         android:textColor="@color/widget_text_dim"
         android:textSize="12sp"

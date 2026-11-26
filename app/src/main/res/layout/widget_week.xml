@@ -1,0 +1,281 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    4x3 周视图：表头 + 日期行 + 「12 节 × 7 天」的列表。
+
+    ## 为什么正文是 ListView 而不是 ScrollView
+
+    ScrollView 滚不动：`setScrollY` 不是 @RemotableViewMethod，宿主在
+    apply 时直接抛 ActionException。只有 ListView 的
+    `RemoteViews.setScrollPosition(listId, row)` 能在 onUpdate 里把视口
+    定位到指定行 —— 这就是「打开就停在当前节次」的唯一实现路径。
+
+    列表数据由 WidgetWeekService（RemoteViewsService）提供，每行一个
+    widget_week_row.xml：左边节次列 + 7 个日列，跨节的课在起始行显示课名、
+    后续行同色留空，视觉上连成一个高块。
+
+    ## 日期行为什么还在 XML 里
+
+    它是固定 7 列的表头，不随滚动移动，没必要走 factory。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg"
+    android:orientation="vertical"
+    android:paddingStart="8dp"
+    android:paddingTop="6dp"
+    android:paddingEnd="8dp"
+    android:paddingBottom="6dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/widget_header"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="@color/widget_text_dim"
+            android:textSize="9sp" />
+
+        <ImageView
+            android:id="@+id/widget_refresh"
+            android:layout_width="14dp"
+            android:layout_height="14dp"
+            android:contentDescription="@string/widget_refresh"
+            android:src="@drawable/ic_widget_refresh" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="30dp"
+            android:layout_height="wrap_content"
+            android:maxLines="1" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center_horizontal"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/wk_wd0"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:maxLines="1"
+                android:textColor="@color/widget_text_dim"
+                android:textSize="8sp" />
+
+            <TextView
+                android:id="@+id/wk_date0"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:maxLines="1"
+                android:textColor="@color/widget_text_dim"
+                android:textSize="8sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center_horizontal"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/wk_wd1"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:maxLines="1"
+                android:textColor="@color/widget_text_dim"
+                android:textSize="8sp" />
+
+            <TextView
+                android:id="@+id/wk_date1"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:maxLines="1"
+                android:textColor="@color/widget_text_dim"
+                android:textSize="8sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center_horizontal"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/wk_wd2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:maxLines="1"
+                android:textColor="@color/widget_text_dim"
+                android:textSize="8sp" />
+
+            <TextView
+                android:id="@+id/wk_date2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:maxLines="1"
+                android:textColor="@color/widget_text_dim"
+                android:textSize="8sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center_horizontal"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/wk_wd3"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:maxLines="1"
+                android:textColor="@color/widget_text_dim"
+                android:textSize="8sp" />
+
+            <TextView
+                android:id="@+id/wk_date3"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:maxLines="1"
+                android:textColor="@color/widget_text_dim"
+                android:textSize="8sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center_horizontal"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/wk_wd4"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:maxLines="1"
+                android:textColor="@color/widget_text_dim"
+                android:textSize="8sp" />
+
+            <TextView
+                android:id="@+id/wk_date4"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:maxLines="1"
+                android:textColor="@color/widget_text_dim"
+                android:textSize="8sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center_horizontal"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/wk_wd5"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:maxLines="1"
+                android:textColor="@color/widget_text_dim"
+                android:textSize="8sp" />
+
+            <TextView
+                android:id="@+id/wk_date5"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:maxLines="1"
+                android:textColor="@color/widget_text_dim"
+                android:textSize="8sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center_horizontal"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/wk_wd6"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:maxLines="1"
+                android:textColor="@color/widget_text_dim"
+                android:textSize="8sp" />
+
+            <TextView
+                android:id="@+id/wk_date6"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:maxLines="1"
+                android:textColor="@color/widget_text_dim"
+                android:textSize="8sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!--
+        divider 设成 null：默认分隔线会在地色块之间切出 1px 白缝，
+        跨节的课看起来就断成两截了。
+        listSelector 关掉，否则点一下整行会闪一下系统高亮。
+    -->
+    <ListView
+        android:id="@+id/widget_week_list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="3dp"
+        android:layout_weight="1"
+        android:cacheColorHint="@android:color/transparent"
+        android:divider="@null"
+        android:dividerHeight="0dp"
+        android:listSelector="@android:color/transparent"
+        android:scrollbars="none" />
+
+    <!--
+        setEmptyView 要求空视图和 ListView 在**同一个父容器**里，所以放这儿。
+        正常情况下用不到：factory 的 getCount() 恒为 12（没课也要占位，
+        行号才等于节次），空态由「12 行全白」本身表达。
+    -->
+    <TextView
+        android:id="@+id/widget_week_empty"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:text="@string/widget_empty_sync"
+        android:textColor="@color/widget_text_dim"
+        android:textSize="9sp"
+        android:visibility="gone" />
+</LinearLayout>
