@@ -1,21 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    4x3 三天视图：今天 / 明天 / 后天三列，每列 4 块，**固定高度平铺**。
+    4x3 三天视图：今天 / 明天 / 后天三列，每列 **4 个块槽**，按权重吃满列高。
 
-    ## 为什么没有 ScrollView
+    ## 为什么块是 0dp + weight=1 而不是固定 26dp
 
-    上一版把三列塞进一个 ScrollView、每列 6 个槽位。真机（HyperOS）上这个部件
-    反复提示「加载时出现问题」：69 个视图 + 三层嵌套 + ScrollView，宿主 apply
-    RemoteViews 时失败。这一版按设计稿改成固定 4 块、无滚动 —— 4 块 26dp
-    加列头正好装进 160dp 的内容高度，本来也不需要滚。
+    真机上 4x3 卡片实际渲染 267dp 高（不是设计稿的 180dp，桌面给的格子更大）。
+    扣掉内边距 20 + 表头 14 + 间隔 6 + 列头 27 之后，列内容区还有约 200dp。
+    固定 26dp × 4 = 104dp 只占一半，下面空着近 100dp，每块看着都被压扁。
 
-    ## 为什么列宽只有 72dp 却还要放时间
+    改成 4 个槽位平分列高：(200 - 4×3dp 间距) / 4 ≈ 47dp。
 
-    时间和课名是**上下两行**：时间 8.5sp 只占一行的高度，课名独占整行宽度
-    （60dp 能放 5~6 个汉字）。换成左右两栏的话课名只剩 30dp，两三个字就被省略号
-    吃掉，等于没有课名。
+    ## 为什么空槽用 INVISIBLE 而不是 GONE
 
-    圆角用 c（13dp），26dp 高的块被 clamp 成胶囊；块内颜色由 colorIndex 决定。
+    GONE 的子视图不参与 weight 分配，剩下的块会被撑成一大块，三列高度也随之
+    错位。INVISIBLE 仍占位，永远是 4 个等高槽 —— 只有 1 门课的日期也和满课
+    日期对齐，扫视时列与列之间能横向比较。
+
+    ## 为什么列宽只有 ~80dp 却还要放时间
+
+    时间和课名是**上下两行**：时间 9sp 只占一行高度，课名独占整行宽度。
+    换成左右两栏的话课名只剩 30dp，两三个字就被省略号吃掉。
+
+    圆角用 c（13dp），块高 47dp 时不再被 clamp 成胶囊。
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
@@ -60,7 +66,7 @@
         <!-- 今天 -->
         <LinearLayout
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1"
             android:orientation="vertical">
 
@@ -86,8 +92,9 @@
             <LinearLayout
                 android:id="@+id/d1_b1"
                 android:layout_width="match_parent"
-                android:layout_height="26dp"
+                android:layout_height="0dp"
                 android:layout_marginTop="3dp"
+                android:layout_weight="1"
                 android:background="@drawable/widget_kc1"
                 android:gravity="center_vertical"
                 android:orientation="vertical"
@@ -101,7 +108,7 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text_dim"
-                    android:textSize="8.5sp" />
+                    android:textSize="9sp" />
 
                 <TextView
                     android:id="@+id/d1_n1"
@@ -111,14 +118,15 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text"
-                    android:textSize="10.5sp" />
+                    android:textSize="11sp" />
             </LinearLayout>
 
             <LinearLayout
                 android:id="@+id/d1_b2"
                 android:layout_width="match_parent"
-                android:layout_height="26dp"
+                android:layout_height="0dp"
                 android:layout_marginTop="3dp"
+                android:layout_weight="1"
                 android:background="@drawable/widget_kc1"
                 android:gravity="center_vertical"
                 android:orientation="vertical"
@@ -132,7 +140,7 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text_dim"
-                    android:textSize="8.5sp" />
+                    android:textSize="9sp" />
 
                 <TextView
                     android:id="@+id/d1_n2"
@@ -142,14 +150,15 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text"
-                    android:textSize="10.5sp" />
+                    android:textSize="11sp" />
             </LinearLayout>
 
             <LinearLayout
                 android:id="@+id/d1_b3"
                 android:layout_width="match_parent"
-                android:layout_height="26dp"
+                android:layout_height="0dp"
                 android:layout_marginTop="3dp"
+                android:layout_weight="1"
                 android:background="@drawable/widget_kc1"
                 android:gravity="center_vertical"
                 android:orientation="vertical"
@@ -163,7 +172,7 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text_dim"
-                    android:textSize="8.5sp" />
+                    android:textSize="9sp" />
 
                 <TextView
                     android:id="@+id/d1_n3"
@@ -173,14 +182,15 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text"
-                    android:textSize="10.5sp" />
+                    android:textSize="11sp" />
             </LinearLayout>
 
             <LinearLayout
                 android:id="@+id/d1_b4"
                 android:layout_width="match_parent"
-                android:layout_height="26dp"
+                android:layout_height="0dp"
                 android:layout_marginTop="3dp"
+                android:layout_weight="1"
                 android:background="@drawable/widget_kc1"
                 android:gravity="center_vertical"
                 android:orientation="vertical"
@@ -194,7 +204,7 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text_dim"
-                    android:textSize="8.5sp" />
+                    android:textSize="9sp" />
 
                 <TextView
                     android:id="@+id/d1_n4"
@@ -204,14 +214,14 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text"
-                    android:textSize="10.5sp" />
+                    android:textSize="11sp" />
             </LinearLayout>
         </LinearLayout>
 
         <!-- 明天 -->
         <LinearLayout
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_marginStart="6dp"
             android:layout_weight="1"
             android:orientation="vertical">
@@ -238,8 +248,9 @@
             <LinearLayout
                 android:id="@+id/d2_b1"
                 android:layout_width="match_parent"
-                android:layout_height="26dp"
+                android:layout_height="0dp"
                 android:layout_marginTop="3dp"
+                android:layout_weight="1"
                 android:background="@drawable/widget_kc1"
                 android:gravity="center_vertical"
                 android:orientation="vertical"
@@ -253,7 +264,7 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text_dim"
-                    android:textSize="8.5sp" />
+                    android:textSize="9sp" />
 
                 <TextView
                     android:id="@+id/d2_n1"
@@ -263,14 +274,15 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text"
-                    android:textSize="10.5sp" />
+                    android:textSize="11sp" />
             </LinearLayout>
 
             <LinearLayout
                 android:id="@+id/d2_b2"
                 android:layout_width="match_parent"
-                android:layout_height="26dp"
+                android:layout_height="0dp"
                 android:layout_marginTop="3dp"
+                android:layout_weight="1"
                 android:background="@drawable/widget_kc1"
                 android:gravity="center_vertical"
                 android:orientation="vertical"
@@ -284,7 +296,7 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text_dim"
-                    android:textSize="8.5sp" />
+                    android:textSize="9sp" />
 
                 <TextView
                     android:id="@+id/d2_n2"
@@ -294,14 +306,15 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text"
-                    android:textSize="10.5sp" />
+                    android:textSize="11sp" />
             </LinearLayout>
 
             <LinearLayout
                 android:id="@+id/d2_b3"
                 android:layout_width="match_parent"
-                android:layout_height="26dp"
+                android:layout_height="0dp"
                 android:layout_marginTop="3dp"
+                android:layout_weight="1"
                 android:background="@drawable/widget_kc1"
                 android:gravity="center_vertical"
                 android:orientation="vertical"
@@ -315,7 +328,7 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text_dim"
-                    android:textSize="8.5sp" />
+                    android:textSize="9sp" />
 
                 <TextView
                     android:id="@+id/d2_n3"
@@ -325,14 +338,15 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text"
-                    android:textSize="10.5sp" />
+                    android:textSize="11sp" />
             </LinearLayout>
 
             <LinearLayout
                 android:id="@+id/d2_b4"
                 android:layout_width="match_parent"
-                android:layout_height="26dp"
+                android:layout_height="0dp"
                 android:layout_marginTop="3dp"
+                android:layout_weight="1"
                 android:background="@drawable/widget_kc1"
                 android:gravity="center_vertical"
                 android:orientation="vertical"
@@ -346,7 +360,7 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text_dim"
-                    android:textSize="8.5sp" />
+                    android:textSize="9sp" />
 
                 <TextView
                     android:id="@+id/d2_n4"
@@ -356,14 +370,14 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text"
-                    android:textSize="10.5sp" />
+                    android:textSize="11sp" />
             </LinearLayout>
         </LinearLayout>
 
         <!-- 后天 -->
         <LinearLayout
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_marginStart="6dp"
             android:layout_weight="1"
             android:orientation="vertical">
@@ -390,8 +404,9 @@
             <LinearLayout
                 android:id="@+id/d3_b1"
                 android:layout_width="match_parent"
-                android:layout_height="26dp"
+                android:layout_height="0dp"
                 android:layout_marginTop="3dp"
+                android:layout_weight="1"
                 android:background="@drawable/widget_kc1"
                 android:gravity="center_vertical"
                 android:orientation="vertical"
@@ -405,7 +420,7 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text_dim"
-                    android:textSize="8.5sp" />
+                    android:textSize="9sp" />
 
                 <TextView
                     android:id="@+id/d3_n1"
@@ -415,14 +430,15 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text"
-                    android:textSize="10.5sp" />
+                    android:textSize="11sp" />
             </LinearLayout>
 
             <LinearLayout
                 android:id="@+id/d3_b2"
                 android:layout_width="match_parent"
-                android:layout_height="26dp"
+                android:layout_height="0dp"
                 android:layout_marginTop="3dp"
+                android:layout_weight="1"
                 android:background="@drawable/widget_kc1"
                 android:gravity="center_vertical"
                 android:orientation="vertical"
@@ -436,7 +452,7 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text_dim"
-                    android:textSize="8.5sp" />
+                    android:textSize="9sp" />
 
                 <TextView
                     android:id="@+id/d3_n2"
@@ -446,14 +462,15 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text"
-                    android:textSize="10.5sp" />
+                    android:textSize="11sp" />
             </LinearLayout>
 
             <LinearLayout
                 android:id="@+id/d3_b3"
                 android:layout_width="match_parent"
-                android:layout_height="26dp"
+                android:layout_height="0dp"
                 android:layout_marginTop="3dp"
+                android:layout_weight="1"
                 android:background="@drawable/widget_kc1"
                 android:gravity="center_vertical"
                 android:orientation="vertical"
@@ -467,7 +484,7 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text_dim"
-                    android:textSize="8.5sp" />
+                    android:textSize="9sp" />
 
                 <TextView
                     android:id="@+id/d3_n3"
@@ -477,14 +494,15 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text"
-                    android:textSize="10.5sp" />
+                    android:textSize="11sp" />
             </LinearLayout>
 
             <LinearLayout
                 android:id="@+id/d3_b4"
                 android:layout_width="match_parent"
-                android:layout_height="26dp"
+                android:layout_height="0dp"
                 android:layout_marginTop="3dp"
+                android:layout_weight="1"
                 android:background="@drawable/widget_kc1"
                 android:gravity="center_vertical"
                 android:orientation="vertical"
@@ -498,7 +516,7 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text_dim"
-                    android:textSize="8.5sp" />
+                    android:textSize="9sp" />
 
                 <TextView
                     android:id="@+id/d3_n4"
@@ -508,7 +526,7 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/widget_text"
-                    android:textSize="10.5sp" />
+                    android:textSize="11sp" />
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>

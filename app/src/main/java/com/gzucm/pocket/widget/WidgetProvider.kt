@@ -685,7 +685,9 @@ class ThreeDaysWidget : BaseWidgetProvider() {
                         views.setTextColor(NAME_IDS[c][i], weak)
                     }
 
-                    else -> views.setViewVisibility(blockId, View.GONE)
+                    // 空槽必须是 INVISIBLE：GONE 不参与 weight 分配，
+                    // 剩下的块会被撑成一整块，三列也随之错位
+                    else -> views.setViewVisibility(blockId, View.INVISIBLE)
                 }
             }
         }
