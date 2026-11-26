@@ -9,58 +9,77 @@
     <!--
         桌面部件配色。
 
-        和 Compose 的 LightColors 对齐：surface #FFFFFF / onSurface #14181C /
-        onSurfaceVariant #5C646E / primary #1D9E75。
+        和 Compose 的 LightColors 对齐：surface #FFFFFF / onSurface #14181C。
 
         **必须是静态资源**（values + values-night 两套），不能在代码里判断
         深色再 setTextColor —— 小米桌面切深色时不会回调，宿主直接拿缓存
         重建 RemoteViews，代码里切的颜色不会重新执行。
+
+        文字三档（主 / 次 / 弱，见液态玻璃规范 §5.2 的 92/66/46）：
+        widget_text / widget_text_dim / widget_text_weak。
     -->
     <color name="widget_bg">#FFFFFF</color>
     <color name="widget_text">#14181C</color>
-    <color name="widget_text_dim">#5C646E</color>
+    <color name="widget_text_dim">#575F67</color>
+    <color name="widget_text_weak">#8A9098</color>
     <color name="widget_accent">#1D9E75</color>
-    <!--
-        课程块底色 / 块内文字。
-
-        #CFE9DC 而不是更淡的 #E9F6F0：真机（小米 HyperOS）上后者和白底只差
-        4%，用户看到的是一片灰 —— 白底上必须一眼看出「这里有个块」。
-    -->
-    <color name="widget_block">#CFE9DC</color>
-    <color name="widget_block_text">#0B3B29</color>
-    <!-- 正在上的课：反色块，一眼能看出来 -->
-    <color name="widget_block_now">#1D9E75</color>
-    <color name="widget_block_now_text">#FFFFFF</color>
-    <!-- 已经上完的课：整块压暗（但要和正常块拉开层次，不能又是接近白） -->
-    <color name="widget_block_past">#E4E7EA</color>
-    <color name="widget_block_past_text">#6B747E</color>
 
     <!--
-        周视图的课程配色：按**课程名的 hash** 取一组，同一门课永远同一个颜色。
+        8 组课程色。同一门课按 WidgetRender.colorIndexFor(name) 永远取同一组。
 
-        浅色模式：淡底 + 深字，8 组在色相上尽量拉开（绿蓝橙紫红青棕灰），
-        避免两门相邻的课撞色。
+        每组四个值：
+          widget_k{n}       普通块底（该色相 15% 叠在底上）
+          widget_k{n}_now   正在上的块底（26%，比普通块明显深一档）
+          widget_k{n}_text  块内文字（同色系的深色，保证对比度）
+          widget_k{n}_dot   圆点（实色）
+
+        强调色只做局部（今天的列头、当前节次），课程色绝不换成主题绿 ——
+        否则整墙的绿块分不出是哪门课。
     -->
-    <color name="widget_c1">#CFE9DC</color>
-    <color name="widget_c1_text">#14503A</color>
-    <color name="widget_c2">#D7E8F7</color>
-    <color name="widget_c2_text">#17456B</color>
-    <color name="widget_c3">#FBE3C8</color>
-    <color name="widget_c3_text">#6B3F0E</color>
-    <color name="widget_c4">#EADCF6</color>
-    <color name="widget_c4_text">#4A2A6B</color>
-    <color name="widget_c5">#F8DADA</color>
-    <color name="widget_c5_text">#6B2020</color>
-    <color name="widget_c6">#DDEFD3</color>
-    <color name="widget_c6_text">#2F4F14</color>
-    <color name="widget_c7">#D3E9E9</color>
-    <color name="widget_c7_text">#124A4A</color>
-    <color name="widget_c8">#E8E4D5</color>
-    <color name="widget_c8_text">#4D4630</color>
+    <color name="widget_k1">#DDF0EA</color>
+    <color name="widget_k1_now">#C4E6DB</color>
+    <color name="widget_k1_text">#0F5C44</color>
+    <color name="widget_k1_dot">#1D9E75</color>
+
+    <color name="widget_k2">#E1EEFA</color>
+    <color name="widget_k2_now">#CBE1F6</color>
+    <color name="widget_k2_text">#1B4E80</color>
+    <color name="widget_k2_dot">#378ADD</color>
+
+    <color name="widget_k3">#ECEBFA</color>
+    <color name="widget_k3_now">#DEDCF6</color>
+    <color name="widget_k3_text">#4A3F8C</color>
+    <color name="widget_k3_dot">#7F77DD</color>
+
+    <color name="widget_k4">#F9E5EC</color>
+    <color name="widget_k4_now">#F4D2DE</color>
+    <color name="widget_k4_text">#8C2B4A</color>
+    <color name="widget_k4_dot">#D4537E</color>
+
+    <color name="widget_k5">#F6E7E2</color>
+    <color name="widget_k5_now">#EFD6CC</color>
+    <color name="widget_k5_text">#7A3A22</color>
+    <color name="widget_k5_dot">#C2603C</color>
+
+    <color name="widget_k6">#F6EADC</color>
+    <color name="widget_k6_now">#EDDBC3</color>
+    <color name="widget_k6_text">#6B420C</color>
+    <color name="widget_k6_dot">#BA7517</color>
+
+    <color name="widget_k7">#DBF0F3</color>
+    <color name="widget_k7_now">#C1E5EB</color>
+    <color name="widget_k7_text">#0A5A66</color>
+    <color name="widget_k7_dot">#0F9BB0</color>
+
+    <color name="widget_k8">#E8F0DE</color>
+    <color name="widget_k8_now">#D6E5C6</color>
+    <color name="widget_k8_text">#3A5A12</color>
+    <color name="widget_k8_dot">#639922</color>
 
     <!--
         周视图「当前节次」那一行的底色：主题色按 8% 透明度叠上去。
-        只做轻微提亮 —— 真正的指示是行顶那条 2dp 实色线，底色是辅助。
+        只做轻微提亮 —— 真正的指示是节次号变主题色。**不放顶部指示线**：
+        那条 2dp 线会在跨节的连块之间留一道缝，看起来像两门课。
     -->
     <color name="widget_week_row_now">#141D9E75</color>
 </resources>

@@ -8,8 +8,8 @@ import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
 
 /**
- * 周视图一行（一节课）的内容高度。**必须和 widget_week_row.xml 里
- * `wk_row_body` 的 24dp 一致**（行上方另有 2dp 指示线，不算在这里）。
+ * 周视图一行（一节课）的内容高度。**必须和 widget_week_row.xml 里的
+ * `wk_row_body` 的 24dp 一致**（那一行没有别的装饰，行高就等于内容高）。
  */
 const val WeekRowHeightDp = 24
 
@@ -21,7 +21,11 @@ const val WeekRowHeightDp = 24
  */
 const val WeekUnitCount = 12
 
-/** 周视图的配色数量，对应 @color/widget_c1..c8 和 @drawable/widget_week_1..8 */
+/**
+ * 周视图的配色数量，对应 @color/widget_k1..k8 与 @drawable/widget_wk1..8_*。
+ *
+ * 8 组色同时用于 2x2 / 4x2 / 4x4 / 三日 / 周视图，同一门课在哪个部件里都同色。
+ */
 const val WeekColorCount = 8
 
 /**
@@ -104,6 +108,9 @@ data class DayColumn(
  *
  * 两张卡片的版式一样，差别只在 4x2 多两栏（地点、老师），所以数据层不区分尺寸，
  * 由 Provider 决定填几个字段。
+ *
+ * [colorIndex] 是这门课的配色下标（0..7），Provider 拿它查 drawable / 颜色表。
+ * 默认值 0 只是为了老测试能少改一行；新逻辑必须显式填。
  */
 data class TodayCard(
     val startText: String,
@@ -111,8 +118,9 @@ data class TodayCard(
     val name: String,
     val room: String,
     val teacher: String,
-    /** true = 正在上，整张卡用主题色 */
+    /** true = 正在上：块底换成该课的 26% 变体 + 课名加粗 */
     val ongoing: Boolean,
+    val colorIndex: Int = 0,
 )
 
 /**
@@ -136,6 +144,8 @@ data class TodayRow(
     val name: String,
     val room: String,
     val state: TodayRowState,
+    /** 这门课的配色下标（0..7）。「还有 N 节」那一行没有课，给 0 即可 */
+    val colorIndex: Int = 0,
 )
 
 /** 4x4 节次列表的数据。[overflow] > 0 时最后一行是「还有 N 节」 */
@@ -146,11 +156,33 @@ data class TodayList(
 )
 
 /**
+ * 2x1 一行的内容（圆点 + 课名 + 尾巴）。
+ *
+ * [emptyText] 非空 = 今天没课 / 没同步过，Provider 把整行收掉只留那句提示。
+ */
+data class CurrentInfo(
+    val name: String,
+    /** 正在上：「至 09:40」；下一节：「10:20 开始」 */
+    val tail: String,
+    val colorIndex: Int,
+    val emptyText: String?,
+)
+
+/**
+ * 周视图格子在「同一门课里」的位置。
+ *
+ * 只有这四个角色才能拼出正确的连块：跨 3 节的课是 first + middle + last，
+ * 单节是 single。缺口（不同课之间 2dp）和贴合（同门课之间 0dp）全靠
+ * 每种角色各自的上下 inset 实现，见 widget_wk{n}_{role} 的 drawable。
+ */
+enum class WeekCellRole { SINGLE, FIRST, MIDDLE, LAST }
+
+/**
  * 周视图的一个格子。
  *
  * 跨节的课（第 1-2 节连上）在数据层就是两个格子：
  * 起始格 [isStart] = true、[span] = 2、带课名和时间；后续格 [covered] = true、
- * 只有颜色没有字。视觉上两格同色相接 = 一个高块。
+ * 只有颜色没有字。视觉上两格同色相接 = 一个高块，靠 [role] 决定各自的圆角和 inset。
  *
  * 为什么不在运行时把起始格的 layout_height 改成两倍：RemoteViews 的
  * `setInt(..., "setMinimumHeight", ...)` 不是 @RemotableViewMethod，宿主要抛
@@ -168,6 +200,8 @@ data class WeekCell(
     val covered: Boolean,
     /** 只有起始格有意义：这门课跨几节 */
     val span: Int,
+    /** 在连块里的位置。没课时无意义，给 SINGLE */
+    val role: WeekCellRole = WeekCellRole.SINGLE,
 ) {
     /** 块高度 = 跨的节数 × 行高。仅起始格有意义 */
     val heightDp: Int get() = if (isStart) span * WeekRowHeightDp else 0
@@ -288,6 +322,47 @@ object WidgetRender {
         if (next != null) return "下一节 ${next.startText} ${next.name}"
 
         return NoMoreText
+    }
+
+    /**
+     * 2x1 的一行：圆点 + 课名 + 尾巴。
+     *
+     * 和 [currentLine] 是同一套判断，只是拆成结构化字段 —— v3 版式里课名要用
+     * 主文字色、尾巴用次色，还得在左边放一个课程色圆点，一整串字符串做不到。
+     * [currentLine] 留着是因为它被单测和别处引用，两边口径必须一致。
+     *
+     *   正在上 → name=课名 / tail=「至 09:40」
+     *   下一节 → name=课名 / tail=「10:20 开始」
+     *   没课   → [emptyText] 非空，Provider 只显示那一句
+     */
+    fun currentInfo(snapshot: WidgetSnapshotData?, now: LocalDateTime): CurrentInfo {
+        if (snapshot == null || snapshot.sessions.isEmpty()) {
+            return CurrentInfo("", "", 0, EmptyText)
+        }
+        val today = coursesOn(snapshot, now.toLocalDate())
+        val nowMinute = now.hour * 60 + now.minute
+
+        val ongoing = today.firstOrNull { nowMinute >= it.startMinute && nowMinute < it.endMinute }
+        if (ongoing != null) {
+            return CurrentInfo(
+                name = ongoing.name,
+                tail = "至 ${ongoing.endText}",
+                colorIndex = colorIndexFor(ongoing.name),
+                emptyText = null,
+            )
+        }
+
+        val next = today.firstOrNull { it.startMinute > nowMinute }
+        if (next != null) {
+            return CurrentInfo(
+                name = next.name,
+                tail = "${next.startText} 开始",
+                colorIndex = colorIndexFor(next.name),
+                emptyText = null,
+            )
+        }
+
+        return CurrentInfo("", "", 0, NoMoreText)
     }
 
     /**
@@ -418,6 +493,7 @@ object WidgetRender {
         room = room,
         teacher = teacherText,
         ongoing = ongoing,
+        colorIndex = colorIndexFor(name),
     )
 
     // ── 4x4 节次列表 ────────────────────────────────────────────────
@@ -443,6 +519,7 @@ object WidgetRender {
                 nowMinute < c.endMinute -> TodayRowState.ONGOING
                 else -> TodayRowState.PAST
             },
+            colorIndex = colorIndexFor(c.name),
         )
 
         val overflow = (today.size - max).coerceAtLeast(0)
@@ -542,6 +619,7 @@ object WidgetRender {
                             isStart = true,
                             covered = false,
                             span = (c.endUnit - c.startUnit + 1).coerceAtLeast(1),
+                            role = roleOf(unit, c),
                         )
                     }
 
@@ -556,6 +634,7 @@ object WidgetRender {
                             isStart = false,
                             covered = true,
                             span = 0,
+                            role = roleOf(unit, c),
                         )
                     }
                 }
@@ -572,5 +651,18 @@ object WidgetRender {
             cells = cells,
             emptyText = if (snapshot == null || snapshot.sessions.isEmpty()) EmptyText else null,
         )
+    }
+
+    /**
+     * 第 [unit] 节落在某门课的哪个位置。
+     *
+     * 口径以 [WidgetCourse.startUnit] / [endUnit] 为准，不看 `isStart` ——
+     * 后者是「这一格要不要显示课名」，和「这一格上下要不要圆角」是两件事。
+     */
+    private fun roleOf(unit: Int, c: WidgetCourse): WeekCellRole = when {
+        unit == c.startUnit && c.endUnit <= c.startUnit -> WeekCellRole.SINGLE
+        unit == c.startUnit -> WeekCellRole.FIRST
+        unit == c.endUnit -> WeekCellRole.LAST
+        else -> WeekCellRole.MIDDLE
     }
 }

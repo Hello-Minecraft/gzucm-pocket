@@ -6,6 +6,7 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
 import android.text.Spannable
@@ -201,6 +202,131 @@ abstract class BaseWidgetProvider : AppWidgetProvider() {
     }
 }
 
+// ── 课程色查表 ──────────────────────────────────────────────────────────
+//
+// 所有「选哪个颜色 / 哪个圆角」的决策都只看 colorIndex，这里用数组下标完成。
+// **不要**拼 "widget_k$n" 字符串去 Resources.getIdentifier：资源名在 release
+// 包里会被 R8 收缩，运行时拿到 0，整块底色直接变透明 —— 这类 bug 只在
+// release APK 上出现，debug 完全正常。
+
+/** [WidgetRender.colorIndexFor] 的取值范围；下标越界时按环形取，绝不抛异常 */
+private const val K_COUNT = 8
+
+private fun kIndex(raw: Int): Int = ((raw % K_COUNT) + K_COUNT) % K_COUNT
+
+private val DOT_BG = intArrayOf(
+    R.drawable.widget_dot1, R.drawable.widget_dot2, R.drawable.widget_dot3, R.drawable.widget_dot4,
+    R.drawable.widget_dot5, R.drawable.widget_dot6, R.drawable.widget_dot7, R.drawable.widget_dot8,
+)
+
+/** 2x2 卡（43dp 高，a 档 22dp 圆角） */
+private val KA_BG = intArrayOf(
+    R.drawable.widget_ka1, R.drawable.widget_ka2, R.drawable.widget_ka3, R.drawable.widget_ka4,
+    R.drawable.widget_ka5, R.drawable.widget_ka6, R.drawable.widget_ka7, R.drawable.widget_ka8,
+)
+private val KA_NOW_BG = intArrayOf(
+    R.drawable.widget_ka1_now, R.drawable.widget_ka2_now, R.drawable.widget_ka3_now, R.drawable.widget_ka4_now,
+    R.drawable.widget_ka5_now, R.drawable.widget_ka6_now, R.drawable.widget_ka7_now, R.drawable.widget_ka8_now,
+)
+
+/** 4x2 卡（34dp 高，b 档 16dp 圆角） */
+private val KB_BG = intArrayOf(
+    R.drawable.widget_kb1, R.drawable.widget_kb2, R.drawable.widget_kb3, R.drawable.widget_kb4,
+    R.drawable.widget_kb5, R.drawable.widget_kb6, R.drawable.widget_kb7, R.drawable.widget_kb8,
+)
+private val KB_NOW_BG = intArrayOf(
+    R.drawable.widget_kb1_now, R.drawable.widget_kb2_now, R.drawable.widget_kb3_now, R.drawable.widget_kb4_now,
+    R.drawable.widget_kb5_now, R.drawable.widget_kb6_now, R.drawable.widget_kb7_now, R.drawable.widget_kb8_now,
+)
+
+/** 4x4 行 / 三日块（26dp 高，c 档 13dp 圆角） */
+private val KC_BG = intArrayOf(
+    R.drawable.widget_kc1, R.drawable.widget_kc2, R.drawable.widget_kc3, R.drawable.widget_kc4,
+    R.drawable.widget_kc5, R.drawable.widget_kc6, R.drawable.widget_kc7, R.drawable.widget_kc8,
+)
+private val KC_NOW_BG = intArrayOf(
+    R.drawable.widget_kc1_now, R.drawable.widget_kc2_now, R.drawable.widget_kc3_now, R.drawable.widget_kc4_now,
+    R.drawable.widget_kc5_now, R.drawable.widget_kc6_now, R.drawable.widget_kc7_now, R.drawable.widget_kc8_now,
+)
+
+/** 块内文字（同色系的深/亮色），只用在「正在上」和课色块上 */
+private val K_TEXT = intArrayOf(
+    R.color.widget_k1_text, R.color.widget_k2_text, R.color.widget_k3_text, R.color.widget_k4_text,
+    R.color.widget_k5_text, R.color.widget_k6_text, R.color.widget_k7_text, R.color.widget_k8_text,
+)
+
+/** 加粗。RemoteViews 没有 setTypeface，用 StyleSpan 跟着文本一起过去 */
+private fun bold(text: String): CharSequence =
+    SpannableString(text).apply {
+        setSpan(StyleSpan(Typeface.BOLD), 0, length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+    }
+
+/** 有内容就显示，空串整栏收掉 */
+private fun setOptionalText(views: RemoteViews, viewId: Int, text: String, color: Int) {
+    if (text.isBlank()) {
+        views.setViewVisibility(viewId, View.GONE)
+    } else {
+        views.setViewVisibility(viewId, View.VISIBLE)
+        views.setTextViewText(viewId, text)
+        views.setTextColor(viewId, color)
+    }
+}
+
+/**
+ * 一张 2x2 / 4x2 的课程卡（两个版式共用）。
+ *
+ * [roomId] / [teacherId] 传 null = 这个版式没有这两栏；值为空串时整栏隐藏
+ * （老快照没有 teacher 字段，读出来就是空串）。
+ *
+ * 正在上的卡：块底换成该课的 26% 变体、课名加粗、正文改用块内文字色 ——
+ * **不用实心主题色**，否则一眼看过去分不出是哪门课。
+ */
+private fun bindTodayCard(
+    views: RemoteViews,
+    context: Context,
+    card: TodayCard?,
+    cardId: Int,
+    dotId: Int,
+    timeId: Int,
+    nameId: Int,
+    roomId: Int?,
+    teacherId: Int?,
+    normalBg: IntArray,
+    nowBg: IntArray,
+) {
+    if (card == null) {
+        // 今天只剩一节课时，第二张卡收成 INVISIBLE 而不是 GONE：
+        // GONE 会让第一张卡撑满整块，看起来「这一天特别长」
+        views.setViewVisibility(cardId, View.INVISIBLE)
+        return
+    }
+    val i = kIndex(card.colorIndex)
+    views.setViewVisibility(cardId, View.VISIBLE)
+    views.setInt(cardId, "setBackgroundResource", if (card.ongoing) nowBg[i] else normalBg[i])
+    views.setInt(dotId, "setBackgroundResource", DOT_BG[i])
+
+    views.setTextViewText(timeId, card.startText)
+    views.setTextViewText(nameId, if (card.ongoing) bold(card.name) else card.name)
+
+    val strong = ContextCompat.getColor(
+        context,
+        if (card.ongoing) K_TEXT[i] else R.color.widget_text,
+    )
+    val dim = ContextCompat.getColor(
+        context,
+        if (card.ongoing) K_TEXT[i] else R.color.widget_text_dim,
+    )
+    val weak = ContextCompat.getColor(
+        context,
+        if (card.ongoing) K_TEXT[i] else R.color.widget_text_weak,
+    )
+    views.setTextColor(nameId, strong)
+    views.setTextColor(timeId, dim)
+
+    if (roomId != null) setOptionalText(views, roomId, card.room, dim)
+    if (teacherId != null) setOptionalText(views, teacherId, card.teacher, weak)
+}
+
 // ── 2x1 当前课程 ────────────────────────────────────────────────────────
 
 class CurrentCourseWidget : BaseWidgetProvider() {
@@ -215,7 +341,23 @@ class CurrentCourseWidget : BaseWidgetProvider() {
         snapshot: WidgetSnapshotData?,
         now: LocalDateTime,
     ) {
-        views.setTextViewText(R.id.widget_line, WidgetRender.currentLine(snapshot, now))
+        val info = WidgetRender.currentInfo(snapshot, now)
+        if (info.emptyText != null) {
+            views.setViewVisibility(R.id.widget_current_row, View.GONE)
+            views.setViewVisibility(R.id.widget_empty, View.VISIBLE)
+            views.setTextViewText(R.id.widget_empty, info.emptyText)
+            return
+        }
+
+        views.setViewVisibility(R.id.widget_current_row, View.VISIBLE)
+        views.setViewVisibility(R.id.widget_empty, View.GONE)
+        views.setInt(
+            R.id.widget_current_dot,
+            "setBackgroundResource",
+            DOT_BG[kIndex(info.colorIndex)],
+        )
+        views.setTextViewText(R.id.widget_current_name, info.name)
+        views.setTextViewText(R.id.widget_current_tail, info.tail)
     }
 }
 
@@ -245,27 +387,31 @@ class TodayWidget : BaseWidgetProvider() {
         }
 
         views.setViewVisibility(R.id.widget_empty, View.GONE)
-        bindCard(
+        bindTodayCard(
             views = views,
             context = context,
             card = data.cards.getOrNull(0),
             cardId = R.id.card1,
-            startId = R.id.card1_start,
-            endId = R.id.card1_end,
+            dotId = R.id.card1_dot,
+            timeId = R.id.card1_time,
             nameId = R.id.card1_name,
             roomId = null,
             teacherId = null,
+            normalBg = KA_BG,
+            nowBg = KA_NOW_BG,
         )
-        bindCard(
+        bindTodayCard(
             views = views,
             context = context,
             card = data.cards.getOrNull(1),
             cardId = R.id.card2,
-            startId = R.id.card2_start,
-            endId = R.id.card2_end,
+            dotId = R.id.card2_dot,
+            timeId = R.id.card2_time,
             nameId = R.id.card2_name,
             roomId = null,
             teacherId = null,
+            normalBg = KA_BG,
+            nowBg = KA_NOW_BG,
         )
     }
 }
@@ -294,129 +440,33 @@ class TodayHorizontalWidget : BaseWidgetProvider() {
         }
 
         views.setViewVisibility(R.id.widget_empty, View.GONE)
-        bindCard(
+        bindTodayCard(
             views = views,
             context = context,
             card = data.cards.getOrNull(0),
             cardId = R.id.c1,
-            startId = R.id.c1_start,
-            endId = R.id.c1_end,
+            dotId = R.id.c1_dot,
+            timeId = R.id.c1_time,
             nameId = R.id.c1_name,
             roomId = R.id.c1_room,
             teacherId = R.id.c1_teacher,
+            normalBg = KB_BG,
+            nowBg = KB_NOW_BG,
         )
-        bindCard(
+        bindTodayCard(
             views = views,
             context = context,
             card = data.cards.getOrNull(1),
             cardId = R.id.c2,
-            startId = R.id.c2_start,
-            endId = R.id.c2_end,
+            dotId = R.id.c2_dot,
+            timeId = R.id.c2_time,
             nameId = R.id.c2_name,
             roomId = R.id.c2_room,
             teacherId = R.id.c2_teacher,
+            normalBg = KB_BG,
+            nowBg = KB_NOW_BG,
         )
     }
-}
-
-/**
- * 把一张卡填上数据（2x2 和 4x2 共用）。
- *
- * [roomId] / [teacherId] 传 null 表示这个版式没有这两栏。值为空串时
- * **整栏隐藏**，不留一条空白 —— 老快照没有 teacher 字段，读出来就是空串。
- */
-private fun bindCard(
-    views: RemoteViews,
-    context: Context,
-    card: TodayCard?,
-    cardId: Int,
-    startId: Int,
-    endId: Int,
-    nameId: Int,
-    roomId: Int?,
-    teacherId: Int?,
-) {
-    if (card == null) {
-        // 今天只剩一节课时，第二张卡整个收掉，不留空壳
-        views.setViewVisibility(cardId, View.GONE)
-        return
-    }
-    views.setViewVisibility(cardId, View.VISIBLE)
-    views.setTextViewText(startId, "· ${card.startText}")
-    views.setTextViewText(endId, card.endText)
-    views.setTextViewText(nameId, card.name)
-
-    if (roomId != null) setOptionalText(views, roomId, card.room)
-    if (teacherId != null) setOptionalText(views, teacherId, card.teacher)
-
-    val bg = if (card.ongoing) R.drawable.widget_block_now else R.drawable.widget_block
-    views.setInt(cardId, "setBackgroundResource", bg)
-
-    val main = ContextCompat.getColor(
-        context,
-        if (card.ongoing) R.color.widget_block_now_text else R.color.widget_block_text,
-    )
-    views.setTextColor(nameId, main)
-
-    // 时间用次要色；正在上的卡是反色底，次要色也要跟着变白，否则灰字糊在绿底上看不清
-    val accent = ContextCompat.getColor(
-        context,
-        if (card.ongoing) R.color.widget_block_now_text else R.color.widget_text_dim,
-    )
-    views.setTextColor(startId, accent)
-    views.setTextColor(endId, accent)
-    if (roomId != null) views.setTextColor(roomId, accent)
-    if (teacherId != null) views.setTextColor(teacherId, accent)
-}
-
-/** 有内容就显示，空串整栏收掉 */
-private fun setOptionalText(views: RemoteViews, viewId: Int, text: String) {
-    if (text.isBlank()) {
-        views.setViewVisibility(viewId, View.GONE)
-    } else {
-        views.setViewVisibility(viewId, View.VISIBLE)
-        views.setTextViewText(viewId, text)
-    }
-}
-
-/**
- * 课程块 / 列表行的三种状态配色。
- *
- * 色值全部来自 resources（values + values-night 各一套），这里不判断深浅色 ——
- * 小米桌面切深色不会回调，代码里判 `isSystemInDarkTheme()` 是无效的。
- *
- * [textIds] 随底色走的正文；[dimIds] 是次要信息（地点之类），
- * 普通状态下比正文淡一档。
- */
-private fun applyBlockStyle(
-    views: RemoteViews,
-    context: Context,
-    blockId: Int,
-    state: TodayRowState,
-    textIds: IntArray,
-    dimIds: IntArray = IntArray(0),
-) {
-    val bg = when (state) {
-        TodayRowState.ONGOING -> R.drawable.widget_block_now
-        TodayRowState.PAST -> R.drawable.widget_block_past
-        TodayRowState.UPCOMING -> R.drawable.widget_block
-    }
-    val textColor = when (state) {
-        TodayRowState.ONGOING -> R.color.widget_block_now_text
-        TodayRowState.PAST -> R.color.widget_block_past_text
-        TodayRowState.UPCOMING -> R.color.widget_block_text
-    }
-    val dimColor = when (state) {
-        TodayRowState.ONGOING -> R.color.widget_block_now_text
-        TodayRowState.PAST -> R.color.widget_block_past_text
-        TodayRowState.UPCOMING -> R.color.widget_text_dim
-    }
-
-    views.setInt(blockId, "setBackgroundResource", bg)
-    val main = ContextCompat.getColor(context, textColor)
-    textIds.forEach { views.setTextColor(it, main) }
-    val dim = ContextCompat.getColor(context, dimColor)
-    dimIds.forEach { views.setTextColor(it, dim) }
 }
 
 // ── 4x4 今日课程（节次列表）────────────────────────────────────────────
@@ -442,6 +492,10 @@ class TimelineWidget : BaseWidgetProvider() {
         }
 
         views.setViewVisibility(R.id.widget_empty, View.GONE)
+        val text = ContextCompat.getColor(context, R.color.widget_text)
+        val dim = ContextCompat.getColor(context, R.color.widget_text_dim)
+        val weak = ContextCompat.getColor(context, R.color.widget_text_weak)
+
         ROW_IDS.forEachIndexed { i, rowId ->
             val row = data.rows.getOrNull(i)
             if (row == null) {
@@ -449,20 +503,55 @@ class TimelineWidget : BaseWidgetProvider() {
                 return@forEachIndexed
             }
             views.setViewVisibility(rowId, View.VISIBLE)
-            views.setTextViewText(UNIT_IDS[i], row.unitText)
             views.setTextViewText(TIME_IDS[i], row.timeText)
             views.setTextViewText(NAME_IDS[i], row.name)
-            views.setTextViewText(ROOM_IDS[i], row.room)
             // 地点没填就整栏收掉，别留一截空白把课名挤窄
             views.setViewVisibility(ROOM_IDS[i], if (row.room.isBlank()) View.GONE else View.VISIBLE)
-            applyBlockStyle(
-                views = views,
-                context = context,
-                blockId = rowId,
-                state = row.state,
-                textIds = intArrayOf(UNIT_IDS[i], TIME_IDS[i], NAME_IDS[i]),
-                dimIds = intArrayOf(ROOM_IDS[i]),
+            views.setTextViewText(ROOM_IDS[i], row.room)
+
+            // 「还有 N 节」是凑数的一行：没有课色、没有圆点、整行弱色
+            val overflowRow = data.overflow > 0 && i == data.rows.lastIndex
+            if (overflowRow) {
+                views.setInt(rowId, "setBackgroundColor", Color.TRANSPARENT)
+                views.setViewVisibility(DOT_IDS[i], View.INVISIBLE)
+                views.setTextColor(TIME_IDS[i], weak)
+                views.setTextColor(NAME_IDS[i], weak)
+                views.setTextColor(ROOM_IDS[i], weak)
+                return@forEachIndexed
+            }
+
+            val colorIndex = kIndex(row.colorIndex)
+            views.setInt(DOT_IDS[i], "setBackgroundResource", DOT_BG[colorIndex])
+            views.setViewVisibility(DOT_IDS[i], View.VISIBLE)
+            views.setInt(
+                rowId,
+                "setBackgroundResource",
+                if (row.state == TodayRowState.ONGOING) KC_NOW_BG[colorIndex] else KC_BG[colorIndex],
             )
+
+            when (row.state) {
+                // 已经上完：同一块底，整行压成弱色 —— 还看得见「今天上过这门课」，
+                // 但不抢正在上 / 还没上的注意力
+                TodayRowState.PAST -> {
+                    views.setTextColor(TIME_IDS[i], weak)
+                    views.setTextColor(NAME_IDS[i], weak)
+                    views.setTextColor(ROOM_IDS[i], weak)
+                }
+
+                TodayRowState.ONGOING -> {
+                    val ink = ContextCompat.getColor(context, K_TEXT[colorIndex])
+                    views.setTextColor(TIME_IDS[i], ink)
+                    views.setTextColor(NAME_IDS[i], ink)
+                    views.setTextColor(ROOM_IDS[i], ink)
+                    views.setTextViewText(NAME_IDS[i], bold(row.name))
+                }
+
+                TodayRowState.UPCOMING -> {
+                    views.setTextColor(TIME_IDS[i], dim)
+                    views.setTextColor(NAME_IDS[i], text)
+                    views.setTextColor(ROOM_IDS[i], weak)
+                }
+            }
         }
     }
 
@@ -472,10 +561,6 @@ class TimelineWidget : BaseWidgetProvider() {
         val ROW_IDS = intArrayOf(
             R.id.tl1, R.id.tl2, R.id.tl3, R.id.tl4,
             R.id.tl5, R.id.tl6, R.id.tl7,
-        )
-        val UNIT_IDS = intArrayOf(
-            R.id.tl1_unit, R.id.tl2_unit, R.id.tl3_unit, R.id.tl4_unit,
-            R.id.tl5_unit, R.id.tl6_unit, R.id.tl7_unit,
         )
         val TIME_IDS = intArrayOf(
             R.id.tl1_time, R.id.tl2_time, R.id.tl3_time, R.id.tl4_time,
@@ -489,11 +574,21 @@ class TimelineWidget : BaseWidgetProvider() {
             R.id.tl1_room, R.id.tl2_room, R.id.tl3_room, R.id.tl4_room,
             R.id.tl5_room, R.id.tl6_room, R.id.tl7_room,
         )
+        val DOT_IDS = intArrayOf(
+            R.id.tl1_dot, R.id.tl2_dot, R.id.tl3_dot, R.id.tl4_dot,
+            R.id.tl5_dot, R.id.tl6_dot, R.id.tl7_dot,
+        )
     }
 }
 
 // ── 4x3 三天课表 ────────────────────────────────────────────────────────
 
+/**
+ * 今天 / 明天 / 后天三列，每列最多 4 块。
+ *
+ * 超出的第 4 块换成「还有 N 节」（不显示第 4 门课）—— 和时间轴的做法一致，
+ * 用户能知道「这天还有课」，也不会误以为课表只到这儿。
+ */
 class ThreeDaysWidget : BaseWidgetProvider() {
 
     override val layoutId = R.layout.widget_three_days
@@ -507,44 +602,89 @@ class ThreeDaysWidget : BaseWidgetProvider() {
         views.setTextViewText(R.id.widget_header, WidgetRender.header(snapshot, now.toLocalDate()))
 
         val nowMinute = now.hour * 60 + now.minute
+        val accent = ContextCompat.getColor(context, R.color.widget_accent)
+        val text = ContextCompat.getColor(context, R.color.widget_text)
+        val dim = ContextCompat.getColor(context, R.color.widget_text_dim)
+        val weak = ContextCompat.getColor(context, R.color.widget_text_weak)
         val columns = WidgetRender.threeDays(snapshot, now, MAX_PER_DAY)
 
         columns.forEachIndexed { c, column ->
-            views.setTextViewText(LABEL_IDS[c], column.label)
+            // 今天用强调色 + 加粗：三列只有 70dp 宽，靠颜色比靠位置更快认出「我在哪」
+            views.setTextViewText(LABEL_IDS[c], if (column.isToday) bold(column.label) else column.label)
+            views.setTextColor(LABEL_IDS[c], if (column.isToday) accent else text)
             views.setTextViewText(DATE_IDS[c], column.dateText)
+            views.setTextColor(DATE_IDS[c], if (column.isToday) accent else dim)
 
             BLOCK_IDS[c].forEachIndexed { i, blockId ->
-                val course = column.courses.getOrNull(i)
+                val course = if (column.overflow > 0 && i == MAX_PER_DAY - 1) {
+                    null
+                } else {
+                    column.courses.getOrNull(i)
+                }
+                val overflowRow = course == null &&
+                    column.overflow > 0 &&
+                    i == MAX_PER_DAY - 1
+
                 when {
                     course != null -> {
                         views.setViewVisibility(blockId, View.VISIBLE)
-                        views.setTextViewText(TIME_IDS[c][i], course.startText)
-                        views.setTextViewText(NAME_IDS[c][i], course.name)
+                        val colorIndex = kIndex(WidgetRender.colorIndexFor(course.name))
                         val state = when {
                             nowMinute < course.startMinute -> TodayRowState.UPCOMING
                             nowMinute < course.endMinute -> TodayRowState.ONGOING
                             else -> TodayRowState.PAST
                         }
-                        applyBlockStyle(
-                            views = views,
-                            context = context,
-                            blockId = blockId,
-                            state = state,
-                            textIds = intArrayOf(TIME_IDS[c][i], NAME_IDS[c][i]),
+                        views.setInt(
+                            blockId,
+                            "setBackgroundResource",
+                            if (state == TodayRowState.ONGOING) {
+                                KC_NOW_BG[colorIndex]
+                            } else {
+                                KC_BG[colorIndex]
+                            },
                         )
+                        views.setTextViewText(TIME_IDS[c][i], course.startText)
+                        views.setTextViewText(NAME_IDS[c][i], course.name)
+                        when (state) {
+                            // 三天视图里「已经上完」只在今天那一列出现，
+                            // 压成弱色即可，不必整块挖空
+                            TodayRowState.PAST -> {
+                                views.setTextColor(TIME_IDS[c][i], weak)
+                                views.setTextColor(NAME_IDS[c][i], weak)
+                            }
+
+                            TodayRowState.ONGOING -> {
+                                val ink = ContextCompat.getColor(context, K_TEXT[colorIndex])
+                                views.setTextColor(TIME_IDS[c][i], ink)
+                                views.setTextColor(NAME_IDS[c][i], ink)
+                                views.setTextViewText(NAME_IDS[c][i], bold(course.name))
+                            }
+
+                            TodayRowState.UPCOMING -> {
+                                views.setTextColor(TIME_IDS[c][i], dim)
+                                views.setTextColor(NAME_IDS[c][i], text)
+                            }
+                        }
                     }
 
                     // 整天没课：第一格写「没课」，其余格收掉。
                     // 整列空白会让人以为部件没加载
                     i == 0 && column.courses.isEmpty() -> {
                         views.setViewVisibility(blockId, View.VISIBLE)
-                        views.setInt(blockId, "setBackgroundResource", 0)
+                        // 这里以前传 setBackgroundResource(0)，部分 ROM 的宿主
+                        // 不接受 0 这个资源 id。改成显式透明色更稳。
+                        views.setInt(blockId, "setBackgroundColor", Color.TRANSPARENT)
                         views.setTextViewText(TIME_IDS[c][i], "")
                         views.setTextViewText(NAME_IDS[c][i], "没课")
-                        views.setTextColor(
-                            NAME_IDS[c][i],
-                            ContextCompat.getColor(context, R.color.widget_text_dim),
-                        )
+                        views.setTextColor(NAME_IDS[c][i], weak)
+                    }
+
+                    overflowRow -> {
+                        views.setViewVisibility(blockId, View.VISIBLE)
+                        views.setInt(blockId, "setBackgroundColor", Color.TRANSPARENT)
+                        views.setTextViewText(TIME_IDS[c][i], "")
+                        views.setTextViewText(NAME_IDS[c][i], "还有 ${column.overflow} 节")
+                        views.setTextColor(NAME_IDS[c][i], weak)
                     }
 
                     else -> views.setViewVisibility(blockId, View.GONE)
@@ -554,24 +694,25 @@ class ThreeDaysWidget : BaseWidgetProvider() {
     }
 
     private companion object {
-        const val MAX_PER_DAY = 6
+        /** 和 widget_three_days.xml 里每列的块数一致；改布局必须同步改这里 */
+        const val MAX_PER_DAY = 4
 
         val LABEL_IDS = intArrayOf(R.id.d1_label, R.id.d2_label, R.id.d3_label)
         val DATE_IDS = intArrayOf(R.id.d1_date, R.id.d2_date, R.id.d3_date)
         val TIME_IDS = arrayOf(
-            intArrayOf(R.id.d1_t1, R.id.d1_t2, R.id.d1_t3, R.id.d1_t4, R.id.d1_t5, R.id.d1_t6),
-            intArrayOf(R.id.d2_t1, R.id.d2_t2, R.id.d2_t3, R.id.d2_t4, R.id.d2_t5, R.id.d2_t6),
-            intArrayOf(R.id.d3_t1, R.id.d3_t2, R.id.d3_t3, R.id.d3_t4, R.id.d3_t5, R.id.d3_t6),
+            intArrayOf(R.id.d1_t1, R.id.d1_t2, R.id.d1_t3, R.id.d1_t4),
+            intArrayOf(R.id.d2_t1, R.id.d2_t2, R.id.d2_t3, R.id.d2_t4),
+            intArrayOf(R.id.d3_t1, R.id.d3_t2, R.id.d3_t3, R.id.d3_t4),
         )
         val NAME_IDS = arrayOf(
-            intArrayOf(R.id.d1_n1, R.id.d1_n2, R.id.d1_n3, R.id.d1_n4, R.id.d1_n5, R.id.d1_n6),
-            intArrayOf(R.id.d2_n1, R.id.d2_n2, R.id.d2_n3, R.id.d2_n4, R.id.d2_n5, R.id.d2_n6),
-            intArrayOf(R.id.d3_n1, R.id.d3_n2, R.id.d3_n3, R.id.d3_n4, R.id.d3_n5, R.id.d3_n6),
+            intArrayOf(R.id.d1_n1, R.id.d1_n2, R.id.d1_n3, R.id.d1_n4),
+            intArrayOf(R.id.d2_n1, R.id.d2_n2, R.id.d2_n3, R.id.d2_n4),
+            intArrayOf(R.id.d3_n1, R.id.d3_n2, R.id.d3_n3, R.id.d3_n4),
         )
         val BLOCK_IDS = arrayOf(
-            intArrayOf(R.id.d1_b1, R.id.d1_b2, R.id.d1_b3, R.id.d1_b4, R.id.d1_b5, R.id.d1_b6),
-            intArrayOf(R.id.d2_b1, R.id.d2_b2, R.id.d2_b3, R.id.d2_b4, R.id.d2_b5, R.id.d2_b6),
-            intArrayOf(R.id.d3_b1, R.id.d3_b2, R.id.d3_b3, R.id.d3_b4, R.id.d3_b5, R.id.d3_b6),
+            intArrayOf(R.id.d1_b1, R.id.d1_b2, R.id.d1_b3, R.id.d1_b4),
+            intArrayOf(R.id.d2_b1, R.id.d2_b2, R.id.d2_b3, R.id.d2_b4),
+            intArrayOf(R.id.d3_b1, R.id.d3_b2, R.id.d3_b3, R.id.d3_b4),
         )
     }
 }
@@ -598,29 +739,19 @@ class WeekWidget : BaseWidgetProvider() {
 
         views.setTextViewText(R.id.widget_header, grid.header)
 
-        // 星期表头 + 日期。今天那一列用主题色，日期加粗
+        // 星期表头 + 日期。今天那一列用主题色，两行都加粗
         grid.weekdays.forEachIndexed { c, label ->
-            views.setTextViewText(WEEKDAY_IDS[c], label)
             val isToday = c == grid.todayCol
-            views.setTextColor(
-                WEEKDAY_IDS[c],
-                ContextCompat.getColor(
-                    context,
-                    if (isToday) R.color.widget_accent else R.color.widget_text_dim,
-                ),
+            val color = ContextCompat.getColor(
+                context,
+                if (isToday) R.color.widget_accent else R.color.widget_text_dim,
             )
-            views.setTextColor(
-                DATE_IDS[c],
-                ContextCompat.getColor(
-                    context,
-                    if (isToday) R.color.widget_accent else R.color.widget_text_dim,
-                ),
-            )
+            views.setTextViewText(WEEKDAY_IDS[c], if (isToday) bold(label) else label)
+            views.setTextColor(WEEKDAY_IDS[c], color)
+
             val date = grid.dates.getOrNull(c).orEmpty()
-            views.setTextViewText(
-                DATE_IDS[c],
-                if (isToday) bold(date) else date,
-            )
+            views.setTextViewText(DATE_IDS[c], if (isToday) bold(date) else date)
+            views.setTextColor(DATE_IDS[c], color)
         }
     }
 
@@ -685,12 +816,6 @@ class WeekWidget : BaseWidgetProvider() {
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(WEEK_PREFS, Context.MODE_PRIVATE)
-
-    /** 日期加粗。RemoteViews 没有 setTypeface，用 StyleSpan 跟着文本一起过去 */
-    private fun bold(text: String): CharSequence =
-        SpannableString(text).apply {
-            setSpan(StyleSpan(Typeface.BOLD), 0, length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-        }
 
     private companion object {
         const val WEEK_PREFS = "gzucm_widget_week"

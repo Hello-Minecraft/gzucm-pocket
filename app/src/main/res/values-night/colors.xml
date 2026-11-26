@@ -10,35 +10,59 @@
         onSurfaceVariant #9AA3AE / primary #4ADE9B）。
 
         荣耀的深色规范禁止纯黑 #000000，这里的 #12151A 不是纯黑。
+
+        文字三档和浅色一一对应，只是明暗反过来：主 #E9EDF0 / 次 #9AA3AE / 弱 #79828C。
     -->
     <color name="widget_bg">#12151A</color>
     <color name="widget_text">#E9EDF0</color>
     <color name="widget_text_dim">#9AA3AE</color>
+    <color name="widget_text_weak">#79828C</color>
     <color name="widget_accent">#4ADE9B</color>
-    <color name="widget_block">#26382F</color>
-    <color name="widget_block_text">#CFE9DC</color>
-    <color name="widget_block_now">#4ADE9B</color>
-    <color name="widget_block_now_text">#00281A</color>
-    <color name="widget_block_past">#20262E</color>
-    <color name="widget_block_past_text">#6B747E</color>
 
-    <!-- 周视图配色：深色模式反过来 —— 深底 + 浅字，色相和浅色一一对应 -->
-    <color name="widget_c1">#26382F</color>
-    <color name="widget_c1_text">#CFE9DC</color>
-    <color name="widget_c2">#1E3348</color>
-    <color name="widget_c2_text">#CFE3F7</color>
-    <color name="widget_c3">#3D2E1C</color>
-    <color name="widget_c3_text">#F7DFC0</color>
-    <color name="widget_c4">#32263F</color>
-    <color name="widget_c4_text">#E4D6F5</color>
-    <color name="widget_c5">#3D2222</color>
-    <color name="widget_c5_text">#F5D6D6</color>
-    <color name="widget_c6">#29361F</color>
-    <color name="widget_c6_text">#DCEFC8</color>
-    <color name="widget_c7">#1F3535</color>
-    <color name="widget_c7_text">#CDEAEA</color>
-    <color name="widget_c8">#33301F</color>
-    <color name="widget_c8_text">#EAE4CC</color>
+    <!--
+        8 组课程色（深色）：深底 + 亮字。
+        正在上的 26% 档**不是**把 20% 档再压暗，而是提亮一点点 ——
+        暗底上「更深」看不出来，只有提亮才有「这块亮着」的语义。
+    -->
+    <color name="widget_k1">#14302C</color>
+    <color name="widget_k1_now">#153932</color>
+    <color name="widget_k1_text">#7FE3B8</color>
+    <color name="widget_k1_dot">#4ADE9B</color>
+
+    <color name="widget_k2">#192C41</color>
+    <color name="widget_k2_now">#1C334D</color>
+    <color name="widget_k2_text">#A8CCF2</color>
+    <color name="widget_k2_dot">#85B7EB</color>
+
+    <color name="widget_k3">#282941</color>
+    <color name="widget_k3_now">#2E2E4D</color>
+    <color name="widget_k3_text">#C4C0F2</color>
+    <color name="widget_k3_dot">#AFA9EC</color>
+
+    <color name="widget_k4">#39212E</color>
+    <color name="widget_k4_now">#442534</color>
+    <color name="widget_k4_text">#F5B4C8</color>
+    <color name="widget_k4_dot">#ED93B1</color>
+
+    <color name="widget_k5">#352421</color>
+    <color name="widget_k5_now">#402823</color>
+    <color name="widget_k5_text">#EFB19C</color>
+    <color name="widget_k5_dot">#E09277</color>
+
+    <color name="widget_k6">#342819</color>
+    <color name="widget_k6_now">#3E2E19</color>
+    <color name="widget_k6_text">#F5BC63</color>
+    <color name="widget_k6_dot">#EF9F27</color>
+
+    <color name="widget_k7">#113038</color>
+    <color name="widget_k7_now">#113841</color>
+    <color name="widget_k7_text">#8CE3E9</color>
+    <color name="widget_k7_dot">#5CD3DC</color>
+
+    <color name="widget_k8">#222F1C</color>
+    <color name="widget_k8_now">#27371C</color>
+    <color name="widget_k8_text">#B6D986</color>
+    <color name="widget_k8_dot">#97C459</color>
 
     <!--
         深色下不能照抄浅色的 8% 黑系叠加：底色本来就深，再压一层看不出来。

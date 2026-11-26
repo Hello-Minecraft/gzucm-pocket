@@ -87,9 +87,9 @@ private class WeekRowFactory(private val context: Context) : RemoteViewsService.
         val unit = position + 1
         val snapshot = grid
 
-        // 左列：节次号 + 上课时间，两行
-        val time = SlotTimes[unit].orEmpty()
-        row.setTextViewText(R.id.wk_row_unit, if (time.isBlank()) "$unit" else "$unit\n$time")
+        // 左列：节次号 + 上课时间，两行，字号不同（节次号更小更淡）
+        row.setTextViewText(R.id.wk_row_unit, "$unit")
+        row.setTextViewText(R.id.wk_row_time, SlotTimes[unit].orEmpty())
 
         // 右边 7 格：日 一 二 三 四 五 六（和表头一致，周日在前）
         for (col in 0..6) {
@@ -100,46 +100,49 @@ private class WeekRowFactory(private val context: Context) : RemoteViewsService.
                 // 不主动清就会带着上一行/上一次刷新的颜色
                 cell == null || cell.colorIndex < 0 -> {
                     row.setTextViewText(cellId, "")
-                    row.setInt(cellId, "setBackgroundResource", 0)
+                    row.setInt(cellId, "setBackgroundColor", Color.TRANSPARENT)
                 }
 
                 cell.isStart -> {
                     row.setTextViewText(cellId, listOfNotNull(cell.time, cell.name).joinToString("\n"))
-                    row.setInt(cellId, "setBackgroundResource", CELL_BG[cell.colorIndex])
+                    row.setInt(cellId, "setBackgroundResource", cellBg(cell))
                     row.setTextColor(
                         cellId,
                         ContextCompat.getColor(context, CELL_TEXT[cell.colorIndex]),
                     )
                 }
 
-                // 跨节课的后续节：同色、无字，和起始格连成一个高块
+                // 跨节课的后续节：同色、无字。drawable 的 inset 让上下两格
+                // 严丝合缝连成一块，看起来就是一个高块
                 else -> {
                     row.setTextViewText(cellId, "")
-                    row.setInt(cellId, "setBackgroundResource", CELL_BG[cell.colorIndex])
+                    row.setInt(cellId, "setBackgroundResource", cellBg(cell))
                 }
             }
         }
 
-        // ── 当前节次的指示 ──────────────────────────────────────────
+        // ── 当前节次 ────────────────────────────────────────────────
         //
         // 精度只做到「一节课」，不做分钟级：分钟级要把线画在行的 0%~100% 之间，
         // 那是绝对定位，ListView 给不了（每行是一个独立 RemoteViews，
         // 拿不到整行像素高度的百分比），只能换回 ScrollView —— 而 ScrollView
         // 又没法程序化定位。两害相权取整节精度：用户要的是「我现在在哪一节」。
+        //
+        // 表现方式：整行底色微微提亮 + 节次号和时间变主题色。**不放顶部指示线** ——
+        // 那条线会在跨节的连块之间切出一道缝，看起来像两门课。
         val isNow = position == currentRow
-        row.setInt(
-            R.id.wk_row_line,
-            "setBackgroundColor",
-            if (isNow) ContextCompat.getColor(context, R.color.widget_accent) else Color.TRANSPARENT,
-        )
-        // 整行微微提亮 + 节次号跟着变主题色，让「当前」在两三米外也看得出
         row.setInt(
             R.id.wk_row_body,
             "setBackgroundColor",
             if (isNow) ContextCompat.getColor(context, R.color.widget_week_row_now) else Color.TRANSPARENT,
         )
+        val unitColor = ContextCompat.getColor(
+            context,
+            if (isNow) R.color.widget_accent else R.color.widget_text_weak,
+        )
+        row.setTextColor(R.id.wk_row_unit, unitColor)
         row.setTextColor(
-            R.id.wk_row_unit,
+            R.id.wk_row_time,
             ContextCompat.getColor(
                 context,
                 if (isNow) R.color.widget_accent else R.color.widget_text_dim,
@@ -147,6 +150,23 @@ private class WeekRowFactory(private val context: Context) : RemoteViewsService.
         )
 
         return row
+    }
+
+    /**
+     * 这一格该用哪种连块 drawable。
+     *
+     * 只有角色（single/first/middle/last）决定上下 inset 和圆角，颜色仍是
+     * colorIndex 那一组 —— 两门课相邻时是 last(下 1dp) + first(上 1dp)，
+     * 正好 2dp 视觉缝；同一门课相邻时是 first/middle/last，没有 inset，贴合。
+     */
+    private fun cellBg(cell: WeekCell): Int {
+        val i = cell.colorIndex
+        return when (cell.role) {
+            WeekCellRole.SINGLE -> CELL_SINGLE[i]
+            WeekCellRole.FIRST -> CELL_FIRST[i]
+            WeekCellRole.MIDDLE -> CELL_MID[i]
+            WeekCellRole.LAST -> CELL_LAST[i]
+        }
     }
 
     override fun getLoadingView(): RemoteViews? = null
@@ -162,17 +182,38 @@ private class WeekRowFactory(private val context: Context) : RemoteViewsService.
             R.id.wk_row_c0, R.id.wk_row_c1, R.id.wk_row_c2, R.id.wk_row_c3,
             R.id.wk_row_c4, R.id.wk_row_c5, R.id.wk_row_c6,
         )
-        val CELL_BG = intArrayOf(
-            R.drawable.widget_week_1, R.drawable.widget_week_2,
-            R.drawable.widget_week_3, R.drawable.widget_week_4,
-            R.drawable.widget_week_5, R.drawable.widget_week_6,
-            R.drawable.widget_week_7, R.drawable.widget_week_8,
+
+        // 下标 = colorIndex，值 = 该角色的 drawable
+        val CELL_SINGLE = intArrayOf(
+            R.drawable.widget_wk1_single, R.drawable.widget_wk2_single,
+            R.drawable.widget_wk3_single, R.drawable.widget_wk4_single,
+            R.drawable.widget_wk5_single, R.drawable.widget_wk6_single,
+            R.drawable.widget_wk7_single, R.drawable.widget_wk8_single,
         )
+        val CELL_FIRST = intArrayOf(
+            R.drawable.widget_wk1_first, R.drawable.widget_wk2_first,
+            R.drawable.widget_wk3_first, R.drawable.widget_wk4_first,
+            R.drawable.widget_wk5_first, R.drawable.widget_wk6_first,
+            R.drawable.widget_wk7_first, R.drawable.widget_wk8_first,
+        )
+        val CELL_MID = intArrayOf(
+            R.drawable.widget_wk1_mid, R.drawable.widget_wk2_mid,
+            R.drawable.widget_wk3_mid, R.drawable.widget_wk4_mid,
+            R.drawable.widget_wk5_mid, R.drawable.widget_wk6_mid,
+            R.drawable.widget_wk7_mid, R.drawable.widget_wk8_mid,
+        )
+        val CELL_LAST = intArrayOf(
+            R.drawable.widget_wk1_last, R.drawable.widget_wk2_last,
+            R.drawable.widget_wk3_last, R.drawable.widget_wk4_last,
+            R.drawable.widget_wk5_last, R.drawable.widget_wk6_last,
+            R.drawable.widget_wk7_last, R.drawable.widget_wk8_last,
+        )
+
         val CELL_TEXT = intArrayOf(
-            R.color.widget_c1_text, R.color.widget_c2_text,
-            R.color.widget_c3_text, R.color.widget_c4_text,
-            R.color.widget_c5_text, R.color.widget_c6_text,
-            R.color.widget_c7_text, R.color.widget_c8_text,
+            R.color.widget_k1_text, R.color.widget_k2_text,
+            R.color.widget_k3_text, R.color.widget_k4_text,
+            R.color.widget_k5_text, R.color.widget_k6_text,
+            R.color.widget_k7_text, R.color.widget_k8_text,
         )
     }
 }

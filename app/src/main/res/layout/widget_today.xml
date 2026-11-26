@@ -1,143 +1,129 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    2x2 今日课程：**上下两张卡片**（各 50% 高）。
+    2x2 今日课程：**上下两张胶囊卡**（各 43dp）。
 
-    上一版是「表头 + 3 行」，真机上表头占掉一行、3 行又各自均分剩余高度，
-    结果中间那条空白比字还多。现在不放表头（连刷新图标一起删掉，2x2 太小），
-    两张卡正好是用户扫一眼要的两件事：
-        上：正在上的课（或课间时的下一节）
-        下：再下一节
+    95dp 的可用高度里，两张卡各占一半，中间 8dp；只有一节课时第二张卡用
+    INVISIBLE 而不是 GONE —— GONE 会让第一张卡撑满整块，看起来像只有一门课
+    的一天特别长。
 
-    卡片内部两行：
-        · 08:30          ← 开始时间（带圆点，提醒「这是一节的起点」）
-          09:40  外科学   ← 结束时间 + 课名（结束时间缩进到圆点右边，和上行对齐）
+    卡内只显示**上课时间**（不显示下课时间）：2x2 的宽度留给课名更值，
+    「几点开始」是用户扫一眼要的那个数。圆点是这门课自己的颜色。
 
-    整块的背景 / 文字颜色在 Kotlin 里按状态 set（正在上 → widget_block_now），
-    这里给的 @drawable/widget_block 只是「没绑数据时」的兜底，
-    保证预览和加载中也不是一片白。
+    底色 / 圆点颜色都在 Kotlin 里按 colorIndex set，这里给的
+    @drawable/widget_ka1 / widget_dot1 只是预览和加载中的兜底。
 -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/widget_bg"
-    android:orientation="vertical"
-    android:paddingStart="10dp"
-    android:paddingTop="10dp"
-    android:paddingEnd="10dp"
-    android:paddingBottom="10dp">
+    android:padding="8dp">
 
     <LinearLayout
-        android:id="@+id/card1"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:background="@drawable/widget_block"
-        android:gravity="center_vertical"
-        android:orientation="vertical"
-        android:paddingStart="8dp"
-        android:paddingTop="6dp"
-        android:paddingEnd="8dp"
-        android:paddingBottom="6dp">
-
-        <TextView
-            android:id="@+id/card1_start"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:textColor="@color/widget_text_dim"
-            android:textSize="9sp" />
+        android:layout_height="match_parent"
+        android:orientation="vertical">
 
         <LinearLayout
+            android:id="@+id/card1"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="1dp"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:background="@drawable/widget_ka1"
             android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:orientation="horizontal"
+            android:paddingStart="10dp"
+            android:paddingEnd="8dp">
 
-            <TextView
-                android:id="@+id/card1_end"
-                android:layout_width="38dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="7dp"
-                android:maxLines="1"
-                android:textColor="@color/widget_text_dim"
-                android:textSize="9sp" />
+            <FrameLayout
+                android:id="@+id/card1_dot"
+                android:layout_width="7dp"
+                android:layout_height="7dp"
+                android:background="@drawable/widget_dot1" />
 
-            <TextView
-                android:id="@+id/card1_name"
+            <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_marginStart="7dp"
                 android:layout_weight="1"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textColor="@color/widget_text"
-                android:textSize="11sp" />
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/card1_time"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text_dim"
+                    android:textSize="9sp" />
+
+                <TextView
+                    android:id="@+id/card1_name"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text"
+                    android:textSize="11.5sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/card2"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginTop="8dp"
+            android:layout_weight="1"
+            android:background="@drawable/widget_ka1"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="10dp"
+            android:paddingEnd="8dp">
+
+            <FrameLayout
+                android:id="@+id/card2_dot"
+                android:layout_width="7dp"
+                android:layout_height="7dp"
+                android:background="@drawable/widget_dot1" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="7dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/card2_time"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text_dim"
+                    android:textSize="9sp" />
+
+                <TextView
+                    android:id="@+id/card2_name"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text"
+                    android:textSize="11.5sp" />
+            </LinearLayout>
         </LinearLayout>
     </LinearLayout>
 
-    <LinearLayout
-        android:id="@+id/card2"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_marginTop="4dp"
-        android:layout_weight="1"
-        android:background="@drawable/widget_block"
-        android:gravity="center_vertical"
-        android:orientation="vertical"
-        android:paddingStart="8dp"
-        android:paddingTop="6dp"
-        android:paddingEnd="8dp"
-        android:paddingBottom="6dp">
-
-        <TextView
-            android:id="@+id/card2_start"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:textColor="@color/widget_text_dim"
-            android:textSize="9sp" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="1dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <TextView
-                android:id="@+id/card2_end"
-                android:layout_width="38dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="7dp"
-                android:maxLines="1"
-                android:textColor="@color/widget_text_dim"
-                android:textSize="9sp" />
-
-            <TextView
-                android:id="@+id/card2_name"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textColor="@color/widget_text"
-                android:textSize="11sp" />
-        </LinearLayout>
-    </LinearLayout>
-
-    <!-- 今天课都上完了 / 周末：两张卡合并成一句话 -->
+    <!-- 今天课都上完了 / 周末 / 没同步过：两卡收掉，整块换成一句话 -->
     <TextView
         android:id="@+id/widget_empty"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:ellipsize="end"
+        android:layout_height="match_parent"
         android:gravity="center"
         android:maxLines="2"
-        android:textColor="@color/widget_text_dim"
-        android:textSize="12sp"
+        android:textColor="@color/widget_text_weak"
+        android:textSize="11sp"
         android:visibility="gone" />
-</LinearLayout>
+</FrameLayout>

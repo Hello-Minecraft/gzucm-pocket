@@ -2,6 +2,7 @@ package com.gzucm.pocket
 
 import com.gzucm.pocket.widget.SnapshotSession
 import com.gzucm.pocket.widget.TodayRowState
+import com.gzucm.pocket.widget.WeekCellRole
 import com.gzucm.pocket.widget.WeekColorCount
 import com.gzucm.pocket.widget.WeekRowHeightDp
 import com.gzucm.pocket.widget.WeekUnitCount
@@ -535,5 +536,154 @@ class WidgetRenderTest {
         // 最后一节之后不越界
         assertEquals(WeekUnitCount - 1, WidgetRender.currentRow(at(0, 21, 30)))
         assertEquals(WeekUnitCount - 1, WidgetRender.currentRow(at(0, 23, 59)))
+    }
+
+    // ── 连块的角色 ────────────────────────────────────────────────
+    //
+    // 角色（single/first/middle/last）决定格子上下要不要留 inset、哪几个角要圆。
+    // 算错的后果很具体：跨节的课中间出现一条缝（看起来像两门课），
+    // 或者两门相邻的课粘成一整块（看起来像一门课拖了四节）。
+
+    @Test
+    fun `周视图连块_单节课是SINGLE`() {
+        val data = snapshot(
+            s("单节课", weekday = 1, startUnit = 3, endUnit = 3, startTime = "10:20", endTime = "11:00"),
+        )
+        val grid = WidgetRender.weekGrid(data, at(0, 7, 0))
+
+        assertEquals(WeekCellRole.SINGLE, grid.cell(3, 1).role)
+    }
+
+    @Test
+    fun `周视图连块_跨两节是FIRST和LAST`() {
+        val data = snapshot(
+            s("两节连上", weekday = 1, startUnit = 1, endUnit = 2, startTime = "08:30", endTime = "10:00"),
+        )
+        val grid = WidgetRender.weekGrid(data, at(0, 7, 0))
+
+        assertEquals(WeekCellRole.FIRST, grid.cell(1, 1).role)
+        assertEquals(WeekCellRole.LAST, grid.cell(2, 1).role)
+    }
+
+    @Test
+    fun `周视图连块_跨三节是FIRST_MIDDLE_LAST`() {
+        val data = snapshot(
+            s("三节连上", weekday = 1, startUnit = 3, endUnit = 5, startTime = "10:20", endTime = "12:30"),
+        )
+        val grid = WidgetRender.weekGrid(data, at(0, 7, 0))
+
+        assertEquals(WeekCellRole.FIRST, grid.cell(3, 1).role)
+        assertEquals(WeekCellRole.MIDDLE, grid.cell(4, 1).role)
+        assertEquals(WeekCellRole.LAST, grid.cell(5, 1).role)
+        // 同一个颜色，视觉上才连得起来
+        assertEquals(grid.cell(3, 1).colorIndex, grid.cell(4, 1).colorIndex)
+        assertEquals(grid.cell(3, 1).colorIndex, grid.cell(5, 1).colorIndex)
+    }
+
+    @Test
+    fun `周视图连块_两门课相邻时各自收口而不是连成一块`() {
+        // A 1-2 节、B 3-4 节：第 2 节必须是 LAST（下方留缝），
+        // 第 3 节必须是 FIRST（上方留缝），否则四节会被看成一门课
+        val data = snapshot(
+            s("A", weekday = 1, startUnit = 1, endUnit = 2, startTime = "08:30", endTime = "10:00"),
+            s("B", weekday = 1, startUnit = 3, endUnit = 4, startTime = "10:20", endTime = "11:50"),
+        )
+        val grid = WidgetRender.weekGrid(data, at(0, 7, 0))
+
+        assertEquals(WeekCellRole.LAST, grid.cell(2, 1).role)
+        assertEquals(WeekCellRole.FIRST, grid.cell(3, 1).role)
+    }
+
+    @Test
+    fun `周视图没课的格子colorIndex为负`() {
+        val grid = WidgetRender.weekGrid(normalMonday(), at(0, 7, 0))
+        assertEquals(-1, grid.cell(6, 1).colorIndex)
+    }
+
+    // ── 课程色下标 ────────────────────────────────────────────────
+
+    @Test
+    fun `colorIndexFor永远落在0到7且同一门课稳定`() {
+        val names = listOf(
+            "中药学", "中医诊断学", "外科学(2)", "中医骨伤科学", "就业指导(2)",
+            "中医妇科学", "", "A", "很长的课程名称（合班）", "体育", "马克思主义基本原理",
+        )
+        names.forEach { name ->
+            val i = WidgetRender.colorIndexFor(name)
+            assertTrue("$name 的下标越界：$i", i in 0 until WeekColorCount)
+            assertEquals("同一门课两次算出来必须一样", i, WidgetRender.colorIndexFor(name))
+        }
+    }
+
+    @Test
+    fun `两卡片_只有一节课时只给一张卡`() {
+        // 10:40 上完第一节课后只剩一节 → 第二张卡要 INVISIBLE 占位，不能补出空卡
+        val data = snapshot(
+            s("唯一的一节", weekday = 1, startUnit = 3, endUnit = 4, startTime = "10:20", endTime = "11:50"),
+        )
+        val cards = WidgetRender.todayCards(data, at(0, 10, 40))
+        assertEquals(1, cards.cards.size)
+        assertNull(cards.emptyText)
+    }
+
+    @Test
+    fun `三天的每列最多四节且统计溢出`() {
+        val data = snapshot(
+            *(1..6).map { i ->
+                s("课$i", weekday = 1, startUnit = i, endUnit = i, startTime = "%02d:00".format(7 + i), endTime = "%02d:45".format(7 + i))
+            }.toTypedArray(),
+        )
+        val cols = WidgetRender.threeDays(data, at(0, 7, 0), maxPerDay = 4)
+
+        assertEquals(4, cols[0].courses.size)
+        assertEquals(2, cols[0].overflow)
+        assertEquals(listOf("课1", "课2", "课3", "课4"), cols[0].courses.map { it.name })
+        // 明天 / 后天没课，不该有溢出
+        assertEquals(0, cols[1].overflow)
+        assertTrue(cols[1].courses.isEmpty())
+    }
+
+    // ── 2x1 的行内容 ──────────────────────────────────────────────
+
+    @Test
+    fun `2x1_正在上课时给课名和下课时间`() {
+        val info = WidgetRender.currentInfo(normalMonday(), at(0, 10, 40))
+        assertEquals("中医诊断学", info.name)
+        assertEquals("至 11:50", info.tail)
+        assertNull(info.emptyText)
+        assertEquals(WidgetRender.colorIndexFor("中医诊断学"), info.colorIndex)
+    }
+
+    @Test
+    fun `2x1_课间给下一节和开始时间`() {
+        val info = WidgetRender.currentInfo(normalMonday(), at(0, 10, 5))
+        assertEquals("中医诊断学", info.name)
+        assertEquals("10:20 开始", info.tail)
+    }
+
+    @Test
+    fun `2x1_没课时只给一句话`() {
+        assertEquals("今天没课了", WidgetRender.currentInfo(normalMonday(), at(0, 21, 0)).emptyText)
+        assertEquals("打开 App 同步课表", WidgetRender.currentInfo(null, at(0, 10, 0)).emptyText)
+        assertEquals("打开 App 同步课表", WidgetRender.currentInfo(snapshot(), at(0, 10, 0)).emptyText)
+    }
+
+    @Test
+    fun `2x1和currentLine的口径必须一致`() {
+        // 两个函数是同一套判断的两份表达，任何一个改了另一个忘了改，
+        // 桌面上就会出现「2x1 说没课、2x2 说正在上」这种自相矛盾
+        val times = listOf(at(0, 7, 0), at(0, 10, 5), at(0, 10, 40), at(0, 11, 50), at(0, 21, 0))
+        times.forEach { now ->
+            val line = WidgetRender.currentLine(normalMonday(), now)
+            val info = WidgetRender.currentInfo(normalMonday(), now)
+            val rebuilt = if (info.emptyText != null) {
+                info.emptyText
+            } else if (info.tail.startsWith("至")) {
+                "${info.name} · ${info.tail}"
+            } else {
+                "下一节 ${info.tail.removeSuffix(" 开始")} ${info.name}"
+            }
+            assertEquals(line, rebuilt)
+        }
     }
 }

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 由 tools/gen_widget_drawables.py 生成，不要手改 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/widget_k1" />
+    <corners android:radius="13dp" />
+</shape>

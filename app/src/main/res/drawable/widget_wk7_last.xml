@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 由 tools/gen_widget_drawables.py 生成，不要手改 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:bottom="1dp">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/widget_k7" />
+            <corners
+            android:topLeftRadius="0dp"
+            android:topRightRadius="0dp"
+            android:bottomLeftRadius="12dp"
+            android:bottomRightRadius="12dp" />
+        </shape>
+    </item>
+</layer-list>

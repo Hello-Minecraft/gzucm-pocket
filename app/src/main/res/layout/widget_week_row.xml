@@ -1,142 +1,161 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    周视图的一行：2dp 指示线 + 节次列 + 7 个日列。
+    周视图的一行：节次列 + 7 个日列。
 
     这个布局由 WidgetWeekService 逐行 inflate（RemoteViewsService 的
     getViewAt 返回 RemoteViews），所以**不能**在里面放 ScrollView / ListView；
     7 个日列只能用 LinearLayout 平铺。
 
-    行高固定：2dp 线 + 24dp 内容 = 26dp。线在非当前行是透明色而不是 GONE ——
-    一旦某行矮 2dp，ListView 的 item 高度就不一致，行号也就不能当节次用了。
+    ## 为什么没有顶部指示线
+
+    上一版每行顶上有一条 2dp 的「当前节次」线。跨节的课（1-2 节连上）在两条
+    行之间正好被这条线切开，看起来像两门不同的课 —— 而且它让行高变成 26dp，
+    行号还能当节次用只是巧合。现在当前节次改用整行底色 + 节次号变主题色表示，
+    行高固定 24dp，行号 = 节次。
+
+    ## 连块怎么拼
+
+    格子撑满行高（match_parent），上下不留 margin，只有 1dp 的水平缝。
+    上下方向靠 drawable 里的 item inset：同一门课的 first/middle/last 都没有
+    接缝，不同课之间是 last(下 1dp) + first(上 1dp) = 2dp。见
+    tools/gen_widget_drawables.py 的 _week_cell()。
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/wk_row_body"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:orientation="vertical">
-
-    <!--
-        当前节次的指示线。用 FrameLayout 而不是裸 <View>：RemoteViews 的
-        inflate 只放行 android.widget.* 里的类，裸 View 在部分 ROM 上直接失败。
-        颜色和显隐都由 Kotlin 侧 setBackgroundColor 控制。
-    -->
-    <FrameLayout
-        android:id="@+id/wk_row_line"
-        android:layout_width="match_parent"
-        android:layout_height="2dp"
-        android:background="@android:color/transparent" />
+    android:layout_height="24dp"
+    android:orientation="horizontal">
 
     <LinearLayout
-        android:id="@+id/wk_row_body"
-        android:layout_width="match_parent"
-        android:layout_height="24dp"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
+        android:id="@+id/wk_row_unit_col"
+        android:layout_width="26dp"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:orientation="vertical">
 
         <TextView
             android:id="@+id/wk_row_unit"
-            android:layout_width="30dp"
-            android:layout_height="match_parent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
             android:gravity="center"
-            android:maxLines="2"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:textColor="@color/widget_text_weak"
+            android:textSize="7sp" />
+
+        <TextView
+            android:id="@+id/wk_row_time"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:includeFontPadding="false"
+            android:maxLines="1"
             android:textColor="@color/widget_text_dim"
-            android:textSize="7sp" />
-
-        <TextView
-            android:id="@+id/wk_row_c0"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_marginStart="1dp"
-            android:layout_weight="1"
-            android:ellipsize="end"
-            android:gravity="center"
-            android:maxLines="2"
-            android:paddingStart="1dp"
-            android:paddingEnd="1dp"
-            android:textColor="@color/widget_text"
-            android:textSize="7sp" />
-
-        <TextView
-            android:id="@+id/wk_row_c1"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_marginStart="1dp"
-            android:layout_weight="1"
-            android:ellipsize="end"
-            android:gravity="center"
-            android:maxLines="2"
-            android:paddingStart="1dp"
-            android:paddingEnd="1dp"
-            android:textColor="@color/widget_text"
-            android:textSize="7sp" />
-
-        <TextView
-            android:id="@+id/wk_row_c2"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_marginStart="1dp"
-            android:layout_weight="1"
-            android:ellipsize="end"
-            android:gravity="center"
-            android:maxLines="2"
-            android:paddingStart="1dp"
-            android:paddingEnd="1dp"
-            android:textColor="@color/widget_text"
-            android:textSize="7sp" />
-
-        <TextView
-            android:id="@+id/wk_row_c3"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_marginStart="1dp"
-            android:layout_weight="1"
-            android:ellipsize="end"
-            android:gravity="center"
-            android:maxLines="2"
-            android:paddingStart="1dp"
-            android:paddingEnd="1dp"
-            android:textColor="@color/widget_text"
-            android:textSize="7sp" />
-
-        <TextView
-            android:id="@+id/wk_row_c4"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_marginStart="1dp"
-            android:layout_weight="1"
-            android:ellipsize="end"
-            android:gravity="center"
-            android:maxLines="2"
-            android:paddingStart="1dp"
-            android:paddingEnd="1dp"
-            android:textColor="@color/widget_text"
-            android:textSize="7sp" />
-
-        <TextView
-            android:id="@+id/wk_row_c5"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_marginStart="1dp"
-            android:layout_weight="1"
-            android:ellipsize="end"
-            android:gravity="center"
-            android:maxLines="2"
-            android:paddingStart="1dp"
-            android:paddingEnd="1dp"
-            android:textColor="@color/widget_text"
-            android:textSize="7sp" />
-
-        <TextView
-            android:id="@+id/wk_row_c6"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_marginStart="1dp"
-            android:layout_weight="1"
-            android:ellipsize="end"
-            android:gravity="center"
-            android:maxLines="2"
-            android:paddingStart="1dp"
-            android:paddingEnd="1dp"
-            android:textColor="@color/widget_text"
-            android:textSize="7sp" />
+            android:textSize="8sp" />
     </LinearLayout>
+
+    <TextView
+        android:id="@+id/wk_row_c0"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_marginStart="1dp"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:includeFontPadding="false"
+        android:maxLines="2"
+        android:paddingStart="1dp"
+        android:paddingEnd="1dp"
+        android:textColor="@color/widget_text"
+        android:textSize="7.5sp" />
+
+    <TextView
+        android:id="@+id/wk_row_c1"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_marginStart="1dp"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:includeFontPadding="false"
+        android:maxLines="2"
+        android:paddingStart="1dp"
+        android:paddingEnd="1dp"
+        android:textColor="@color/widget_text"
+        android:textSize="7.5sp" />
+
+    <TextView
+        android:id="@+id/wk_row_c2"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_marginStart="1dp"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:includeFontPadding="false"
+        android:maxLines="2"
+        android:paddingStart="1dp"
+        android:paddingEnd="1dp"
+        android:textColor="@color/widget_text"
+        android:textSize="7.5sp" />
+
+    <TextView
+        android:id="@+id/wk_row_c3"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_marginStart="1dp"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:includeFontPadding="false"
+        android:maxLines="2"
+        android:paddingStart="1dp"
+        android:paddingEnd="1dp"
+        android:textColor="@color/widget_text"
+        android:textSize="7.5sp" />
+
+    <TextView
+        android:id="@+id/wk_row_c4"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_marginStart="1dp"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:includeFontPadding="false"
+        android:maxLines="2"
+        android:paddingStart="1dp"
+        android:paddingEnd="1dp"
+        android:textColor="@color/widget_text"
+        android:textSize="7.5sp" />
+
+    <TextView
+        android:id="@+id/wk_row_c5"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_marginStart="1dp"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:includeFontPadding="false"
+        android:maxLines="2"
+        android:paddingStart="1dp"
+        android:paddingEnd="1dp"
+        android:textColor="@color/widget_text"
+        android:textSize="7.5sp" />
+
+    <TextView
+        android:id="@+id/wk_row_c6"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_marginStart="1dp"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:includeFontPadding="false"
+        android:maxLines="2"
+        android:paddingStart="1dp"
+        android:paddingEnd="1dp"
+        android:textColor="@color/widget_text"
+        android:textSize="7.5sp" />
 </LinearLayout>

@@ -1,10 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    2x1 当前课程：一行字。
+    2x1 当前课程：圆点 + 课名 + 尾巴（「至 09:40」/「10:20 开始」）。
 
-    空间只有 40dp 高，除了一行文字什么都放不下 —— 刷新图标按产品要求
-    也不放（点了容易误触，而且这一行信息本来就是「看一眼就走」）。
-    点整块打开 App。
+    40dp 高，除了一行字什么都放不下，所以刷新图标按产品要求不放
+    （误触率高于收益，这一行本来就是「看一眼就走」）。
+
+    圆点用 FrameLayout + 背景 drawable，不能用裸 <View>：
+    RemoteViews 只放行 android.widget.* 里的类，裸 View 在部分 ROM 上直接
+    让宿主抛 "加载时出现问题"。这个坑以前踩过，别再改回去。
+
+    空态和内容行叠在同一个 FrameLayout 里靠 visibility 切换 —— 2x1 没有
+    第二行可以放提示，只能整块换掉。
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
@@ -15,19 +21,20 @@
     android:paddingEnd="12dp">
 
     <LinearLayout
+        android:id="@+id/widget_current_row"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
-        <!-- 左侧色条：正在上课/有下一节时的「有内容」暗示 -->
-        <TextView
-            android:layout_width="3dp"
-            android:layout_height="16dp"
-            android:background="@color/widget_accent" />
+        <FrameLayout
+            android:id="@+id/widget_current_dot"
+            android:layout_width="6dp"
+            android:layout_height="6dp"
+            android:background="@drawable/widget_dot1" />
 
         <TextView
-            android:id="@+id/widget_line"
+            android:id="@+id/widget_current_name"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
@@ -35,6 +42,25 @@
             android:ellipsize="end"
             android:maxLines="1"
             android:textColor="@color/widget_text"
-            android:textSize="13sp" />
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/widget_current_tail"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:maxLines="1"
+            android:textColor="@color/widget_text_dim"
+            android:textSize="9.5sp" />
     </LinearLayout>
+
+    <TextView
+        android:id="@+id/widget_empty"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:maxLines="1"
+        android:textColor="@color/widget_text_weak"
+        android:textSize="11sp"
+        android:visibility="gone" />
 </FrameLayout>
