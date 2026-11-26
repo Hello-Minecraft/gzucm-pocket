@@ -105,6 +105,9 @@ abstract class BaseWidgetProvider : AppWidgetProvider() {
             runCatching { push(context, appWidgetManager, id, snapshot, now) }
                 .onFailure { android.util.Log.w(TAG, "更新部件 $id 失败", it) }
         }
+        // 刚放到桌面上时也要进入 15 分钟节奏，否则要等用户开一次 App 才开始刷
+        runCatching { WidgetTick.arm(context.applicationContext, snapshot, now) }
+            .onFailure { android.util.Log.w(TAG, "排下一次 tick 失败", it) }
     }
 
     override fun onAppWidgetOptionsChanged(
@@ -356,8 +359,8 @@ class CurrentCourseWidget : BaseWidgetProvider() {
             "setBackgroundResource",
             DOT_BG[kIndex(info.colorIndex)],
         )
+        views.setTextViewText(R.id.widget_current_time, info.time)
         views.setTextViewText(R.id.widget_current_name, info.name)
-        views.setTextViewText(R.id.widget_current_tail, info.tail)
     }
 }
 
@@ -469,8 +472,15 @@ class TodayHorizontalWidget : BaseWidgetProvider() {
     }
 }
 
-// ── 4x4 今日课程（节次列表）────────────────────────────────────────────
+// ── 4x4 今日课程（课程条目）────────────────────────────────────────────
 
+/**
+ * 一门课一行，最多 7 门；已上完的课不占位。
+ *
+ * 行高靠 weight 分配：前 n 行 VISIBLE，接着到 [WidgetRender.widgetRowsToAllot]
+ * 行 INVISIBLE（不画但**仍参与分配**），其余 GONE（不参与）。这样 1~4 门课时
+ * 卡片只占四分之一到一半高度，不会被一门课撑成一整块。
+ */
 class TimelineWidget : BaseWidgetProvider() {
 
     override val layoutId = R.layout.widget_timeline
@@ -483,74 +493,58 @@ class TimelineWidget : BaseWidgetProvider() {
     ) {
         views.setTextViewText(R.id.widget_header, WidgetRender.header(snapshot, now.toLocalDate()))
 
-        val data = WidgetRender.todayList(snapshot, now, MAX_ROWS)
+        val data = WidgetRender.todayCourses(snapshot, now, MAX_ROWS)
         if (data.emptyText != null) {
             ROW_IDS.forEach { views.setViewVisibility(it, View.GONE) }
             views.setViewVisibility(R.id.widget_empty, View.VISIBLE)
             views.setTextViewText(R.id.widget_empty, data.emptyText)
             return
         }
-
         views.setViewVisibility(R.id.widget_empty, View.GONE)
+
         val text = ContextCompat.getColor(context, R.color.widget_text)
         val dim = ContextCompat.getColor(context, R.color.widget_text_dim)
         val weak = ContextCompat.getColor(context, R.color.widget_text_weak)
+        val allot = WidgetRender.widgetRowsToAllot(data.rows.size)
 
         ROW_IDS.forEachIndexed { i, rowId ->
             val row = data.rows.getOrNull(i)
             if (row == null) {
-                views.setViewVisibility(rowId, View.GONE)
+                // 关键：INVISIBLE 仍占 weight，GONE 不占。
+                // 「少于 4 门按 4 门排」完全靠这一行实现
+                views.setViewVisibility(rowId, if (i < allot) View.INVISIBLE else View.GONE)
                 return@forEachIndexed
             }
+
             views.setViewVisibility(rowId, View.VISIBLE)
+            val colorIndex = kIndex(row.colorIndex)
+            val ongoing = row.state == TodayRowState.ONGOING
+            views.setInt(
+                rowId,
+                "setBackgroundResource",
+                if (ongoing) KA_NOW_BG[colorIndex] else KA_BG[colorIndex],
+            )
+            views.setInt(DOT_IDS[i], "setBackgroundResource", DOT_BG[colorIndex])
+
+            views.setTextViewText(UNIT_IDS[i], row.unitText)
             views.setTextViewText(TIME_IDS[i], row.timeText)
-            views.setTextViewText(NAME_IDS[i], row.name)
+            views.setTextViewText(NAME_IDS[i], if (ongoing) bold(row.name) else row.name)
             // 地点没填就整栏收掉，别留一截空白把课名挤窄
             views.setViewVisibility(ROOM_IDS[i], if (row.room.isBlank()) View.GONE else View.VISIBLE)
             views.setTextViewText(ROOM_IDS[i], row.room)
 
-            // 「还有 N 节」是凑数的一行：没有课色、没有圆点、整行弱色
-            val overflowRow = data.overflow > 0 && i == data.rows.lastIndex
-            if (overflowRow) {
-                views.setInt(rowId, "setBackgroundColor", Color.TRANSPARENT)
-                views.setViewVisibility(DOT_IDS[i], View.INVISIBLE)
-                views.setTextColor(TIME_IDS[i], weak)
-                views.setTextColor(NAME_IDS[i], weak)
+            if (ongoing) {
+                // 正在上：块底换 26% 变体、课名加粗、文字用块内文字色
+                val ink = ContextCompat.getColor(context, K_TEXT[colorIndex])
+                views.setTextColor(UNIT_IDS[i], ink)
+                views.setTextColor(TIME_IDS[i], ink)
+                views.setTextColor(NAME_IDS[i], ink)
+                views.setTextColor(ROOM_IDS[i], ink)
+            } else {
+                views.setTextColor(UNIT_IDS[i], weak)
+                views.setTextColor(TIME_IDS[i], dim)
+                views.setTextColor(NAME_IDS[i], text)
                 views.setTextColor(ROOM_IDS[i], weak)
-                return@forEachIndexed
-            }
-
-            val colorIndex = kIndex(row.colorIndex)
-            views.setInt(DOT_IDS[i], "setBackgroundResource", DOT_BG[colorIndex])
-            views.setViewVisibility(DOT_IDS[i], View.VISIBLE)
-            views.setInt(
-                rowId,
-                "setBackgroundResource",
-                if (row.state == TodayRowState.ONGOING) KC_NOW_BG[colorIndex] else KC_BG[colorIndex],
-            )
-
-            when (row.state) {
-                // 已经上完：同一块底，整行压成弱色 —— 还看得见「今天上过这门课」，
-                // 但不抢正在上 / 还没上的注意力
-                TodayRowState.PAST -> {
-                    views.setTextColor(TIME_IDS[i], weak)
-                    views.setTextColor(NAME_IDS[i], weak)
-                    views.setTextColor(ROOM_IDS[i], weak)
-                }
-
-                TodayRowState.ONGOING -> {
-                    val ink = ContextCompat.getColor(context, K_TEXT[colorIndex])
-                    views.setTextColor(TIME_IDS[i], ink)
-                    views.setTextColor(NAME_IDS[i], ink)
-                    views.setTextColor(ROOM_IDS[i], ink)
-                    views.setTextViewText(NAME_IDS[i], bold(row.name))
-                }
-
-                TodayRowState.UPCOMING -> {
-                    views.setTextColor(TIME_IDS[i], dim)
-                    views.setTextColor(NAME_IDS[i], text)
-                    views.setTextColor(ROOM_IDS[i], weak)
-                }
             }
         }
     }
@@ -561,6 +555,10 @@ class TimelineWidget : BaseWidgetProvider() {
         val ROW_IDS = intArrayOf(
             R.id.tl1, R.id.tl2, R.id.tl3, R.id.tl4,
             R.id.tl5, R.id.tl6, R.id.tl7,
+        )
+        val UNIT_IDS = intArrayOf(
+            R.id.tl1_unit, R.id.tl2_unit, R.id.tl3_unit, R.id.tl4_unit,
+            R.id.tl5_unit, R.id.tl6_unit, R.id.tl7_unit,
         )
         val TIME_IDS = intArrayOf(
             R.id.tl1_time, R.id.tl2_time, R.id.tl3_time, R.id.tl4_time,
@@ -859,6 +857,10 @@ object WidgetUpdate {
             runCatching { refreshProvider(app, cls, snapshot, now) }
                 .onFailure { android.util.Log.w(TAG, "刷新 ${cls.simpleName} 失败", it) }
         }
+        // App 打开 / 同步完成 / tick 跑完都会走到这里：顺手把下一次 tick 排上。
+        // arm 内部有防抖，这里多调几次不会把链重置。
+        runCatching { WidgetTick.arm(app, snapshot, now) }
+            .onFailure { android.util.Log.w(TAG, "排下一次 tick 失败", it) }
     }
 
     /** 只刷一类部件（比如点某个部件上的刷新图标） */
@@ -891,6 +893,10 @@ object WidgetUpdate {
  *
  * WorkManager 不保证准点（Doze / 厂商省电都会推迟），所以所有文案都写成
  * 相对语义（「今天」「下一节」），晚几个小时也不会变成错的。
+ *
+ * 它同时是 15 分钟链的**起点**：`refreshAll()` 末尾会调 `WidgetTick.arm`，
+ * 今天有课时就把第一条 tick 排到「第一节前 5 分钟」；没课则什么也不排，
+ * 安静等到第二天 0:05。
  */
 class WidgetRefreshWorker(
     appContext: Context,

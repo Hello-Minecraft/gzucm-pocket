@@ -1,17 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    4x4 今日课程：表头 + **今天全部课**（最多 7 行，超出的折成「还有 N 节」）。
+    4x4 今日课程：表头 + **课程条目**（一门课一行，最多 7 门）。
 
-    一行就是一门课，不再是 12 节的空时间轴 —— 只有两节课时，12 行均分高度会
-    把空白撑得比字还多。
+    ## 为什么是「课」不是「节」
 
-        · 08:30  外科学(2)          综教808
-        · 10:20  中医骨伤科学       新课室202
+    按节次排的时候，1-2 节的连堂课会拆成两行、课名重复两遍。用户要的是
+    「今天还剩哪几门课」，所以一门课一行，节次写成「1-2」。
 
-    行高 26dp + 间距 2dp：7 行 = 194dp，加上表头仍小于 4x4 的 250dp，
-    多出来的高度留在底部，不参与分配（weight 会让每行都变高，反而难看）。
+    ## 行高怎么自适应
 
-    圆角用 c（13dp），26dp 高的行正好被 clamp 成胶囊。
+    RemoteViews 改不了 layout_height（setViewLayoutHeight 要 API 31），所以
+    7 行全部 `height=0dp + weight=1`，靠 Provider 控制可见性：
+      前 n 行 VISIBLE，接着到 max(n,4) 行 **INVISIBLE**（不画但仍参与分配），
+      其余 GONE（不参与分配）。
+    结果是 1~4 门课时每行占 1/4 高（约 52dp），5 门 1/5，7 门 1/7（约 29dp）——
+    卡片永远铺满，一门课也不会被撑成一整块。
+
+    ## 圆角
+
+    用 a 档（radius 22dp）：行高在 29~52dp 之间时 22dp 都会被 clamp 成半高，
+    所以不管几门课都接近胶囊，不需要再按行高换 drawable。
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
@@ -50,360 +58,430 @@
         </LinearLayout>
 
         <LinearLayout
-            android:id="@+id/tl1"
             android:layout_width="match_parent"
-            android:layout_height="26dp"
+            android:layout_height="0dp"
             android:layout_marginTop="6dp"
-            android:background="@drawable/widget_kc1"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="10dp"
-            android:paddingEnd="10dp">
+            android:layout_weight="1"
+            android:orientation="vertical">
 
-            <TextView
-                android:id="@+id/tl1_time"
-                android:layout_width="40dp"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textColor="@color/widget_text_dim"
-                android:textSize="9.5sp" />
-
-            <FrameLayout
-                android:id="@+id/tl1_dot"
-                android:layout_width="6dp"
-                android:layout_height="6dp"
-                android:layout_marginStart="7dp"
-                android:background="@drawable/widget_dot1" />
-
-            <TextView
-                android:id="@+id/tl1_name"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="7dp"
+            <LinearLayout
+                android:id="@+id/tl1"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
                 android:layout_weight="1"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textColor="@color/widget_text"
-                android:textSize="11sp" />
+                android:background="@drawable/widget_ka1"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp">
 
-            <TextView
-                android:id="@+id/tl1_room"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
-                android:ellipsize="end"
-                android:gravity="end"
-                android:maxLines="1"
-                android:maxWidth="60dp"
-                android:textColor="@color/widget_text_weak"
-                android:textSize="9sp" />
-        </LinearLayout>
+                <TextView
+                    android:id="@+id/tl1_unit"
+                    android:layout_width="22dp"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text_weak"
+                    android:textSize="7.5sp" />
 
-        <LinearLayout
-            android:id="@+id/tl2"
-            android:layout_width="match_parent"
-            android:layout_height="26dp"
-            android:layout_marginTop="2dp"
-            android:background="@drawable/widget_kc1"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="10dp"
-            android:paddingEnd="10dp">
+                <TextView
+                    android:id="@+id/tl1_time"
+                    android:layout_width="40dp"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text_dim"
+                    android:textSize="9.5sp" />
 
-            <TextView
-                android:id="@+id/tl2_time"
-                android:layout_width="40dp"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textColor="@color/widget_text_dim"
-                android:textSize="9.5sp" />
+                <FrameLayout
+                    android:id="@+id/tl1_dot"
+                    android:layout_width="6dp"
+                    android:layout_height="6dp"
+                    android:background="@drawable/widget_dot1" />
 
-            <FrameLayout
-                android:id="@+id/tl2_dot"
-                android:layout_width="6dp"
-                android:layout_height="6dp"
-                android:layout_marginStart="7dp"
-                android:background="@drawable/widget_dot1" />
+                <TextView
+                    android:id="@+id/tl1_name"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="7dp"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text"
+                    android:textSize="11.5sp" />
 
-            <TextView
-                android:id="@+id/tl2_name"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="7dp"
+                <TextView
+                    android:id="@+id/tl1_room"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:ellipsize="end"
+                    android:gravity="end"
+                    android:maxLines="1"
+                    android:maxWidth="60dp"
+                    android:textColor="@color/widget_text_weak"
+                    android:textSize="9sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tl2"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_marginTop="2dp"
                 android:layout_weight="1"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textColor="@color/widget_text"
-                android:textSize="11sp" />
+                android:background="@drawable/widget_ka1"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp">
 
-            <TextView
-                android:id="@+id/tl2_room"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
-                android:ellipsize="end"
-                android:gravity="end"
-                android:maxLines="1"
-                android:maxWidth="60dp"
-                android:textColor="@color/widget_text_weak"
-                android:textSize="9sp" />
-        </LinearLayout>
+                <TextView
+                    android:id="@+id/tl2_unit"
+                    android:layout_width="22dp"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text_weak"
+                    android:textSize="7.5sp" />
 
-        <LinearLayout
-            android:id="@+id/tl3"
-            android:layout_width="match_parent"
-            android:layout_height="26dp"
-            android:layout_marginTop="2dp"
-            android:background="@drawable/widget_kc1"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="10dp"
-            android:paddingEnd="10dp">
+                <TextView
+                    android:id="@+id/tl2_time"
+                    android:layout_width="40dp"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text_dim"
+                    android:textSize="9.5sp" />
 
-            <TextView
-                android:id="@+id/tl3_time"
-                android:layout_width="40dp"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textColor="@color/widget_text_dim"
-                android:textSize="9.5sp" />
+                <FrameLayout
+                    android:id="@+id/tl2_dot"
+                    android:layout_width="6dp"
+                    android:layout_height="6dp"
+                    android:background="@drawable/widget_dot1" />
 
-            <FrameLayout
-                android:id="@+id/tl3_dot"
-                android:layout_width="6dp"
-                android:layout_height="6dp"
-                android:layout_marginStart="7dp"
-                android:background="@drawable/widget_dot1" />
+                <TextView
+                    android:id="@+id/tl2_name"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="7dp"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text"
+                    android:textSize="11.5sp" />
 
-            <TextView
-                android:id="@+id/tl3_name"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="7dp"
+                <TextView
+                    android:id="@+id/tl2_room"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:ellipsize="end"
+                    android:gravity="end"
+                    android:maxLines="1"
+                    android:maxWidth="60dp"
+                    android:textColor="@color/widget_text_weak"
+                    android:textSize="9sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tl3"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_marginTop="2dp"
                 android:layout_weight="1"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textColor="@color/widget_text"
-                android:textSize="11sp" />
+                android:background="@drawable/widget_ka1"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp">
 
-            <TextView
-                android:id="@+id/tl3_room"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
-                android:ellipsize="end"
-                android:gravity="end"
-                android:maxLines="1"
-                android:maxWidth="60dp"
-                android:textColor="@color/widget_text_weak"
-                android:textSize="9sp" />
-        </LinearLayout>
+                <TextView
+                    android:id="@+id/tl3_unit"
+                    android:layout_width="22dp"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text_weak"
+                    android:textSize="7.5sp" />
 
-        <LinearLayout
-            android:id="@+id/tl4"
-            android:layout_width="match_parent"
-            android:layout_height="26dp"
-            android:layout_marginTop="2dp"
-            android:background="@drawable/widget_kc1"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="10dp"
-            android:paddingEnd="10dp">
+                <TextView
+                    android:id="@+id/tl3_time"
+                    android:layout_width="40dp"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text_dim"
+                    android:textSize="9.5sp" />
 
-            <TextView
-                android:id="@+id/tl4_time"
-                android:layout_width="40dp"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textColor="@color/widget_text_dim"
-                android:textSize="9.5sp" />
+                <FrameLayout
+                    android:id="@+id/tl3_dot"
+                    android:layout_width="6dp"
+                    android:layout_height="6dp"
+                    android:background="@drawable/widget_dot1" />
 
-            <FrameLayout
-                android:id="@+id/tl4_dot"
-                android:layout_width="6dp"
-                android:layout_height="6dp"
-                android:layout_marginStart="7dp"
-                android:background="@drawable/widget_dot1" />
+                <TextView
+                    android:id="@+id/tl3_name"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="7dp"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text"
+                    android:textSize="11.5sp" />
 
-            <TextView
-                android:id="@+id/tl4_name"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="7dp"
+                <TextView
+                    android:id="@+id/tl3_room"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:ellipsize="end"
+                    android:gravity="end"
+                    android:maxLines="1"
+                    android:maxWidth="60dp"
+                    android:textColor="@color/widget_text_weak"
+                    android:textSize="9sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tl4"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_marginTop="2dp"
                 android:layout_weight="1"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textColor="@color/widget_text"
-                android:textSize="11sp" />
+                android:background="@drawable/widget_ka1"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp">
 
-            <TextView
-                android:id="@+id/tl4_room"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
-                android:ellipsize="end"
-                android:gravity="end"
-                android:maxLines="1"
-                android:maxWidth="60dp"
-                android:textColor="@color/widget_text_weak"
-                android:textSize="9sp" />
-        </LinearLayout>
+                <TextView
+                    android:id="@+id/tl4_unit"
+                    android:layout_width="22dp"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text_weak"
+                    android:textSize="7.5sp" />
 
-        <LinearLayout
-            android:id="@+id/tl5"
-            android:layout_width="match_parent"
-            android:layout_height="26dp"
-            android:layout_marginTop="2dp"
-            android:background="@drawable/widget_kc1"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="10dp"
-            android:paddingEnd="10dp">
+                <TextView
+                    android:id="@+id/tl4_time"
+                    android:layout_width="40dp"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text_dim"
+                    android:textSize="9.5sp" />
 
-            <TextView
-                android:id="@+id/tl5_time"
-                android:layout_width="40dp"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textColor="@color/widget_text_dim"
-                android:textSize="9.5sp" />
+                <FrameLayout
+                    android:id="@+id/tl4_dot"
+                    android:layout_width="6dp"
+                    android:layout_height="6dp"
+                    android:background="@drawable/widget_dot1" />
 
-            <FrameLayout
-                android:id="@+id/tl5_dot"
-                android:layout_width="6dp"
-                android:layout_height="6dp"
-                android:layout_marginStart="7dp"
-                android:background="@drawable/widget_dot1" />
+                <TextView
+                    android:id="@+id/tl4_name"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="7dp"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text"
+                    android:textSize="11.5sp" />
 
-            <TextView
-                android:id="@+id/tl5_name"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="7dp"
+                <TextView
+                    android:id="@+id/tl4_room"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:ellipsize="end"
+                    android:gravity="end"
+                    android:maxLines="1"
+                    android:maxWidth="60dp"
+                    android:textColor="@color/widget_text_weak"
+                    android:textSize="9sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tl5"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_marginTop="2dp"
                 android:layout_weight="1"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textColor="@color/widget_text"
-                android:textSize="11sp" />
+                android:background="@drawable/widget_ka1"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp">
 
-            <TextView
-                android:id="@+id/tl5_room"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
-                android:ellipsize="end"
-                android:gravity="end"
-                android:maxLines="1"
-                android:maxWidth="60dp"
-                android:textColor="@color/widget_text_weak"
-                android:textSize="9sp" />
-        </LinearLayout>
+                <TextView
+                    android:id="@+id/tl5_unit"
+                    android:layout_width="22dp"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text_weak"
+                    android:textSize="7.5sp" />
 
-        <LinearLayout
-            android:id="@+id/tl6"
-            android:layout_width="match_parent"
-            android:layout_height="26dp"
-            android:layout_marginTop="2dp"
-            android:background="@drawable/widget_kc1"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="10dp"
-            android:paddingEnd="10dp">
+                <TextView
+                    android:id="@+id/tl5_time"
+                    android:layout_width="40dp"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text_dim"
+                    android:textSize="9.5sp" />
 
-            <TextView
-                android:id="@+id/tl6_time"
-                android:layout_width="40dp"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textColor="@color/widget_text_dim"
-                android:textSize="9.5sp" />
+                <FrameLayout
+                    android:id="@+id/tl5_dot"
+                    android:layout_width="6dp"
+                    android:layout_height="6dp"
+                    android:background="@drawable/widget_dot1" />
 
-            <FrameLayout
-                android:id="@+id/tl6_dot"
-                android:layout_width="6dp"
-                android:layout_height="6dp"
-                android:layout_marginStart="7dp"
-                android:background="@drawable/widget_dot1" />
+                <TextView
+                    android:id="@+id/tl5_name"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="7dp"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text"
+                    android:textSize="11.5sp" />
 
-            <TextView
-                android:id="@+id/tl6_name"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="7dp"
+                <TextView
+                    android:id="@+id/tl5_room"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:ellipsize="end"
+                    android:gravity="end"
+                    android:maxLines="1"
+                    android:maxWidth="60dp"
+                    android:textColor="@color/widget_text_weak"
+                    android:textSize="9sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tl6"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_marginTop="2dp"
                 android:layout_weight="1"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textColor="@color/widget_text"
-                android:textSize="11sp" />
+                android:background="@drawable/widget_ka1"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp">
 
-            <TextView
-                android:id="@+id/tl6_room"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
-                android:ellipsize="end"
-                android:gravity="end"
-                android:maxLines="1"
-                android:maxWidth="60dp"
-                android:textColor="@color/widget_text_weak"
-                android:textSize="9sp" />
-        </LinearLayout>
+                <TextView
+                    android:id="@+id/tl6_unit"
+                    android:layout_width="22dp"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text_weak"
+                    android:textSize="7.5sp" />
 
-        <LinearLayout
-            android:id="@+id/tl7"
-            android:layout_width="match_parent"
-            android:layout_height="26dp"
-            android:layout_marginTop="2dp"
-            android:background="@drawable/widget_kc1"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="10dp"
-            android:paddingEnd="10dp">
+                <TextView
+                    android:id="@+id/tl6_time"
+                    android:layout_width="40dp"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text_dim"
+                    android:textSize="9.5sp" />
 
-            <TextView
-                android:id="@+id/tl7_time"
-                android:layout_width="40dp"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textColor="@color/widget_text_dim"
-                android:textSize="9.5sp" />
+                <FrameLayout
+                    android:id="@+id/tl6_dot"
+                    android:layout_width="6dp"
+                    android:layout_height="6dp"
+                    android:background="@drawable/widget_dot1" />
 
-            <FrameLayout
-                android:id="@+id/tl7_dot"
-                android:layout_width="6dp"
-                android:layout_height="6dp"
-                android:layout_marginStart="7dp"
-                android:background="@drawable/widget_dot1" />
+                <TextView
+                    android:id="@+id/tl6_name"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="7dp"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text"
+                    android:textSize="11.5sp" />
 
-            <TextView
-                android:id="@+id/tl7_name"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="7dp"
+                <TextView
+                    android:id="@+id/tl6_room"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:ellipsize="end"
+                    android:gravity="end"
+                    android:maxLines="1"
+                    android:maxWidth="60dp"
+                    android:textColor="@color/widget_text_weak"
+                    android:textSize="9sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tl7"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_marginTop="2dp"
                 android:layout_weight="1"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textColor="@color/widget_text"
-                android:textSize="11sp" />
+                android:background="@drawable/widget_ka1"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp">
 
-            <TextView
-                android:id="@+id/tl7_room"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
-                android:ellipsize="end"
-                android:gravity="end"
-                android:maxLines="1"
-                android:maxWidth="60dp"
-                android:textColor="@color/widget_text_weak"
-                android:textSize="9sp" />
+                <TextView
+                    android:id="@+id/tl7_unit"
+                    android:layout_width="22dp"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text_weak"
+                    android:textSize="7.5sp" />
+
+                <TextView
+                    android:id="@+id/tl7_time"
+                    android:layout_width="40dp"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text_dim"
+                    android:textSize="9.5sp" />
+
+                <FrameLayout
+                    android:id="@+id/tl7_dot"
+                    android:layout_width="6dp"
+                    android:layout_height="6dp"
+                    android:background="@drawable/widget_dot1" />
+
+                <TextView
+                    android:id="@+id/tl7_name"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="7dp"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_text"
+                    android:textSize="11.5sp" />
+
+                <TextView
+                    android:id="@+id/tl7_room"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:ellipsize="end"
+                    android:gravity="end"
+                    android:maxLines="1"
+                    android:maxWidth="60dp"
+                    android:textColor="@color/widget_text_weak"
+                    android:textSize="9sp" />
+            </LinearLayout>
         </LinearLayout>
     </LinearLayout>
 

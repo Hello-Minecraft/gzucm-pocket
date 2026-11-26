@@ -144,26 +144,28 @@ data class TodayRow(
     val name: String,
     val room: String,
     val state: TodayRowState,
-    /** 这门课的配色下标（0..7）。「还有 N 节」那一行没有课，给 0 即可 */
+    /** 这门课的配色下标（0..7） */
     val colorIndex: Int = 0,
 )
 
-/** 4x4 节次列表的数据。[overflow] > 0 时最后一行是「还有 N 节」 */
+/** 4x4 今日课程的数据。[rows] 一门课一条，最多 7 条 */
 data class TodayList(
     val rows: List<TodayRow>,
-    val overflow: Int,
     val emptyText: String?,
 )
 
 /**
- * 2x1 一行的内容（圆点 + 课名 + 尾巴）。
+ * 2x1 一行的内容（圆点 + 上课时间 + 课名）。
+ *
+ * 时间放在课名**上面**而不是右边：40dp 宽的一行里放尾部时间会把课名挤到
+ * 只剩三四个字，用户反馈过。竖排之后课名独占整行宽度。
  *
  * [emptyText] 非空 = 今天没课 / 没同步过，Provider 把整行收掉只留那句提示。
  */
 data class CurrentInfo(
     val name: String,
-    /** 正在上：「至 09:40」；下一节：「10:20 开始」 */
-    val tail: String,
+    /** 上课时间（[WidgetCourse.startText]），和 2x2 同一口径；不是下课时间 */
+    val time: String,
     val colorIndex: Int,
     val emptyText: String?,
 )
@@ -325,14 +327,14 @@ object WidgetRender {
     }
 
     /**
-     * 2x1 的一行：圆点 + 课名 + 尾巴。
+     * 2x1 的一行：圆点 + 上课时间 + 课名。
      *
-     * 和 [currentLine] 是同一套判断，只是拆成结构化字段 —— v3 版式里课名要用
-     * 主文字色、尾巴用次色，还得在左边放一个课程色圆点，一整串字符串做不到。
+     * 和 [currentLine] 是同一套判断，只是拆成结构化字段 —— v3 版式里时间在
+     * 课名上方用小字、课名用主文字色，一整串字符串做不到。
      * [currentLine] 留着是因为它被单测和别处引用，两边口径必须一致。
      *
-     *   正在上 → name=课名 / tail=「至 09:40」
-     *   下一节 → name=课名 / tail=「10:20 开始」
+     *   正在上 → 当前这节课
+     *   下一节 → 下一节
      *   没课   → [emptyText] 非空，Provider 只显示那一句
      */
     fun currentInfo(snapshot: WidgetSnapshotData?, now: LocalDateTime): CurrentInfo {
@@ -346,7 +348,7 @@ object WidgetRender {
         if (ongoing != null) {
             return CurrentInfo(
                 name = ongoing.name,
-                tail = "至 ${ongoing.endText}",
+                time = ongoing.startText,
                 colorIndex = colorIndexFor(ongoing.name),
                 emptyText = null,
             )
@@ -356,7 +358,7 @@ object WidgetRender {
         if (next != null) {
             return CurrentInfo(
                 name = next.name,
-                tail = "${next.startText} 开始",
+                time = next.startText,
                 colorIndex = colorIndexFor(next.name),
                 emptyText = null,
             )
@@ -496,39 +498,51 @@ object WidgetRender {
         colorIndex = colorIndexFor(name),
     )
 
-    // ── 4x4 节次列表 ────────────────────────────────────────────────
+    // ── 4x4 今日课程 ────────────────────────────────────────────────
 
     /**
-     * 今天的课按节次排成一列，最多 [max] 行。
+     * 4x4 显示的是**课程**，不是节次。
      *
-     * 超过 [max] 时**最后一行换成「还有 N 节」**，而不是硬截断 ——
-     * 一眼能看到「今天还有课」，不至于以为课表就到这儿了。
+     * 跨 1-2 节的连堂课在节次视角里是两行，同一个课名会重复两遍；用户要的是
+     * 「今天还剩哪几门课」，所以这里一门课只出一条，[TodayRow.unitText] 用
+     * 「1-2」这种范围表示节次。
+     *
+     * **已经上完的课会被过滤掉**（[WidgetCourse.endMinute] <= now）：课上完了
+     * 就往下轮转，部件里永远只剩「还有用的」那几门。正在上的保留。
+     *
+     * 超过 [max] 条直接截断，不做「还有 N 节」那一行 —— 用户明确说超出就不显示。
      */
-    fun todayList(snapshot: WidgetSnapshotData?, now: LocalDateTime, max: Int = 7): TodayList {
+    fun todayCourses(snapshot: WidgetSnapshotData?, now: LocalDateTime, max: Int = 7): TodayList {
         val today = snapshot?.let { coursesOn(it, now.toLocalDate()) }.orEmpty()
-        if (today.isEmpty()) return TodayList(emptyList(), 0, emptyText(snapshot))
-
         val nowMinute = now.hour * 60 + now.minute
+
+        val remaining = today.filter { it.endMinute > nowMinute }
+        if (remaining.isEmpty()) return TodayList(emptyList(), emptyText(snapshot))
+
         fun row(c: WidgetCourse) = TodayRow(
             unitText = c.unitText,
             timeText = c.startText,
             name = c.name,
             room = c.room,
-            state = when {
-                nowMinute < c.startMinute -> TodayRowState.UPCOMING
-                nowMinute < c.endMinute -> TodayRowState.ONGOING
-                else -> TodayRowState.PAST
-            },
+            state = if (nowMinute >= c.startMinute) TodayRowState.ONGOING else TodayRowState.UPCOMING,
             colorIndex = colorIndexFor(c.name),
         )
 
-        val overflow = (today.size - max).coerceAtLeast(0)
-        if (overflow == 0) return TodayList(today.map(::row), 0, null)
-
-        val shown = today.take(max - 1).map(::row) +
-            TodayRow("", "", "还有 $overflow 节", "", TodayRowState.PAST)
-        return TodayList(shown, overflow, null)
+        return TodayList(remaining.take(max).map(::row), null)
     }
+
+    /**
+     * 4x4 里实际参与高度分配的行数。
+     *
+     * 规则「少于 4 门按 4 门排」：一门课时卡片只占四分之一高，不会被撑成
+     * 一整块；5 门以上才真正按门数均分。
+     *
+     * 布局侧的做法是 7 行全都 `height=0dp + weight=1`，前 n 行 VISIBLE、
+     * 接着到 [widgetRowsToAllot] 的行为 INVISIBLE（仍在分配高度，只是不画），
+     * 其余 GONE（不参与分配）。RemoteViews 改不了 layout_height，这是唯一
+     * 能在 minSdk 26 上做「自适应行高」的路子。
+     */
+    fun widgetRowsToAllot(n: Int): Int = n.coerceAtLeast(4).coerceAtMost(7)
 
     // ── 4x3 周视图 ──────────────────────────────────────────────────
 

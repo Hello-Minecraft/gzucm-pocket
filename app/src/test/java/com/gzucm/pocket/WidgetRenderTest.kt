@@ -410,39 +410,78 @@ class WidgetRenderTest {
         assertEquals("综教楼101", card.room)
     }
 
-    // ── 4x4 节次列表 ──────────────────────────────────────────────
+    // ── 4x4 今日课程 ──────────────────────────────────────────────
 
     @Test
-    fun `节次列表给出节次标签和时间并标状态`() {
-        val list = WidgetRender.todayList(normalMonday(), at(0, 10, 40), max = 7)
+    fun `4x4_跨两节的连堂课只出一条而不是两条`() {
+        // 这是用户提的原问题：按节次排的时候 1-2 节会变成两行、课名重复两遍
+        val data = snapshot(
+            s("外科学", weekday = 1, startUnit = 1, endUnit = 2, startTime = "08:30", endTime = "10:00"),
+        )
+        val list = WidgetRender.todayCourses(data, at(0, 7, 0))
 
         assertNull(list.emptyText)
-        assertEquals(listOf("1-2", "3-4"), list.rows.map { it.unitText })
-        assertEquals(listOf("08:30", "10:20"), list.rows.map { it.timeText })
-        assertEquals(listOf("中药学", "中医诊断学"), list.rows.map { it.name })
-        assertEquals(TodayRowState.PAST, list.rows[0].state)
-        assertEquals(TodayRowState.ONGOING, list.rows[1].state)
+        assertEquals(1, list.rows.size)
+        assertEquals("1-2", list.rows[0].unitText)
+        assertEquals("08:30", list.rows[0].timeText)
+        assertEquals("外科学", list.rows[0].name)
     }
 
     @Test
-    fun `节次列表空的时候给空态文案`() {
-        val list = WidgetRender.todayList(snapshot(), at(0, 10, 0))
+    fun `4x4_上完的课被过滤正在上的保留`() {
+        // 10:40：中药学（10:00 下课）不该再出现，中医诊断学正在上要留着
+        val list = WidgetRender.todayCourses(normalMonday(), at(0, 10, 40))
+
+        assertEquals(listOf("中医诊断学"), list.rows.map { it.name })
+        assertEquals(TodayRowState.ONGOING, list.rows[0].state)
+    }
+
+    @Test
+    fun `4x4_课间时下一节是UPCOMING`() {
+        val list = WidgetRender.todayCourses(normalMonday(), at(0, 10, 5))
+        assertEquals(listOf("中医诊断学"), list.rows.map { it.name })
+        assertEquals(TodayRowState.UPCOMING, list.rows[0].state)
+    }
+
+    @Test
+    fun `4x4_今天课都上完时给空态文案`() {
+        val list = WidgetRender.todayCourses(normalMonday(), at(0, 21, 0))
+        assertTrue(list.rows.isEmpty())
+        assertEquals("今天没课了", list.emptyText)
+    }
+
+    @Test
+    fun `4x4_空快照时提示去App同步`() {
+        val list = WidgetRender.todayCourses(snapshot(), at(0, 10, 0))
         assertTrue(list.rows.isEmpty())
         assertEquals("打开 App 同步课表", list.emptyText)
     }
 
     @Test
-    fun `节次列表超出行数时最后一行是还有N节`() {
+    fun `4x4_超过七门只出七条且没有还有N节`() {
         val data = snapshot(
-            *(1..4).map { i ->
-                s("课$i", weekday = 1, startUnit = i, endUnit = i, startTime = "%02d:00".format(8 + i), endTime = "%02d:40".format(8 + i))
+            *(1..8).map { i ->
+                s("课$i", weekday = 1, startUnit = i, endUnit = i, startTime = "%02d:00".format(7 + i), endTime = "%02d:40".format(7 + i))
             }.toTypedArray(),
         )
-        val list = WidgetRender.todayList(data, at(0, 7, 0), max = 3)
+        val list = WidgetRender.todayCourses(data, at(0, 6, 0), max = 7)
 
-        assertEquals(3, list.rows.size)
-        assertEquals(1, list.overflow)
-        assertEquals("还有 1 节", list.rows.last().name)
+        assertEquals(7, list.rows.size)
+        assertEquals("课7", list.rows.last().name)
+        // 用户明确说超出就不显示，不再有「还有 N 节」那一行
+        assertTrue(list.rows.none { it.name.contains("还有") })
+    }
+
+    @Test
+    fun `4x4_少于四门时按四门的高度分配`() {
+        // 1 门课只占 1/4 高，不会被撑成一整块；5 门以上才真正按门数均分
+        assertEquals(4, WidgetRender.widgetRowsToAllot(0))
+        assertEquals(4, WidgetRender.widgetRowsToAllot(1))
+        assertEquals(4, WidgetRender.widgetRowsToAllot(3))
+        assertEquals(4, WidgetRender.widgetRowsToAllot(4))
+        assertEquals(5, WidgetRender.widgetRowsToAllot(5))
+        assertEquals(7, WidgetRender.widgetRowsToAllot(7))
+        assertEquals(7, WidgetRender.widgetRowsToAllot(8))
     }
 
     // ── 4x3 周视图 ────────────────────────────────────────────────
@@ -646,19 +685,20 @@ class WidgetRenderTest {
     // ── 2x1 的行内容 ──────────────────────────────────────────────
 
     @Test
-    fun `2x1_正在上课时给课名和下课时间`() {
+    fun `2x1_正在上课时给课名和上课时间`() {
         val info = WidgetRender.currentInfo(normalMonday(), at(0, 10, 40))
         assertEquals("中医诊断学", info.name)
-        assertEquals("至 11:50", info.tail)
+        // 时间是**上课**时间，不是下课时间：竖排版式里上面那行就是「几点开始」
+        assertEquals("10:20", info.time)
         assertNull(info.emptyText)
         assertEquals(WidgetRender.colorIndexFor("中医诊断学"), info.colorIndex)
     }
 
     @Test
-    fun `2x1_课间给下一节和开始时间`() {
+    fun `2x1_课间给下一节的课名和上课时间`() {
         val info = WidgetRender.currentInfo(normalMonday(), at(0, 10, 5))
         assertEquals("中医诊断学", info.name)
-        assertEquals("10:20 开始", info.tail)
+        assertEquals("10:20", info.time)
     }
 
     @Test
@@ -676,14 +716,12 @@ class WidgetRenderTest {
         times.forEach { now ->
             val line = WidgetRender.currentLine(normalMonday(), now)
             val info = WidgetRender.currentInfo(normalMonday(), now)
-            val rebuilt = if (info.emptyText != null) {
-                info.emptyText
-            } else if (info.tail.startsWith("至")) {
-                "${info.name} · ${info.tail}"
+            if (info.emptyText != null) {
+                assertEquals(line, info.emptyText)
             } else {
-                "下一节 ${info.tail.removeSuffix(" 开始")} ${info.name}"
+                assertTrue("$now 的 2x1 课名必须和 currentLine 指向同一门课：$line / ${info.name}", line.contains(info.name))
+                assertTrue("$now 的时间必须是 hh:mm：${info.time}", info.time.matches(Regex("\\d{2}:\\d{2}")))
             }
-            assertEquals(line, rebuilt)
         }
     }
 }

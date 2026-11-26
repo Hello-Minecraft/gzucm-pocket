@@ -1,24 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    2x1 当前课程：圆点 + 课名 + 尾巴（「至 09:40」/「10:20 开始」）。
+    2x1 当前课程：圆点 + 竖排（上课时间在上、课名在下）。
 
-    40dp 高，除了一行字什么都放不下，所以刷新图标按产品要求不放
-    （误触率高于收益，这一行本来就是「看一眼就走」）。
+    ## 为什么时间是竖排的
+
+    上一版是「圆点 课名 ·至 09:40」横排：40dp 高、110dp 宽的一行里，尾部时间
+    会把课名挤到只剩三四个字，用户反馈课名看不全。时间挪到课名上方之后，
+    课名独占整行宽度。
+
+    ## 高度账
+
+    部件 40dp − 上下 padding 6dp×2 = 28dp 可用：
+    8.5sp 时间（≈10dp，includeFontPadding=false） + 0.5dp 间距 + 11sp 课名（≈13dp）
+    ≈ 24dp，刚好装下。**不要再给这两行加竖直 margin**，一加第二行就被裁。
 
     圆点用 FrameLayout + 背景 drawable，不能用裸 <View>：
     RemoteViews 只放行 android.widget.* 里的类，裸 View 在部分 ROM 上直接
     让宿主抛 "加载时出现问题"。这个坑以前踩过，别再改回去。
-
-    空态和内容行叠在同一个 FrameLayout 里靠 visibility 切换 —— 2x1 没有
-    第二行可以放提示，只能整块换掉。
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/widget_bg"
-    android:paddingStart="12dp"
-    android:paddingEnd="12dp">
+    android:paddingStart="10dp"
+    android:paddingTop="6dp"
+    android:paddingEnd="10dp"
+    android:paddingBottom="6dp">
 
     <LinearLayout
         android:id="@+id/widget_current_row"
@@ -33,25 +41,34 @@
             android:layout_height="6dp"
             android:background="@drawable/widget_dot1" />
 
-        <TextView
-            android:id="@+id/widget_current_name"
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
+            android:layout_marginStart="7dp"
             android:layout_weight="1"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:textColor="@color/widget_text"
-            android:textSize="12sp" />
+            android:gravity="center_vertical"
+            android:orientation="vertical">
 
-        <TextView
-            android:id="@+id/widget_current_tail"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:maxLines="1"
-            android:textColor="@color/widget_text_dim"
-            android:textSize="9.5sp" />
+            <TextView
+                android:id="@+id/widget_current_time"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:textColor="@color/widget_text_dim"
+                android:textSize="8.5sp" />
+
+            <TextView
+                android:id="@+id/widget_current_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="0.5dp"
+                android:ellipsize="end"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:textColor="@color/widget_text"
+                android:textSize="11sp" />
+        </LinearLayout>
     </LinearLayout>
 
     <TextView
