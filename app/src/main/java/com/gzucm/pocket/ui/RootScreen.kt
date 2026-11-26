@@ -1064,6 +1064,19 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
     }
 
     /*
+     * 天气提醒「立即预览」的结果也走 Toast。
+     *
+     * 消息是个一次性事件（连点两次成功会是同一句话，光看字符串分辨不出新旧），
+     * 所以 ViewModel 里用「取出即清空」的方式传递：弹完立刻 consume，
+     * 下次再设为同一句话时仍然是 null → 文案 的变化，LaunchedEffect 会重新触发。
+     */
+    LaunchedEffect(vm.weatherPreviewMessage) {
+        val msg = vm.weatherPreviewMessage ?: return@LaunchedEffect
+        android.widget.Toast.makeText(ctxToast, msg, android.widget.Toast.LENGTH_SHORT).show()
+        vm.consumeWeatherPreviewMessage()
+    }
+
+    /*
      * 设置面板**常驻组合树**，靠 visible 控制显隐。
      *
      * 之前写成 `if (showSettings) { AdaptiveSheet(...) }` ——
@@ -1410,6 +1423,9 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 },
                 weatherEveningTime = vm.weatherEveningTime,
                 onWeatherEveningTimeChange = { vm.changeWeatherEveningTime(it) },
+                onPreviewMorning = { vm.previewWeatherAlert(morning = true) },
+                onPreviewEvening = { vm.previewWeatherAlert(morning = false) },
+                previewBusy = vm.weatherPreviewBusy,
             )
         }
     }

@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,6 +26,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -107,6 +109,14 @@ fun SettingsScreen(
     onWeatherEveningChange: (Boolean) -> Unit = {},
     weatherEveningTime: String = "22:00",
     onWeatherEveningTimeChange: (String) -> Unit = {},
+    /**
+     * 「立即预览」：马上发一条跟真实触发一模一样的通知，不用等到点。
+     * 预览不写去重标记、不动闹钟，到点的提醒照常发。
+     */
+    onPreviewMorning: () -> Unit = {},
+    onPreviewEvening: () -> Unit = {},
+    /** 正在发预览的是哪一条："morning" / "evening"；null 表示空闲 */
+    previewBusy: String? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
     val scrollState = rememberScrollState()
@@ -394,6 +404,9 @@ fun SettingsScreen(
                 onEveningTimeChange = onWeatherEveningTimeChange,
                 notifyGranted = notifyGranted,
                 onRequestNotify = onRequestNotify,
+                onPreviewMorning = onPreviewMorning,
+                onPreviewEvening = onPreviewEvening,
+                previewBusy = previewBusy,
             )
         }
 
@@ -554,6 +567,9 @@ private fun WeatherAlertCard(
     onEveningTimeChange: (String) -> Unit,
     notifyGranted: Boolean,
     onRequestNotify: () -> Unit,
+    onPreviewMorning: () -> Unit,
+    onPreviewEvening: () -> Unit,
+    previewBusy: String?,
 ) {
     val scheme = MaterialTheme.colorScheme
     // null / "morning" / "evening"。同时只展开一个：两个 132dp 的滚轮上下叠着没法用
@@ -586,6 +602,11 @@ private fun WeatherAlertCard(
                 HourMinuteWheel(morningTime, onMorningTimeChange)
             }
         }
+        PreviewButton(
+            busy = previewBusy == "morning",
+            enabled = previewBusy == null,
+            onClick = onPreviewMorning,
+        )
 
         Box(
             Modifier
@@ -611,6 +632,11 @@ private fun WeatherAlertCard(
                 HourMinuteWheel(eveningTime, onEveningTimeChange)
             }
         }
+        PreviewButton(
+            busy = previewBusy == "evening",
+            enabled = previewBusy == null,
+            onClick = onPreviewEvening,
+        )
 
         // 两张提醒都是靠通知送达的：没权限就明说，给一个能点的出口
         if ((morningOn || eveningOn) && !notifyGranted) {
@@ -659,6 +685,33 @@ private fun WeatherAlertSwitchRow(
         }
         Spacer(Modifier.width(10.dp))
         androidx.compose.material3.Switch(checked = checked, onCheckedChange = null)
+    }
+}
+
+/**
+ * 「立即预览」：马上发一条通知，不用等到点。
+ *
+ * 做成行尾的小号文字按钮，不是大按钮 —— 它是个验证手段，不是每天要点的操作；
+ * 摆在卡片里也不该抢走开关和时间的注意力。
+ *
+ * @param busy 这一条正在发（显示「发送中…」并禁点，防止连点打两次天气接口）
+ * @param enabled 另一条在发时置 false：两条同时发只会撞上天气接口的频控
+ */
+@Composable
+private fun PreviewButton(busy: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 8.dp, bottom = 4.dp),
+        horizontalArrangement = Arrangement.End,
+    ) {
+        TextButton(
+            onClick = onClick,
+            enabled = enabled && !busy,
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+        ) {
+            Text(if (busy) "发送中…" else "立即预览", fontSize = 12.5.sp)
+        }
     }
 }
 

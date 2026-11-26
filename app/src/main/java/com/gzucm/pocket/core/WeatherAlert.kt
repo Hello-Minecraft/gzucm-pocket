@@ -331,29 +331,102 @@ object WeatherAlert {
 
         if (!Weather.enabled) return
 
-        val info = Weather.fetch(WeatherPlaceStore(app).place)
-        if (info == null) {
-            android.util.Log.i(TAG, "$kind 取天气失败，静默跳过：${Weather.lastError}")
-            return
+        when (val c = compose(app, kind, today)) {
+            is Composed.Ok -> {
+                notify(app, c.title, c.text, c.id)
+                // 只有真的发出去了才记「今天发过」，否则当天重排后还能补发
+                when (kind) {
+                    KIND_MORNING -> store.lastMorningDate = todayIso
+                    KIND_EVENING -> store.lastEveningDate = todayIso
+                }
+            }
+            // 失败一律静默 —— 这个提醒本来就不是必须的
+            Composed.NoWeather -> android.util.Log.i(TAG, "$kind 取天气失败，跳过：${Weather.lastError}")
+            Composed.Nothing -> android.util.Log.i(TAG, "$kind 没有要发的内容，跳过")
         }
-        // 顺手刷新缓存 + 记下今天的最高/最低温（明天的温差就靠它）
-        Weather.save(app, SessionStore(app), info)
+    }
 
-        when (kind) {
+    // ── 预览 ────────────────────────────────────────────────────────
+
+    /** 预览失败的原因。[message] 直接给用户看（UI Toast 出去），所以是中文口语 */
+    class PreviewError(message: String) : Exception(message)
+
+    /**
+     * 立即发一条预览通知。
+     *
+     * 和到点触发走**同一段** [compose] → [notify]，所以文案一个字都不差；
+     * 但**不写**「今天已发过」的标记、**不碰闹钟** —— 预览完，明天的正常提醒照发。
+     *
+     * 和 [fire] 的区别只有失败处理：那边静默，这边把原因带回去让 UI 说出来。
+     */
+    suspend fun sendPreview(ctx: Context, morning: Boolean): Result<Unit> {
+        val app = ctx.applicationContext
+        val kind = if (morning) KIND_MORNING else KIND_EVENING
+
+        if (!Weather.enabled) {
+            return Result.failure(PreviewError("这个版本没配天气服务"))
+        }
+        // notify() 内部没权限就静默返回，预览必须提前拦下来，否则「点了没反应」
+        if (!notifPermitted(app)) {
+            return Result.failure(PreviewError("通知权限没开，允许通知后才能看到预览"))
+        }
+
+        return when (val c = compose(app, kind, LocalDate.now())) {
+            is Composed.Ok -> {
+                notify(app, c.title, c.text, c.id)
+                Result.success(Unit)
+            }
+            Composed.NoWeather ->
+                Result.failure(PreviewError(Weather.lastError ?: "天气没拿到，检查网络"))
+            Composed.Nothing ->
+                Result.failure(
+                    PreviewError(
+                        if (morning) "预报里没有今天的数据，稍后再试"
+                        // 晚上这条本来就只有下雨下雪才发，没雨时「预览成功」会让人以为漏了通知
+                        else "明天没有雨雪，这条到点不会发通知"
+                    ),
+                )
+        }
+    }
+
+    // ── 内容组装（正式触发与预览共用） ──────────────────────────────
+
+    /** 拼好的一条通知。两边共用同一份，文案才不会「预览一个样、真发另一个样」 */
+    private sealed class Composed {
+        data class Ok(val title: String, val text: String, val id: Int) : Composed()
+
+        /** 天气取不到 */
+        data object NoWeather : Composed()
+
+        /** 按规则本来就不发：晚上明天没雨雪，或预报里缺那一天 */
+        data object Nothing : Composed()
+    }
+
+    /**
+     * 拉一次天气并拼出要发的内容。
+     *
+     * 顺手把结果写进缓存和 [WeatherSnapshot]（明天的温差靠它）—— 预览也写：
+     * 这和「用户下拉刷新一次天气」的数据副作用等价，不是提醒状态。
+     */
+    private suspend fun compose(ctx: Context, kind: String, today: LocalDate): Composed {
+        val info = Weather.fetch(WeatherPlaceStore(ctx).place) ?: return Composed.NoWeather
+        Weather.save(ctx, SessionStore(ctx), info)
+
+        val todayIso = today.toString()
+        return when (kind) {
             KIND_MORNING -> {
-                val d = info.days.firstOrNull { it.date == todayIso } ?: return
-                val yesterday = WeatherSnapshot.of(app, today.minusDays(1))?.max
-                notify(app, "今日天气", morningText(d.max, d.min, d.text, yesterday), NOTIFY_MORNING)
-                store.lastMorningDate = todayIso
+                val d = info.days.firstOrNull { it.date == todayIso } ?: return Composed.Nothing
+                val yesterday = WeatherSnapshot.of(ctx, today.minusDays(1))?.max
+                Composed.Ok("今日天气", morningText(d.max, d.min, d.text, yesterday), NOTIFY_MORNING)
             }
             KIND_EVENING -> {
                 val tomorrowIso = today.plusDays(1).toString()
-                val d = info.days.firstOrNull { it.date == tomorrowIso } ?: return
+                val d = info.days.firstOrNull { it.date == tomorrowIso } ?: return Composed.Nothing
                 // 不下雨下雪就什么都不发（需求里明确要求静默）
-                val text = eveningText(d.text) ?: return
-                notify(app, "明日天气", text, NOTIFY_EVENING)
-                store.lastEveningDate = todayIso
+                val text = eveningText(d.text) ?: return Composed.Nothing
+                Composed.Ok("明日天气", text, NOTIFY_EVENING)
             }
+            else -> Composed.Nothing
         }
     }
 }

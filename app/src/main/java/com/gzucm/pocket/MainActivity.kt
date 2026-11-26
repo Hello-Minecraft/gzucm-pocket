@@ -87,4 +87,22 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    /**
+     * 回到前台就刷一遍桌面部件。
+     *
+     * 这是所有刷新触发点里最可靠的一个：用户刚在 App 里看过课表，
+     * 桌面就不该还停在旧内容上（后台被杀、隔夜没刷新这些事在这里补齐）。
+     *
+     * 放后台线程：要读一次 SharedPreferences、再给每个实例构造 RemoteViews，
+     * 虽然不重，也没必要占 onResume 的主线程。
+     */
+    override fun onResume() {
+        super.onResume()
+        val app = applicationContext
+        Thread {
+            runCatching { com.gzucm.pocket.widget.WidgetUpdate.refreshAll(app) }
+                .onFailure { android.util.Log.w("Widget", "App 打开后刷新部件失败", it) }
+        }.start()
+    }
 }

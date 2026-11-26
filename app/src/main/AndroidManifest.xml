@@ -163,6 +163,87 @@
             </intent-filter>
         </receiver>
 
+        <!--
+            ── 桌面课表部件（5 个独立部件）─────────────────────────────────
+
+            每个部件都是**独立的 receiver + 独立的 appwidget-provider 配置**，
+            所以桌面「添加小部件」列表里是 5 条并列的条目，而不是一个部件里的
+            模式切换。label 见 values/strings.xml（统一前缀「课表 · 」）。
+
+            几条硬约束（都是查证过的，不要「优化」掉）：
+
+            1. **不声明 android:configure** —— 荣耀 MagicOS 实测会把它丢弃，
+               导致添加流程回滚。要改设置请进 App。
+            2. **appwidget-provider 里不写 targetCellWidth/Height** ——
+               ColorOS 5×6 网格会算错格数，部件被压扁。
+            3. **updatePeriodMillis = 0** —— 关掉系统周期刷新，刷新交给
+               App 打开 / 快照写入 / 每日 WorkManager / 部件上的刷新图标。
+            4. 类名一旦发布就**冻结**：改名会让已添加的部件升级后消失。
+
+            exported=false：APPWIDGET_UPDATE 是系统按 ComponentName 直投的，
+            不需要导出；点刷新图标用的 PendingIntent 以本 App 身份执行，
+            同样不受影响。
+        -->
+        <receiver
+            android:name=".widget.CurrentCourseWidget"
+            android:exported="false"
+            android:label="@string/widget_current_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_current_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.TodayWidget"
+            android:exported="false"
+            android:label="@string/widget_today_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_today_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.TodayHorizontalWidget"
+            android:exported="false"
+            android:label="@string/widget_today_horizontal_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_today_horizontal_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.TimelineWidget"
+            android:exported="false"
+            android:label="@string/widget_timeline_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_timeline_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.ThreeDaysWidget"
+            android:exported="false"
+            android:label="@string/widget_three_days_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_three_days_info" />
+        </receiver>
+
 </application>
 
 </manifest>

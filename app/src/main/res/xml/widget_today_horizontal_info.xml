@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    4x2 今日横排：今天的课横向排开。
+
+    250dp = 4 格（70×4-30）。不再往上堆到 320dp —— 320dp 在 4 列桌面上会
+    被算成 5 格，反而出问题；调研报告 §5.2 建议的 250dp 是 AOSP 公式值。
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:initialLayout="@layout/widget_today_horizontal"
+    android:minWidth="250dp"
+    android:minHeight="110dp"
+    android:previewLayout="@layout/widget_today_horizontal"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

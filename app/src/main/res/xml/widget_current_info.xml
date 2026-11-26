@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    2x1 当前课程。
+
+    ## 只用 minWidth / minHeight
+
+    **绝不用 targetCellWidth / targetCellHeight**：ColorOS 5×6 网格下它们会把
+    格数算错，部件被压扁（BeeCount #307 实测，2026-05）。宁可放弃精确性换兼容性。
+
+    ## updatePeriodMillis = 0
+
+    关掉系统周期刷新。30 分钟一次的兜底只会叫醒进程，对省电是负担；
+    刷新交给「App 打开 / 课表变化 / 每天 0 点 WorkManager / 手动点刷新」。
+
+    2x1 是 1 格高（70×1-30 = 40dp），放不下一行字以外的东西。
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:initialLayout="@layout/widget_current"
+    android:minWidth="110dp"
+    android:minHeight="40dp"
+    android:previewLayout="@layout/widget_current"
+    android:resizeMode="horizontal"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

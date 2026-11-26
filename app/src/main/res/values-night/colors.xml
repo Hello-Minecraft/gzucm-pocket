@@ -4,4 +4,21 @@
     <color name="window_background">#0A0C0F</color>
     <!-- 深色模式下系统栏图标用浅色 -->
     <bool name="light_system_bars">false</bool>
+
+    <!--
+        部件的深色配色：和 DarkColors 对齐（surface #12151A / onSurface #E9EDF0 /
+        onSurfaceVariant #9AA3AE / primary #4ADE9B）。
+
+        荣耀的深色规范禁止纯黑 #000000，这里的 #12151A 不是纯黑。
+    -->
+    <color name="widget_bg">#12151A</color>
+    <color name="widget_text">#E9EDF0</color>
+    <color name="widget_text_dim">#9AA3AE</color>
+    <color name="widget_accent">#4ADE9B</color>
+    <color name="widget_block">#1A2620</color>
+    <color name="widget_block_text">#CFE9DC</color>
+    <color name="widget_block_now">#4ADE9B</color>
+    <color name="widget_block_now_text">#00281A</color>
+    <color name="widget_block_past">#191D23</color>
+    <color name="widget_block_past_text">#6B747E</color>
 </resources>

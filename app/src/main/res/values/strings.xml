@@ -1,4 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">广中医口袋</string>
+
+    <!--
+        桌面部件。
+
+        label 是用户在「添加小部件」列表里看到的名字 —— 几个部件并列显示，
+        必须一眼区分出尺寸/内容，所以统一前缀「课表 · 」。
+    -->
+    <string name="widget_current_label">课表 · 当前课程</string>
+    <string name="widget_today_label">课表 · 今日</string>
+    <string name="widget_today_horizontal_label">课表 · 今日横排</string>
+    <string name="widget_timeline_label">课表 · 今日时间轴</string>
+    <string name="widget_three_days_label">课表 · 三天</string>
+
+    <string name="widget_refresh">刷新课表</string>
+
+    <!-- 空态 / 异常态文案。部件宁可说话也不能空白（空白 = 用户以为坏了） -->
+    <string name="widget_empty_sync">打开 App 同步课表</string>
+    <string name="widget_no_more">今天没课了</string>
 </resources>

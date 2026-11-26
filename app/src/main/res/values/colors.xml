@@ -5,4 +5,28 @@
     <color name="window_background">#F6F7F9</color>
     <!-- 浅色模式下系统栏图标用深色 -->
     <bool name="light_system_bars">true</bool>
+
+    <!--
+        桌面部件配色。
+
+        和 Compose 的 LightColors 对齐：surface #FFFFFF / onSurface #14181C /
+        onSurfaceVariant #5C646E / primary #1D9E75。
+
+        **必须是静态资源**（values + values-night 两套），不能在代码里判断
+        深色再 setTextColor —— 小米桌面切深色时不会回调，宿主直接拿缓存
+        重建 RemoteViews，代码里切的颜色不会重新执行。
+    -->
+    <color name="widget_bg">#FFFFFF</color>
+    <color name="widget_text">#14181C</color>
+    <color name="widget_text_dim">#5C646E</color>
+    <color name="widget_accent">#1D9E75</color>
+    <!-- 课程块底色 / 块内文字 -->
+    <color name="widget_block">#E9F6F0</color>
+    <color name="widget_block_text">#0B3B29</color>
+    <!-- 正在上的课：反色块，一眼能看出来 -->
+    <color name="widget_block_now">#1D9E75</color>
+    <color name="widget_block_now_text">#FFFFFF</color>
+    <!-- 已经上完的课：整块压暗 -->
+    <color name="widget_block_past">#F1F3F5</color>
+    <color name="widget_block_past_text">#8A929B</color>
 </resources>

@@ -56,6 +56,7 @@ import com.gzucm.pocket.data.Jw
 import com.gzucm.pocket.data.Yjs
 import com.gzucm.pocket.ui.schedule.ClassPlanBarState
 import com.gzucm.pocket.ui.schedule.ClaimablePlan
+import com.gzucm.pocket.widget.WidgetSnapshot
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
@@ -1379,6 +1380,48 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * 正在发预览的那条提醒："morning" / "evening"，null 表示空闲。
+     *
+     * 用字符串而不是布尔：两个按钮各管各的 loading，同时只允许一个在跑
+     * （两个一起点会打两次天气接口，第二次大概率撞上频控）。
+     */
+    var weatherPreviewBusy: String? by mutableStateOf(null)
+        private set
+
+    /** 预览结果文案，UI Toast 出来后调 [consumeWeatherPreviewMessage] 清掉 */
+    var weatherPreviewMessage: String? by mutableStateOf(null)
+        private set
+
+    /**
+     * 「立即预览」：马上发一条和真实触发一模一样的通知。
+     *
+     * 走 IO：里面要联网取天气。**不写去重标记、不碰闹钟**（见
+     * [com.gzucm.pocket.core.WeatherAlert.sendPreview]），所以预览完
+     * 到点的提醒照常发。
+     */
+    fun previewWeatherAlert(morning: Boolean) {
+        if (weatherPreviewBusy != null) return
+        val which = if (morning) "morning" else "evening"
+        val app = getApplication<android.app.Application>()
+        weatherPreviewBusy = which
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { com.gzucm.pocket.core.WeatherAlert.sendPreview(app, morning) }
+                    .getOrElse { Result.failure(it) }
+            }
+            weatherPreviewBusy = null
+            weatherPreviewMessage = result.fold(
+                onSuccess = { "已发送，看看通知栏" },
+                onFailure = { it.message ?: "预览发送失败" },
+            )
+        }
+    }
+
+    fun consumeWeatherPreviewMessage() {
+        weatherPreviewMessage = null
+    }
+
     private val store = Graph.store
 
     /** 日程独立存储，声明在 init 之前：bootstrap 就要读它 */
@@ -1522,6 +1565,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
              * 先拿缓存排上，同步成功后会再排一次。
              */
             reschedule(cachedSemester, cachedSessions)
+            // 桌面部件读的是单独的精简快照：App 一启动就跟着刷一份，
+            // 用户从桌面点进来之前部件就已经是新的了
+            publishWidgetSnapshot(cachedSemester, cachedSessions)
         }
         viewModelScope.launch {
             /*
@@ -1673,6 +1719,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         store.cachedFitness = null
         // 研究生学期码和本科的格式完全不同，单独清
         if (target == Campus.UNDERGRAD) store.graduateTermCode = null
+        // 桌面部件也不能挂着上一个学段的课表 —— 那不是「空」，是「错的」
+        clearWidgetSnapshot()
+    }
+
+    /**
+     * 清掉部件快照并让桌面立刻变空。
+     *
+     * 退出登录 / 切学段时调。部件会显示「打开 App 同步课表」，
+     * 这比显示上一个账号的课表清楚得多。
+     */
+    private fun clearWidgetSnapshot() {
+        val app = getApplication<android.app.Application>()
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                WidgetSnapshot.clear(app)
+                com.gzucm.pocket.widget.WidgetUpdate.refreshAll(app)
+            }.onFailure { android.util.Log.w("Widget", "清部件快照失败", it) }
+        }
     }
 
     /**
@@ -1726,6 +1790,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             store.cachedLevels = null
             store.cachedFitness = null
             // 日程是用户自建数据，退出登录不该把它清掉；从独立存储原样带回来
+            // 桌面部件同理：清了课表缓存，快照也必须一起清，否则桌面还挂着上一个账号的课
+            clearWidgetSnapshot()
             state = UiState(phase = Phase.NeedLogin, agenda = agendaStore.load())
             // 主动退出登录是用户自己的决定，别把「会话过期」的解释挂在这上面
             reloginNotice = null
@@ -1964,6 +2030,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             )
             // 原来研究生同步完从不排提醒 —— 研究生开着「上课提醒」也收不到
             reschedule(semester, sessions)
+            publishWidgetSnapshot(semester, sessions)
 
             val week = semester.weekOf(LocalDate.now()).coerceIn(1, semester.totalWeeks)
             currentWeek = week
@@ -2154,6 +2221,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             syncAfterRelogin = false
             // 课表变了就重排提醒（未来 7 天，代价很小）
             reschedule(semester, sessions)
+            publishWidgetSnapshot(semester, sessions)
             state = state.copy(
                 phase = Phase.Ready,
                 semester = semester,
@@ -2199,6 +2267,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun readSessionCache(): List<CourseSession> {
         val raw = store.cachedSessions ?: return emptyList()
         return runCatching { Net.json.decodeFromString<List<CourseSession>>(raw) }.getOrDefault(emptyList())
+    }
+
+    /**
+     * 把课表写成桌面部件的快照，并刷新所有部件实例。
+     *
+     * **每一处写 `store.cachedSessions` 的地方都要跟着调** —— 部件读的是这份
+     * 精简快照，漏一处就会出现「App 里已经是新课表，桌面还停在旧的」。
+     *
+     * 放 IO 线程：要序列化整学期课表，再给每个尺寸构造一份 RemoteViews。
+     * 这几件事加起来不重，但没必要压在同步流程的主线程上。
+     */
+    private fun publishWidgetSnapshot(semester: Semester, sessions: List<CourseSession>) {
+        val app = getApplication<android.app.Application>()
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { WidgetSnapshot.publish(app, semester, sessions) }
+                .onFailure { android.util.Log.w("Widget", "写部件快照失败", it) }
+        }
     }
 
     private fun readSemesterCache(): Semester? {

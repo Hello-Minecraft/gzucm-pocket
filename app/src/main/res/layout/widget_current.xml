@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    2x1 当前课程：一行字。
+
+    空间只有 40dp 高，除了一行文字什么都放不下 —— 刷新图标按产品要求
+    也不放（点了容易误触，而且这一行信息本来就是「看一眼就走」）。
+    点整块打开 App。
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg"
+    android:paddingStart="12dp"
+    android:paddingEnd="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <!-- 左侧色条：正在上课/有下一节时的「有内容」暗示 -->
+        <TextView
+            android:layout_width="3dp"
+            android:layout_height="16dp"
+            android:background="@color/widget_accent" />
+
+        <TextView
+            android:id="@+id/widget_line"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="@color/widget_text"
+            android:textSize="13sp" />
+    </LinearLayout>
+</FrameLayout>

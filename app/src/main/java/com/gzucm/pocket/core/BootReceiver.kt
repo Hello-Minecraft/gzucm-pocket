@@ -37,6 +37,15 @@ class BootReceiver : BroadcastReceiver() {
                 // 天气提醒：两条独立的每日闹钟，同样要在开机/改时间后按本地配置重排
                 runCatching { WeatherAlert.rescheduleFromStore(app) }
                     .onFailure { android.util.Log.w("WeatherAlert", "$action 后重排失败", it) }
+                /*
+                 * 桌面部件：开机/覆盖安装/改时间后全部重建一次。
+                 *
+                 * RemoteViews 是宿主持有的，系统重启后桌面会重新向 App 要一次内容，
+                 * 但厂商桌面（尤其小米）有时直接用上次的缓存 —— 主动重画一遍最稳。
+                 * 另外改时间/改时区后「今天第几周」会变，也要跟着重算。
+                 */
+                runCatching { com.gzucm.pocket.widget.WidgetUpdate.refreshAll(app) }
+                    .onFailure { android.util.Log.w("Widget", "$action 后刷新部件失败", it) }
             } finally {
                 pending.finish()
             }

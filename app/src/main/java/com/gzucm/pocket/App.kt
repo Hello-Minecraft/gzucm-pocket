@@ -34,6 +34,18 @@ class App : Application() {
         if (runningUnderUnitTest()) return
 
         /*
+         * 桌面课表部件：排每天 0 点的兜底刷新。
+         *
+         * 部件的刷新主要靠「App 打开」和「课表变化」两个同步触发点，
+         * 但这个 Worker 负责覆盖「用户好几天不打开 App、桌面也不重建部件」——
+         * 过了 0 点周次/星期/当前节次都变了，界面要重绘一次才会变。
+         *
+         * KEEP：每次启动都调是安全的，不会重复排。
+         */
+        runCatching { com.gzucm.pocket.widget.WidgetRefreshWorker.ensure(this) }
+            .onFailure { android.util.Log.w("Widget", "排每日刷新失败", it) }
+
+        /*
          * 日程提醒：每次冷启动重排一次。
          *
          * 覆盖的是「App 被系统强停过、闹钟全废，但用户又打开了」这种情况。

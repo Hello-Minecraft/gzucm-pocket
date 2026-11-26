@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    2x2 今日课程：今天接下来最多 3 节。
+
+    110×110dp 是 AOSP 公式 70n-30 在 n=2 时的值。同样只用 minWidth/minHeight，
+    不声明 targetCell*（见 widget_current_info.xml 的说明）。
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:initialLayout="@layout/widget_today"
+    android:minWidth="110dp"
+    android:minHeight="110dp"
+    android:previewLayout="@layout/widget_today"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />
