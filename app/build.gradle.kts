@@ -18,7 +18,7 @@ android {
         // versionCode 由 versionName 推出：主*10000 + 次*100 + 修订
         // 1.2.5 → 10205。改版本名必须同步改 code，VersionTest 会校验。
         versionCode = 10503
-        versionName = "1.5.3-beta"
+        versionName = "1.5.3"
         resourceConfigurations += listOf("zh", "en")
 
         /*
