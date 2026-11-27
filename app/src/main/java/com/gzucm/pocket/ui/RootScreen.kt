@@ -1418,6 +1418,7 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                         closeWeatherPlace()
                     },
                     onBack = { closeWeatherPlace() },
+                    backLabel = if (weatherPlaceFromToday) "返回" else "返回设置",
                 )
                 return@AdaptiveSheet
             }

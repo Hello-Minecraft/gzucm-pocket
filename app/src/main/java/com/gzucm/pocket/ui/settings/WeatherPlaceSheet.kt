@@ -73,6 +73,8 @@ fun WeatherPlaceContent(
     /** 选中后：存盘 + 重拉天气 + 关掉子页面，都由上层做 */
     onPick: (WeatherPlace) -> Unit,
     onBack: () -> Unit,
+    /** 左上角返回文案。从设置进来是「返回设置」，从今日页进来是「返回」 */
+    backLabel: String = "返回设置",
 ) {
     val scheme = MaterialTheme.colorScheme
     val ctx = LocalContext.current
@@ -182,7 +184,7 @@ fun WeatherPlaceContent(
                 tint = scheme.onSurfaceVariant,
             )
             Spacer(Modifier.width(5.dp))
-            Text("返回设置", fontSize = 12.5.sp, color = scheme.onSurfaceVariant)
+            Text(backLabel, fontSize = 12.5.sp, color = scheme.onSurfaceVariant)
         }
 
         Text(
