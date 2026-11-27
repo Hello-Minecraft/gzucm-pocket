@@ -524,6 +524,15 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
     var weatherPlace by remember { mutableStateOf(weatherPlaceStore.place) }
     // 「天气位置」子页面（4 个预设 + 使用当前位置）
     var showWeatherPlaceInSettings by remember { mutableStateOf(false) }
+    /*
+     * 这一页是从今日页天气卡点进来的，还是从设置里点进来的。
+     *
+     * 两者的「返回」落点不同（用户 2026-11-28 定的）：
+     *   · 今日页 → 天气位置：选完 / 返回都应该回今日页，不能停在设置上；
+     *   · 设置 → 天气位置：老行为，回设置页。
+     * 只用一个来源标记，不新增面板层级（叠两层 Dialog 按 BACK 会掉回桌面）。
+     */
+    var weatherPlaceFromToday by remember { mutableStateOf(false) }
     /**
      * 今日页显示配置。
      *
@@ -698,6 +707,15 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                             weatherRefreshing = state.weatherRefreshing,
                             weatherError = state.weatherError,
                             weatherPlaceLabel = weatherPlace.label,
+                            /*
+                             * 今日页点地点 → 复用设置面板里的「天气位置」子页。
+                             * 记下来源：返回 / 选完都直接回今日页，不停在设置上。
+                             */
+                            onOpenWeatherPlace = {
+                                weatherPlaceFromToday = true
+                                showWeatherPlaceInSettings = true
+                                showSettings = true
+                            },
                             onOpenSections = { showTodaySections = true },
                             onOpenPower = { tab = Tab.Power },
                             onOpenSettings = { showSettings = true },
@@ -1116,6 +1134,7 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 showWidgetGuide = false
                 showWeatherAlertInSettings = false
                 showWeatherPlaceInSettings = false
+                weatherPlaceFromToday = false
                 showSettings = false
             },
             paneWidth = 460.dp,
@@ -1148,6 +1167,16 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                     showTodaySectionsInSettings || showWeatherPlaceInSettings || showWidgetGuide ||
                     showWeatherAlertInSettings,
             ) {
+                /*
+                 * 从今日页进来的天气位置页，返回要直接回今日页：
+                 * 面板整层关掉，而不是退到设置主页。
+                 */
+                if (showWeatherPlaceInSettings && weatherPlaceFromToday) {
+                    showWeatherPlaceInSettings = false
+                    weatherPlaceFromToday = false
+                    showSettings = false
+                    return@BackHandler
+                }
                 showAbout = false
                 showDonate = false
                 showExport = false
@@ -1370,14 +1399,25 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 return@AdaptiveSheet
             }
             if (showWeatherPlaceInSettings) {
+                /*
+                 * 选完 / 返回的收尾：今日页进来的就把整个面板关掉（回今日页），
+                 * 设置进来的只清子页标记（回设置页）。老路径行为不变。
+                 */
+                val closeWeatherPlace = {
+                    showWeatherPlaceInSettings = false
+                    if (weatherPlaceFromToday) {
+                        weatherPlaceFromToday = false
+                        showSettings = false
+                    }
+                }
                 com.gzucm.pocket.ui.settings.WeatherPlaceContent(
                     current = weatherPlace,
                     onPick = { picked ->
                         weatherPlace = picked
                         vm.onWeatherPlaceChanged(picked)
-                        showWeatherPlaceInSettings = false
+                        closeWeatherPlace()
                     },
-                    onBack = { showWeatherPlaceInSettings = false },
+                    onBack = { closeWeatherPlace() },
                 )
                 return@AdaptiveSheet
             }
@@ -1422,7 +1462,11 @@ fun RootScreen(vm: AppViewModel = viewModel()) {
                 onOpenTodaySections = { showTodaySectionsInSettings = true },
                 weatherPlaceLabel = weatherPlace.label,
                 weatherAvailable = com.gzucm.pocket.core.Weather.enabled,
-                onOpenWeatherPlace = { showWeatherPlaceInSettings = true },
+                onOpenWeatherPlace = {
+                    // 设置 → 天气位置：老路径，返回回设置页
+                    weatherPlaceFromToday = false
+                    showWeatherPlaceInSettings = true
+                },
                 startTabIndex = prefs.startTab,
                 onStartTabChange = {
                     prefs.startTab = it

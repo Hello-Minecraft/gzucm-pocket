@@ -36,6 +36,7 @@ import com.gzucm.pocket.core.EXAM_COLOR_INDEX
 import com.gzucm.pocket.core.Weather
 import com.gzucm.pocket.ui.components.G3CornerShape
 import com.gzucm.pocket.ui.components.micaPanel
+import com.gzucm.pocket.ui.icons.AppIcons
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
@@ -52,6 +53,7 @@ import java.time.temporal.ChronoUnit
  * 上半是「现在」：温度、天气、体感、湿度；下半是未来三天的高低温和图形。
  * 三天刚好是「要不要带伞 / 周末冷不冷」的量，再多就变成第二张电费卡了。
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun WeatherCard(
     info: Weather.Info?,
@@ -66,6 +68,14 @@ fun WeatherCard(
      * 那时候也得让用户看见「这是哪儿的天气」。
      */
     placeLabel: String = Weather.CityLabel,
+    /**
+     * 点地点那一小块：进「天气位置」选择页。
+     *
+     * 整卡长按是「打开今日页显示管理」，这里只是卡内左上角那一小块，
+     * 热区比文字略大一圈（见下面的 padding），两件事互不干扰：
+     * 点地点 = 换城市；长按地点或卡内其它地方 = 管理区块。
+     */
+    onPlaceClick: () -> Unit = {},
 ) {
     val scheme = MaterialTheme.colorScheme
 
@@ -87,14 +97,40 @@ fun WeatherCard(
             .padding(horizontal = 17.dp, vertical = 15.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                // 地点由用户在设置里选，不再是写死的「广州 · 三元里」
-                info?.city ?: placeLabel,
-                style = MaterialTheme.typography.bodySmall,
-                color = scheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            /*
+             * 地点 + ›。整块可点（进天气位置），热区靠 1dp 横向 / 2dp 纵向
+             * padding 撑开一点点，视觉上看不出来，手指按得住。
+             *
+             * 用 combinedClickable 而不是 clickable：外层 cardLongPress 也是
+             * detectTapGestures 系，内层 clickable 会在 Main pass 把 down 消费掉，
+             * 外层 requireUnconsumed 拿不到就跳过，长按这一小块会变成死区。
+             */
+            Row(
+                Modifier
+                    .clip(G3CornerShape(6.dp))
+                    .combinedClickable(
+                        onClick = onPlaceClick,
+                        onLongClick = onLongPress,
+                    )
+                    .padding(vertical = 2.dp, horizontal = 1.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    // 地点由用户在设置里选，不再是写死的「广州 · 三元里」
+                    info?.city ?: placeLabel,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.width(3.dp))
+                Icon(
+                    AppIcons.ChevronRight,
+                    contentDescription = null,
+                    modifier = Modifier.size(11.dp),
+                    tint = scheme.onSurfaceVariant.copy(alpha = 0.45f),
+                )
+            }
             Spacer(Modifier.weight(1f))
             Text(
                 when {

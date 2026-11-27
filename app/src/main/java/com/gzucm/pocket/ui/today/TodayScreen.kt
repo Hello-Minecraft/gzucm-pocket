@@ -148,6 +148,8 @@ fun TodayScreen(
      * 追加在末尾，理由同上：截图测试有按位置传参的调用。
      */
     weatherPlaceLabel: String = Weather.CityLabel,
+    /** 点天气卡上的地点：进「天气位置」选择页（设置面板里的那个子页） */
+    onOpenWeatherPlace: () -> Unit = {},
 ) {
     // today 也挂在同一个 tick 上：停在首页跨过 0 点后要切到新的一天，
     // 下面 remember(…, today) 那几处才会重算
@@ -317,6 +319,7 @@ fun TodayScreen(
                                     onAgendaClick = onAgendaClick,
                                     onOpenSections = onOpenSections,
                                     weatherPlaceLabel = weatherPlaceLabel,
+                                    onPlaceClick = onOpenWeatherPlace,
                                 )
                             }
                     }
@@ -457,6 +460,7 @@ fun TodayScreen(
                             onAgendaClick = onAgendaClick,
                             onOpenSections = onOpenSections,
                             weatherPlaceLabel = weatherPlaceLabel,
+                            onPlaceClick = onOpenWeatherPlace,
                         )
                     }
                     Spacer(Modifier.height(18.dp))
@@ -1466,6 +1470,7 @@ private fun TodayBlockCard(
     onAgendaClick: (AgendaOccurrence) -> Unit,
     onOpenSections: () -> Unit,
     weatherPlaceLabel: String,
+    onPlaceClick: () -> Unit,
 ) {
     when (block) {
         TodayBlock.WEATHER -> {
@@ -1480,6 +1485,7 @@ private fun TodayBlockCard(
                     error = weatherError,
                     onLongPress = onOpenSections,
                     placeLabel = weatherPlaceLabel,
+                    onPlaceClick = onPlaceClick,
                 )
             }
         }
