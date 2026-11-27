@@ -375,6 +375,42 @@ fun AboutScreen(
                     )
                 }
             }
+
+            /*
+             * 仓库与官网（2026-11-28 用户定的位置：应用卡最后一行）。
+             *
+             * 官网域名还在备案，现在点开是浏览器的错误页 —— 这是预期，
+             * 不做网络检测、不拦点击，「备案中」三个字已经说明白了。
+             */
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "GitHub 仓库",
+                    fontSize = 11.5.sp,
+                    color = scheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .clickable { openUrl("https://github.com/Hello-Minecraft/gzucm-pocket") }
+                        .padding(vertical = 6.dp),
+                )
+                Spacer(Modifier.width(18.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clickable { openUrl("https://gzucm-pocket.top") }
+                        .padding(vertical = 6.dp),
+                ) {
+                    Text(
+                        "官方网站",
+                        fontSize = 11.5.sp,
+                        color = scheme.onSurfaceVariant,
+                    )
+                    Text(
+                        "（备案中）",
+                        fontSize = 9.5.sp,
+                        color = scheme.onSurfaceVariant.copy(alpha = 0.55f),
+                    )
+                }
+            }
         }
 
         Spacer(Modifier.height(16.dp))
